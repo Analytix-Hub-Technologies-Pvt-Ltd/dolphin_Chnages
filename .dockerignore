@@ -1,0 +1,186 @@
+# ============================================================================
+# Created by https://dockerignore.com/
+# COMPREHENSIVE FRAMEWORK TEMPLATE for FastAPI
+# website: https://fastapi.tiangolo.com/
+# ============================================================================
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# TEMPLATE OVERVIEW & USAGE NOTES
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# • TEMPLATE TYPE: Comprehensive Framework Template
+# • DESIGN PHILOSOPHY: Self-contained with all necessary patterns
+# • COMBINATION: Use standalone - no need to combine with other templates
+# • BEST PRACTICES: Follow technology-specific security guidelines
+# • UPDATED: January 2026 - Enhanced pattern organization
+
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+# DEPENDENCIES AND PACKAGE MANAGERS
+
+**/.npm/_logs/
+**/assets/node_modules/
+.npmignore
+.npmrc
+.npmrc.*
+.yarn/install-state.gz
+.yarnrc
+.yarnrc.yml
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log
+
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+# BUILD ARTIFACTS AND OUTPUT
+
+**/.nyc_output/
+**/.out/
+**/.output/
+**/build/
+**/dist/
+**/sdist/
+.env.production
+.tsbuildinfo
+tsconfig.*.tsbuildinfo
+
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+# CACHE AND TEMPORARY FILES
+
+**/.cache/
+**/.parcel-cache/
+**/.turbo/
+**/temp/
+**/tmp/
+*.cache
+*.temp
+*.tmp
+
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+# LOGS AND DEBUG FILES
+
+**/logs/
+*.log
+
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+# CONFIGURATION AND ENVIRONMENT
+
+.env
+.env.*
+.env.example
+.env.local
+.env.staging
+.env.test
+.env.testing
+jsconfig.json
+vitest.config.*.timestamp-*
+
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+# TESTING AND COVERAGE
+
+**/.jest-cache/
+**/__tests__/__snapshots__/
+**/coverage/
+**/test-results/
+
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+# OTHER
+
+!*/migrations/__init__.py
+!alembic/versions/__init__.py
+*$py.class
+**/*.egg-info/
+**/.babel-cache/
+**/.bzr/
+**/.cvs/
+**/.eggs/
+**/.git/
+**/.hg/
+**/.mypy_cache/
+**/.nx/
+**/.nx/cache/
+**/.pyre/
+**/.pytest_cache/
+**/.pytype/
+**/.svn/
+**/__pycache__/
+**/alembic/
+**/develop-eggs/
+**/downloads/
+**/eggs/
+**/instance/
+**/jest-cache/
+**/lib/
+**/lib64/
+**/media/
+**/migrations/
+**/parts/
+**/share/python-wheels/
+**/static/
+**/staticfiles/
+**/uploads/
+**/var/
+**/wheels/
+*.bak
+*.db
+*.egg
+*.old
+*.orig
+*.py[cod]
+*.save
+*.so
+*.sqlite
+*.sqlite3
+*.swo
+*.swp
+*.test.db
+*.test.sqlite
+*.test.sqlite3
+*/migrations/*.py
+*~
+._*
+.babelrc
+.babelrc.*
+.browserslistrc
+.DS_Store
+.DS_Store?
+.eslintcache
+.eslintignore
+.eslintrc
+.eslintrc.*
+.gitattributes
+.gitignore
+.gitmodules
+.installed.cfg
+.jsbeautifyrc
+.jscsrc
+.jshintrc
+.prettiercache
+.prettierignore
+.prettierrc
+.prettierrc.*
+.Python
+.Spotlight-V100
+.stylelintcache
+.stylelintignore
+.stylelintrc
+.stylelintrc.*
+.Trashes
+alembic.ini
+alembic/versions/*.py
+db.sqlite3
+db.sqlite3-journal
+desktop.ini
+ehthumbs.db
+fastapi.log
+hypercorn.log
+local_settings.py
+MANIFEST
+npm-shrinkwrap.json
+openapi.json
+openapi.yaml
+openapi.yml
+pnpm-workspace.yaml
+redoc-static.html
+swagger.json
+swagger.yaml
+swagger.yml
+Thumbs.db
+uvicorn.log

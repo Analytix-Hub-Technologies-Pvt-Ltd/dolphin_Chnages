@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marine Tutor AI | Login</title>
+  <link rel="stylesheet" href="/ui/css/style.css" />
+</head>
+
+<body class="marine-bg">
+  <main class="auth-container">
+    <section class="auth-card">
+      <div class="brand">
+        <div class="brand-icon">⚓</div>
+        <div>
+          <h1>Marine Tutor AI</h1>
+          <p>Navigate your learning voyage</p>
+        </div>
+      </div>
+      <form id="login-form" class="form" novalidate>
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" placeholder="you@example.com" required />
+
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" placeholder="••••••••" required />
+
+        <button type="submit" id="login-button" class="btn primary">Log in</button>
+        <p id="login-message" class="form-message" role="alert"></p>
+      </form>
+    </section>
+  </main>
+  <script src="/ui/js/login.js"></script>
+</body>
+
+</html>

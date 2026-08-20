@@ -1,0 +1,63 @@
+export const lightPalette = {
+  mode: "light",
+  primary: {
+    main: "#106BA3",
+  },
+  background: {
+    default: "#ffffff",
+    paper: "#ffffff",
+    lightblue1: "#DCF6FF",
+    grey: "#E9E9E9",
+    header: "#AFE0FF",
+    sidebar: "#FFFFFF",
+    light: "#FFFFFF",
+    light1: "#edfaff",
+    chatbackground: "#EBEBEB",
+  },
+  text: {
+    main: "#106BA3",
+    primary: "#0f1c2e",
+    secondary: "#5c7080",
+    white: "#ffffff",
+    placeholder: "#464646",
+    placeholder1: "#A0A7BB",
+    smallheading: "#464646",
+    heading1: "#000000",
+    heading2: "#106BA3",
+    caption: "#a1abad",
+    grey1: "#475569",
+    menu:"#464646",
+  },
+};
+
+export const darkPalette = {
+  mode: "dark",
+  primary: {
+    main: "#1cb0f6",
+  },
+  background: {
+    default: "#0f1c2e",
+    paper: "#062842",
+    lightblue1: "#23333E",
+    grey: "#E9E9E9",
+    header: "#031623",
+    sidebar: "#031623",
+    light: "#23333E",
+    light1: "#000d13",
+    chatbackground: "#031623",
+  },
+  text: {
+    main: "#1cb0f6",
+    primary: "#e8f1fb",
+    secondary: "#9fb3c8",
+    white: "#ffffff",
+    placeholder: "#464646",
+    placeholder1: "#A9A9A9",
+    smallheading: "#A6A6A6",
+    heading1: "#ffffff",
+    heading2: "#1989D0",
+    caption: "#E9E9E9",
+    grey1: "#475569",
+    menu:"#ffffff",
+  },
+};
