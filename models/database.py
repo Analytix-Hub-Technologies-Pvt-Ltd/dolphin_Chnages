@@ -34,18 +34,26 @@ async def get_pool() -> Pool:
     # Case 1 → No pool exists
     if _pool is None:
         logger.info("📦 Creating PostgreSQL pool (initial)")
-        _pool = await asyncpg.create_pool(
-            host=settings.db_host,
-            port=settings.db_port,
-            user=settings.db_user,
-            password=settings.db_password,
-            database=settings.db_name,
-            min_size=2,
-            max_size=20,  # ⚡ OPTIMIZATION: Increased from 10 to 20 for concurrent load
-            command_timeout=60,
-            timeout=30,
-            max_inactive_connection_lifetime=300,
-        )
+        try:
+            _pool = await asyncpg.create_pool(
+                host=settings.db_host,
+                port=settings.db_port,
+                user=settings.db_user,
+                password=settings.db_password,
+                database=settings.db_name,
+                min_size=2,
+                max_size=20,  # ⚡ OPTIMIZATION: Increased from 10 to 20 for concurrent load
+                command_timeout=60,
+                timeout=30,
+                max_inactive_connection_lifetime=300,
+            )
+        except Exception as e:
+            logger.warning(
+                "⚠️ PostgreSQL pool creation failed ({!r}). "
+                "App will start without DB; pool will be retried on next access.",
+                e,
+            )
+            return None
         return _pool
 
     # Case 2 → Pool exists but is closed

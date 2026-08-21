@@ -103,10 +103,32 @@ async def chat(
 
     print(f"User message: {user_content}")
 
-    # USER DATA FROM REDIS (IMPORTANT)
-  
+    # USER DATA FROM REDIS (IMPORTANT) WITH POSTGRES FALLBACK
     user_details = await redis_service.get_user_details(user_id)
     print(f"User details from Redis: {user_details}")
+    if not user_details:
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow("SELECT * FROM public.users WHERE id = $1 OR email = $1", user_id)
+                if row:
+                    user_details = {
+                        "id": str(row["id"]),
+                        "name": row["name"],
+                        "email": row["email"],
+                        "role": row["role"],
+                        "company_name": row.get("company_name"),
+                        "company_id": row.get("company_id"),
+                        "user_type": row.get("user_type"),
+                        "ship_name": row.get("ship_name"),
+                        "ship_type": row.get("ship_type"),
+                        "user_courses": row.get("user_courses")
+                    }
+                    print(f"User details from Postgres fallback: {user_details}")
+                else:
+                    user_details = {}
+        except Exception as e:
+            print(f"Postgres fallback error: {e}")
+            user_details = {}
 
     session_summary = await redis_service.get_session_summary(session_id)
     print(f"Session summary from Redis: {session_summary}")
@@ -232,8 +254,31 @@ async def chat1(
 
     user_details = await redis_service.get_user_details(user_id)
     print(f"User details from Redis: {user_details}")
+    if not user_details:
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow("SELECT * FROM public.users WHERE id = $1 OR email = $1", user_id)
+                if row:
+                    user_details = {
+                        "id": str(row["id"]),
+                        "name": row["name"],
+                        "email": row["email"],
+                        "role": row["role"],
+                        "company_name": row.get("company_name"),
+                        "company_id": row.get("company_id"),
+                        "user_type": row.get("user_type"),
+                        "ship_name": row.get("ship_name"),
+                        "ship_type": row.get("ship_type"),
+                        "user_courses": row.get("user_courses")
+                    }
+                    print(f"User details from Postgres fallback: {user_details}")
+                else:
+                    user_details = {}
+        except Exception as e:
+            print(f"Postgres fallback error: {e}")
+            user_details = {}
 
-    company_id = user_details.get("company_id")
+    company_id = user_details.get("company_id") if user_details else None
     print(company_id)
 
     session_summary = await redis_service.get_session_summary(session_id)

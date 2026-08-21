@@ -68,12 +68,15 @@ const Chatpage = ({ userId, setUserId, onLogout }) => {
   };
 
   useEffect(() => {
-    const health = fetchHealth();
-    if (health) {
-      fetchSessions();
-    } else {
-      setUserId(null);
-    }
+    const checkBackendHealth = async () => {
+      const isHealthy = await fetchHealth();
+      if (isHealthy) {
+        fetchSessions();
+      } else {
+        setUserId(null);
+      }
+    };
+    checkBackendHealth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

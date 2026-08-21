@@ -31,3 +31,29 @@ class CompanyDocumentService:
                 ]
                 logger.info(f"Stored {len(rows)} documents for company_id={company_id}")
         return [CompanyDocument(**dict(row)) for row in rows]
+
+    async def get_all_documents(self) -> list[CompanyDocument]:
+        query = """
+            SELECT document_id, company_id, document_title, document_content,
+                   char_length(document_content) AS content_length, created_at, is_active
+            FROM public.company_documents
+            WHERE is_active = TRUE
+            ORDER BY created_at DESC
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query)
+            return [CompanyDocument(**dict(row)) for row in rows]
+
+    async def delete_document(self, document_id: int) -> bool:
+        query = """
+            UPDATE public.company_documents
+            SET is_active = FALSE
+            WHERE document_id = $1
+            RETURNING document_id
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, document_id)
+            if row:
+                logger.info(f"Soft deleted document_id={document_id}")
+                return True
+            return False

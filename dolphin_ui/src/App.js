@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/LoginSignup";
 import Chatpage from "./pages/chatpage/Chatpage.jsx";
+import AdminPage from "./pages/admin/AdminPage.jsx";
 import './App.css'
 import { logout } from "./api/apiAuth.js";
 
@@ -33,10 +35,29 @@ function App() {
     return null;
   }
 
-  return userId ? (
-    <Chatpage userId={userId} onLogout={handleLogout} />
-  ) : (
-    <Login onLoginSuccess={handleLoginSuccess} />
+  return (
+    <Routes>
+      <Route 
+        path="/" 
+        element={
+          userId ? (
+            <Chatpage userId={userId} onLogout={handleLogout} />
+          ) : (
+            <Login onLoginSuccess={handleLoginSuccess} />
+          )
+        } 
+      />
+      <Route 
+        path="/admin" 
+        element={
+          userId ? (
+            <AdminPage />
+          ) : (
+            <Navigate to="/" replace />
+          )
+        } 
+      />
+    </Routes>
   );
 }
 

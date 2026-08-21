@@ -728,7 +728,15 @@ class ChatService:
                         "thumbnail": thumbnail,
                     }
                 )
+                
+                if len(suggestions) >= 3:
+                    # Enough suggestions collected; exit inner loop
+                    break
 
+            # Exit outer loop if limit reached
+            if len(suggestions) >= 3:
+                break
+        
         logger.debug(
             "Video suggestions built",
             suggestion_count=len(suggestions),
@@ -1227,7 +1235,7 @@ class ChatService:
         if node_type in {"query", "quiz", "summary"}:
 
             retrieval_chunks, video_suggestions = await self._retrieve_chunks(
-                current_query
+                standalone_query
             )
 
 
