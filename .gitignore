@@ -71,8 +71,6 @@ storage/
 .env.test
 .env.uat.example
 
-scratch/
-
 retrieval/company_index.bin
 retrieval/company_index.meta.json
 
