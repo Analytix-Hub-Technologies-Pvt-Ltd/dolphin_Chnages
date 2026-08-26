@@ -1076,6 +1076,103 @@ class ChatService:
             logger.exception(f"❌ Understanding failed: {e}")
             return ""    
 
+    async def check_query_scope(self, query: str, chunks: List[Dict[str, Any]]) -> str:
+        """
+        Check if the query is in-scope of the available Marine/Maritime course material.
+        Returns: "IN-SCOPE", "OUT-OF-SCOPE", or "MIXED".
+        """
+        context_parts = []
+        for i, chunk in enumerate(chunks[:3], 1):
+            name = chunk.get("topic_name", "")
+            content = chunk.get("topic_content") or chunk.get("content") or ""
+            context_parts.append(f"Source Document {i}: {name}\nContent:\n{content}")
+        
+        course_context = "\n\n---\n\n".join(context_parts) if context_parts else "No relevant course material found in knowledge base."
+
+        prompt = f"""
+You are a strict scope control classifier for Marine Tutor AI.
+Analyze the User Question and determine whether it is relevant to the available Marine/Maritime course material or the provided Course Context.
+
+Answering Rules:
+1. A question is IN-SCOPE if it relates to:
+- Marine engineering or Engine-room operations
+- Marine operations, Ship operations, Deck operations
+- Navigation, Port operations, Ship management
+- Cargo operations, Cargo loading/unloading
+- Ballast operations
+- Safety procedures, Maritime safety, Fire safety
+- Maritime regulations/conventions (SOLAS, MARPOL, STCW, ISM, ISPS, COLREG)
+- Shipboard procedures, Emergency procedures, Lifesaving appliances
+- Pollution prevention, Marine environmental protection
+- Company procedures
+- Any other topic explicitly covered by the available Course Context.
+
+2. A question is OUT-OF-SCOPE if it is:
+- Clearly unrelated (e.g. Python/Java programming, math, sports, movies, pop culture, geography, general world history).
+- About a famous historical ship, maritime event, accident, or disaster (e.g., Titanic sinking, Estonia sinking, Costa Concordia, Exxon Valdez) UNLESS there is explicit, specific information about that event/ship in the provided Course Context.
+- Conversational/general world knowledge that is not covered in the Course Context.
+Note: General words like "ship", "sea", "ocean", "marine", "boat", "captain", "sailor" do not make a question in-scope if the actual subject is unrelated to the available course material.
+
+3. Simple conversational phrases or acknowledgements (e.g. 'ok', 'yes', 'sure', 'understand', 'cool', 'continue', 'next') should be classified as IN-SCOPE so they are not rejected.
+
+4. A question is MIXED if:
+- It contains both an in-scope Marine topic and an unrelated/out-of-scope topic.
+
+Course Context:
+{course_context}
+
+User Question:
+{query}
+
+Classify the User Question into exactly one of: IN-SCOPE, OUT-OF-SCOPE, or MIXED.
+Output ONLY the classification word: "IN-SCOPE", "OUT-OF-SCOPE", or "MIXED". Do not output anything else.
+"""
+        try:
+            response = await self.openai_service.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.0,
+                category="SCOPE_CHECK"
+            )
+            classification = response.strip().upper()
+            logger.info(f"Scope Check for query '{query}': {classification}")
+            if classification in {"IN-SCOPE", "OUT-OF-SCOPE", "MIXED"}:
+                return classification
+            if "OUT-OF-SCOPE" in classification:
+                return "OUT-OF-SCOPE"
+            if "MIXED" in classification:
+                return "MIXED"
+            return "IN-SCOPE"
+        except Exception as e:
+            logger.error(f"Scope check failed: {e}")
+            return "IN-SCOPE"
+
+    async def rewrite_mixed_query(self, query: str) -> str:
+        """
+        Rewrite a mixed query to keep only the in-scope Marine topic.
+        """
+        prompt = f"""
+You are an assistant that cleans up mixed user queries for Marine Tutor AI.
+The user query contains both a Marine-related topic (in-scope) and an unrelated topic (out-of-scope).
+Your task is to rewrite the query to keep ONLY the Marine-related topic. Remove all unrelated topics, questions, or requests (such as programming, math, sports, general knowledge, etc.).
+
+User Question:
+{query}
+
+Rewritten Question:
+"""
+        try:
+            response = await self.openai_service.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.0,
+                category="QUERY_REWRITE"
+            )
+            rewritten = response.strip()
+            logger.info(f"Rewrote mixed query from '{query}' to '{rewritten}'")
+            return rewritten if rewritten else query
+        except Exception as e:
+            logger.error(f"Rewrite mixed query failed: {e}")
+            return query
+
     async def run_chat(
         self,
         user_id: str,
@@ -1224,46 +1321,30 @@ class ChatService:
 
             logger.info(f"[MEMORY] Loaded meaningful_history: {len(meaningful_history)}")
 
-        if node_type in {"query", "quiz", "summary"}:
-
+        # -----------------------------
+        # 🕵️ SCOPE CONTROL CHECK
+        # -----------------------------
+        is_out_of_scope = False
+        if not is_social:
+            # First, retrieve chunks using standalone_query to get context for checking
             retrieval_chunks, video_suggestions = await self._retrieve_chunks(
-                current_query
+                standalone_query
             )
-
-
-            # OFF TOPIC CHECK
-            query_lower = current_query.lower()
-
-            off_topic_keywords = [
-                "movie",
-                "movies",
-                "film",
-                "actor",
-                "actress",
-                "oscar",
-                "cinema",
-                "cricket",
-                "football",
-                "ipl",
-                "politics",
-                "president",
-                "election",
-                "tamil movie",
-                "hollywood",
-                "bollywood",
-                "netflix",
-                "series",
-                "tv show",
-                "tv shows",
-            ]
-
-            if any(word in query_lower for word in off_topic_keywords):
-
-                logger.info("OFF TOPIC QUESTION DETECTED")
-
+            
+            # Check scope using LLM
+            scope_decision = await self.check_query_scope(standalone_query, retrieval_chunks)
+            if scope_decision == "OUT-OF-SCOPE":
+                is_out_of_scope = True
                 retrieval_chunks = []
                 video_suggestions = []
-
+            elif scope_decision == "MIXED":
+                # Rewrite mixed query to keep only the in-scope marine portion
+                cleaned_query = await self.rewrite_mixed_query(standalone_query)
+                standalone_query = cleaned_query
+                # Re-retrieve chunks for the cleaned query
+                retrieval_chunks, video_suggestions = await self._retrieve_chunks(
+                    standalone_query
+                )
         else:
             retrieval_chunks = []
             video_suggestions = []
@@ -1315,78 +1396,29 @@ class ChatService:
 
         try:
 
-            if node_type == "query":
+            if is_out_of_scope:
 
-                query_lower = current_query.lower()
+                logger.info("🚫 OUT OF SCOPE QUESTION REJECTED")
 
-                off_topic_keywords = [
-                    "movie",
-                    "movies",
-                    "film",
-                    "actor",
-                    "actress",
-                    "oscar",
-                    "cinema",
-                    "hollywood",
-                    "bollywood",
-                    "cricket",
-                    "football",
-                    "ipl",
-                    "politics",
-                    "election",
-                    "president",
-                    "prime minister",
-                    "celebrity",
-                    "tamil movie",
-                    "movie",
-                    "movies",
-                    "film",
-                    "films",
-                    "actor",
-                    "actress",
-                    "oscar",
-                    "cinema",
-                    "hollywood",
-                    "bollywood",
-                    "netflix",
-                    "series",
-                    "tv show",
-                    "tv shows"
-                ]
-
-                is_off_topic = any(
-                    keyword in query_lower
-                    for keyword in off_topic_keywords
-                )
-
-                if is_off_topic:
-
-                    logger.info("🚫 OFF TOPIC QUESTION DETECTED")
-
-                    state["node_response"] = {
-                        "type": "query",
-                        "content": (
-                            "I am Marine Tutor AI. "
-                            "Please ask only maritime, navigation, cargo, "
-                            "marine engineering, PSC inspection, COLREGS, "
-                            "ship safety, and ship operation questions."
-                        ),
-                        "sections": [],
-                        "chunks_used": [],
-                        "videos": [],
-                        "images": [],
-                        "pdfs": [],
-                        "question_suggestions": [
-                            "What is anchor watch?",
-                            "Explain COLREG Rule 15",
-                            "What is boiler design?"
-                        ],
-                        "metadata": {
-                            "routing_reason": "off_topic"
-                        }
+                state["node_response"] = {
+                    "type": "query",
+                    "content": "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content.",
+                    "sections": [],
+                    "chunks_used": [],
+                    "videos": [],
+                    "images": [],
+                    "pdfs": [],
+                    "question_suggestions": [
+                        "What is anchor watch?",
+                        "Explain COLREG Rule 15",
+                        "What is boiler design?"
+                    ],
+                    "metadata": {
+                        "routing_reason": "out_of_scope"
                     }
+                }
 
-                else:
+            elif node_type == "query":
 
                     state = await retrieval_node(
                         state,
@@ -1412,7 +1444,6 @@ class ChatService:
                     )
 
             else:
-
                 state = await fallback_node(
                     state,
                     self.suggestion_service,

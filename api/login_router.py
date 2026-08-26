@@ -86,6 +86,7 @@ async def login(
             ship_type=user_data.ship_type,
             id_type=user_data.id_type,
             id_country=user_data.id_country,
+            company_id=user_data.company_id,
         )
 
         return await auth_service.get_user_by_useremail(email)

@@ -30,6 +30,7 @@ class OpenAIService:
         self,
         messages: List[dict],
         temperature: float | None = None,
+        max_tokens: int | None = None,
         *,
         category: str = "UNKNOWN",
     ) -> str:
@@ -37,6 +38,7 @@ class OpenAIService:
         Execute a chat completion using OpenAI model.
         """
         active_temperature = self.temperature if temperature is None else temperature
+        active_max_tokens = self.max_tokens if max_tokens is None else max_tokens
 
         normalized_category = category.strip().upper() if isinstance(category, str) else "UNKNOWN"
         if not normalized_category:
@@ -113,7 +115,7 @@ class OpenAIService:
             response = await self.client.chat.completions.create(
                 model=self.model,
                 temperature=active_temperature,
-                max_tokens=self.max_tokens,
+                max_tokens=active_max_tokens,
                 messages=messages,
             )
 
@@ -201,10 +203,14 @@ class OpenAIService:
         self,
         messages: List[dict],
         temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> AsyncGenerator[str, None]:
 
         active_temperature = (
             self.temperature if temperature is None else temperature
+        )
+        active_max_tokens = (
+            self.max_tokens if max_tokens is None else max_tokens
         )
 
         try:
@@ -212,7 +218,7 @@ class OpenAIService:
                 model=self.model,
                 messages=messages,
                 temperature=active_temperature,
-                max_tokens=self.max_tokens,
+                max_tokens=active_max_tokens,
                 stream=True,   # IMPORTANT
             )
 

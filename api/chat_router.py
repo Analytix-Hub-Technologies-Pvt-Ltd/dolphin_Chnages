@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -49,9 +50,9 @@ class TestChatMessage(BaseModel):
     ship_type: Optional[str] = ""
     company: Optional[str] = ""    
 
-@router.post("", response_model=NodeResponse)
+@router.post("/legacy", response_model=NodeResponse)
 @rate_limit_chat
-async def chat(
+async def chat_legacy(
     request: Request,
     payload: ChatMessage,
     background_tasks: BackgroundTasks,
@@ -106,7 +107,28 @@ async def chat(
     # USER DATA FROM REDIS (IMPORTANT)
   
     user_details = await redis_service.get_user_details(user_id)
-    print(f"User details from Redis: {user_details}")
+    if not user_details and user_id and user_id != "anonymous" and user_id != "guest":
+        try:
+            async with pool.acquire() as conn:
+                record = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+                if record:
+                    row_dict = dict(record)
+                    user_details = {
+                        "id": str(row_dict.get("id")),
+                        "name": row_dict.get("name"),
+                        "email": row_dict.get("email"),
+                        "role": row_dict.get("role"),
+                        "company_name": row_dict.get("company_name"),
+                        "company_id": row_dict.get("company_id"),
+                        "user_type": row_dict.get("user_type"),
+                        "ship_name": row_dict.get("ship_name"),
+                        "ship_type": row_dict.get("ship_type"),
+                        "user_courses": row_dict.get("user_courses")
+                    }
+                    await redis_service.set_user_data(user_id, user_details)
+        except Exception as ex:
+            print(f"Failed to fetch user from DB: {ex}")
+    print(f"User details: {user_details}")
 
     session_summary = await redis_service.get_session_summary(session_id)
     print(f"Session summary from Redis: {session_summary}")
@@ -154,9 +176,9 @@ async def switch_session(
 
 
 
-@router.post("/working-stream")
+@router.post("")
 @rate_limit_chat
-async def chat1(
+async def chat(
     request: Request,
     payload: TestChatMessage,
     background_tasks: BackgroundTasks,
@@ -230,8 +252,34 @@ async def chat1(
 
     print(f"💬 User message: {user_content}")
 
-    user_details = await redis_service.get_user_details(user_id)
+    user_details = await redis_service.get_user_details(user_id) or {}
     print(f"User details from Redis: {user_details}")
+
+    # Fallback: if Redis is disconnected or missing user details, fetch from PostgreSQL users table
+    if not user_details.get("company_id") and user_id and user_id != "anonymous":
+        try:
+            async with pool.acquire() as conn:
+                user_row = await conn.fetchrow(
+                    "SELECT company_id, company_name, name, email, role, user_type, ship_name, ship_type, user_courses FROM users WHERE id = $1",
+                    user_id
+                )
+                if user_row:
+                    user_details = {
+                        "id": user_id,
+                        "name": user_row.get("name") or "",
+                        "email": user_row.get("email") or "",
+                        "role": user_row.get("role") or "",
+                        "user_type": user_row.get("user_type") or "",
+                        "company_id": user_row.get("company_id"),
+                        "company_name": user_row.get("company_name") or "",
+                        "ship_name": user_row.get("ship_name") or "",
+                        "ship_type": user_row.get("ship_type") or "",
+                        "user_courses": user_row.get("user_courses")
+                    }
+                    print(f"Fallback: Loaded user details from PostgreSQL: {user_details}")
+                    await redis_service.set_user_data(user_id, user_details)
+        except Exception as e:
+            print(f"❌ Failed to fetch user details fallback from PostgreSQL: {e}")
 
     company_id = user_details.get("company_id")
     print(company_id)
@@ -276,11 +324,11 @@ async def chat1(
 
             rewrite_text = standalone_query or ""
 
-            for token in rewrite_text.split():
+            for token in re.findall(r'\s+|\S+', rewrite_text):
 
                 payload_data = {
                     "type": "rewrite_token",
-                    "token": token + " "
+                    "token": token
                 }
 
                 yield (
@@ -317,11 +365,11 @@ async def chat1(
                 and understanding_text.upper() != "EMPTY"
             ):
 
-                for token in understanding_text.split():
+                for token in re.findall(r'\s+|\S+', understanding_text):
 
                     payload_data = {
                         "type": "understanding_token",
-                        "token": token + " "
+                        "token": token
                     }
 
                     yield (
@@ -443,11 +491,11 @@ async def chat1(
 
                     yield f"data: {json.dumps(source_data)}\n\n"
 
-                    for token in section.get("content", "").split():
+                    for token in re.findall(r'\s+|\S+', section.get("content", "") or ""):
 
                         content_data = {
                             "type": "content",
-                            "token": token + " "
+                            "token": token
                         }
 
                         yield f"data: {json.dumps(content_data)}\n\n"
@@ -455,11 +503,11 @@ async def chat1(
 
             else:
 
-                for token in (node_response.content or "").split():
+                for token in re.findall(r'\s+|\S+', node_response.content or ""):
 
                     content_data = {
                         "type": "content",
-                        "token": token + " "
+                        "token": token
                     }
 
                     yield f"data: {json.dumps(content_data)}\n\n"

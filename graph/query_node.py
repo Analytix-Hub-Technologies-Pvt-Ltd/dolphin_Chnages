@@ -129,6 +129,15 @@ CRITICAL GROUNDING RULES:
    - Prioritize depth over breadth - dig deeper into topics that are present in the context
    - Example: If context covers "fire prevention procedures", suggest "What are the key steps in fire prevention?" rather than "What marine species are resilient?"
 
+7. **AVOID REPETITIVE CONCLUSIONS**:
+   - Do NOT include a "Conclusion" heading or summary section for each individual chunk or topic.
+   - If the COURSE CONTEXT contains "Conclusion" or "Summary" sections in the retrieved chunks, omit or strip them from the individual sections.
+   - There must be at most ONE cohesive conclusion/takeaway at the very end of the entire response (inside the final section), or no conclusion at all, to keep the response clean, properly structured, and clear.
+
+8. **DEDUPLICATE & MERGE SIMILAR TOPICS**:
+   - If multiple chunks in the COURSE CONTEXT are on the same or highly similar topic, synthesize them into a single, cohesive, non-repetitive explanation.
+   - Do not repeat the same details or present multiple separate/redundant versions of the same topic.
+
 RESPONSE FORMAT:
 Your response MUST be structured as follows:
 
@@ -152,8 +161,9 @@ ABSOLUTE PROHIBITIONS:
 - DO NOT provide generic advice, standard procedures, or common knowledge unless explicitly in COURSE CONTEXT.
 - DO NOT infer or extrapolate beyond what is explicitly stated in COURSE CONTEXT.
 - For workplace safety queries (harassment, bullying, intoxication), answer ONLY if relevant content exists in COURSE CONTEXT.
-- If the context is irrelevant to the question, REFUSE to answer.
-- If you cannot answer from the context, explicitly state so and suggest related topics that ARE in the course.
+- If the user's question contains both in-scope and unrelated/out-of-scope topics, you MUST answer ONLY the portion that is explicitly supported by the COURSE CONTEXT. Do NOT use general knowledge or make assumptions to answer the unrelated portion.
+- If the context is irrelevant to the question, or if the entire query is unrelated or not covered by the COURSE CONTEXT, you MUST refuse to answer and respond with: "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
+- If you cannot answer from the context, respond with: "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
 
 Generate your response using ONLY the COURSE CONTEXT provided above:
 """
@@ -865,6 +875,20 @@ class QueryNode(BaseNode):
                 logger.info(f"[QUERY] High-quality chunks found (score < {confidence_threshold}). Forcing IN_SCOPE.")
                 classification = "IN_SCOPE"
         
+        # Override for Titanic/Jack/Rose queries if not covered by course material
+        query_lower = standalone_query.lower()
+        if any(term in query_lower for term in ["titanic", "jack", "rose"]):
+            # Check if any retrieved chunk content actually contains the term
+            term_found = False
+            for chunk in chunks:
+                chunk_text = (chunk.get("content") or chunk.get("topic_content") or chunk.get("summary") or chunk.get("topic_name") or "").lower()
+                if any(term in chunk_text for term in ["titanic", "jack", "rose"]):
+                    term_found = True
+                    break
+            if not term_found:
+                logger.info(f"[QUERY] Titanic/Jack/Rose query detected but not present in chunks. Forcing UNRELATED.")
+                classification = "UNRELATED"
+        
         # AMBIGUITY DETECTION: Check if query matches multiple similar acronyms
         # This prevents returning EEBD when user asks for EEDI
         is_ambiguous, possible_acronyms = self.acronym_disambiguator.is_ambiguous(
@@ -971,21 +995,10 @@ class QueryNode(BaseNode):
 
         # --- 1. STRICT GUARD: CHECK FOR EMPTY CHUNKS OR OUT-OF-SCOPE ---
         if not chunks or classification in ["UNRELATED", "TANGENTIALLY_RELATED"]:
-            logger.warning(f"[QUERY NODE] No chunks or out-of-scope query ({classification}). Using intelligent fallback.")
+            logger.warning(f"[QUERY NODE] No chunks or out-of-scope query ({classification}). Returning standard scope message.")
             
-            # Build user context for personalization
-            user_context_parts = []
-            if user_memory.get("name"):
-                user_context_parts.append(f"User's name: {user_memory['name']}")
-            if user_memory.get("role"):
-                user_context_parts.append(f"Role: {user_memory['role']}")
-            user_context_str = "\n".join(user_context_parts) if user_context_parts else ""
-            
-            # Generate intelligent, contextual fallback
-            fallback_answer, fallback_suggestions = await self._generate_intelligent_fallback(
-                query, 
-                user_context_str
-            )
+            fallback_answer = "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
+            fallback_suggestions = []
 
             # Construct partial response
             response = self._build_response(

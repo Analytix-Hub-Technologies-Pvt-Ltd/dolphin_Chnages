@@ -1,6 +1,7 @@
 from typing import Any
 
 from loguru import logger
+from pipeline.manual_filter import is_manual_allowed_for_ship_type
 
 
 async def company_retrieval_node(
@@ -9,10 +10,9 @@ async def company_retrieval_node(
 ) -> dict:
     """Retrieve relevant company-specific document chunks."""
 
-    company_id = (
-        state.get("user_profile", {})
-        .get("company_id")
-    )
+    user_profile = state.get("user_profile", {}) or {}
+    company_id = user_profile.get("company_id")
+    ship_type = user_profile.get("ship_type") or user_profile.get("ShipType") or ""
 
     if not company_id:
         logger.warning("No company_id found in user profile")
@@ -29,9 +29,8 @@ async def company_retrieval_node(
         state["company_chunks"] = []
         return state
 
-    # Retrieve more company chunks so the LLM has enough
-    # information to generate a detailed answer.
-    k = 10
+    # Retrieve more company chunks so we have enough candidate chunks to filter
+    k = 30
 
     chunks = await company_vector_store.search_with_embeddings(
         query,
@@ -48,23 +47,25 @@ async def company_retrieval_node(
     for i, chunk in enumerate(chunks):
         chunk_company_id = chunk.get("company_id")
 
-        logger.info(
-            f"Chunk {i}: "
-            f"company_id={chunk_company_id} "
-            f"({type(chunk_company_id)}) | "
-            f"user_company_id={company_id} "
-            f"({type(company_id)})"
-        )
+        if str(chunk_company_id) != str(company_id):
+            logger.info(
+                f"❌ Company mismatch for chunk {i}: chunk={chunk_company_id}, user={company_id}"
+            )
+            continue
 
-        if str(chunk_company_id) == str(company_id):
+        doc_title = chunk.get("document_title", "")
+        if not is_manual_allowed_for_ship_type(doc_title, ship_type):
             logger.info(
-                f"✅ Company matched for chunk {i}"
+                f"🚫 Filtered out chunk {i} ('{doc_title}') for ship type '{ship_type}'"
             )
-            company_chunks.append(chunk)
-        else:
-            logger.info(
-                f"❌ Company mismatch for chunk {i}"
-            )
+            continue
+
+        logger.info(
+            f"✅ Company and ship type matched for chunk {i} ('{doc_title}')"
+        )
+        company_chunks.append(chunk)
+        if len(company_chunks) >= 10:
+            break
 
     state["company_chunks"] = company_chunks
 

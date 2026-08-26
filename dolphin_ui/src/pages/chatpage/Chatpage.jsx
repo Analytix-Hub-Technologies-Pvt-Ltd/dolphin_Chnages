@@ -126,6 +126,7 @@ const Chatpage = ({ userId, setUserId, onLogout }) => {
           messages={messages}
           setmessages={setmessages}
           setDisableNewChat={setDisableNewChat}
+          disableNewChat={disableNewChat}
         />
       </Grid>
     </Grid>

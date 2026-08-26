@@ -20,3 +20,11 @@ class CompanyDocumentUploadResponse(BaseModel):
 class CompanyDocumentStoreRequest(BaseModel):
     company_id: str
     documents: list[tuple[str, str | None, str]]  # (title, content_type, content)
+
+class CompanyDocumentListResponse(BaseModel):
+    documents: list[CompanyDocument]
+
+class CompanyDocumentDeleteResponse(BaseModel):
+    message: str
+    document_id: int
+

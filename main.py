@@ -1,6 +1,14 @@
 import os
+import sys
 from time import perf_counter
 from contextlib import asynccontextmanager
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles

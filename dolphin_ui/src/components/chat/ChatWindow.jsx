@@ -9,13 +9,15 @@ import { SendIcon } from "../../assets/svgIcons/sendIcon";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import WelcomeChatScreen from "./WelcomeChatScreen";
-import { ensureSession, sendMessage } from "../../api/fetchApi";
+import { ensureSession, sendMessage, checkDocumentGaps, sendMessageStream, checkDocumentGapsStream } from "../../api/fetchApi";
 import ChatMessage from "./ChatMessage";
 import { useThemeMode } from "../../context/ThemeModeContext";
 import { Message } from "../../assets/svgIcons/message";
 import { Saveoutlined } from "../../assets/svgIcons/SaveIconOutlined";
 import DolphinIconW from "../../assets/images/dolphin_w.png";
 import { getContentWidth } from "../../theme/layoutScale";
+import { StopIcon } from "../../assets/svgIcons/StopIcon";
+import axios from "axios";
 
 export const sanitizeMarkdown = (markdownText) => {
   if (!markdownText) return "";
@@ -79,11 +81,29 @@ const ChatWindow = ({
   messages,
   setmessages,
   setDisableNewChat,
+  disableNewChat,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedFile, setSelectedFile] = useState(null);
   const { mode } = useThemeMode();
 
   const bottomRef = useRef(null);
+  const abortControllerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  const handleStop = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+  };
 
   const ThinkingBubble = () => (
     <Box
@@ -168,21 +188,97 @@ const ChatWindow = ({
   const handleSend = async (queryOverride) => {
     const messageText = queryOverride ?? searchQuery;
 
-    if (!messageText.trim()) return;
+    // If there's no text and no selected file, do nothing
+    if (!messageText.trim() && !selectedFile) return;
 
-    const userMessage = {
-      role: "user",
-      content: messageText.trim(),
-      timestamp: new Date().toISOString(),
-    };
+    // If a file is selected, handle its upload
+    if (selectedFile) {
+      const file = selectedFile;
+      const userMessageContent = messageText.trim()
+        ? `${messageText.trim()}\n\n*(Attachment: ${file.name})*`
+        : `Uploaded document **${file.name}** for industry standards gap analysis.`;
 
-    setmessages((prev = []) => [...prev, userMessage]);
-    setSearchQuery("");
+      const userMessage = {
+        role: "user",
+        content: userMessageContent,
+        timestamp: new Date().toISOString(),
+      };
 
-    setmessages((prev = []) => [
-      ...prev,
-      { role: "assistant", isThinking: true },
-    ]);
+      setmessages((prev = []) => [...prev, userMessage]);
+      setSearchQuery("");
+      setSelectedFile(null); // Clear file selection immediately so UI updates
+
+      setmessages((prev = []) => [
+        ...prev,
+        { role: "assistant", isThinking: true },
+      ]);
+
+      setDisableNewChat(true);
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      let assistantMsg = {
+        role: "assistant",
+        content: "",
+        isThinking: true,
+        timestamp: new Date().toISOString(),
+        sections: [
+          {
+            topic_code: "GAP_ANALYSIS",
+            topic_name: `Gap Analysis - ${file.name}`,
+            content: "",
+          }
+        ],
+        metadata: {
+          source_layer: "Industry Standards Check",
+          category: "GAP_ANALYSIS",
+        },
+      };
+
+      setmessages((prev = []) => [
+        ...prev.filter((m) => !m.isThinking),
+        assistantMsg,
+      ]);
+
+      try {
+        await checkDocumentGapsStream(file, controller.signal, (chunk) => {
+          if (chunk.type === "content") {
+            assistantMsg.isThinking = false;
+            assistantMsg.content += chunk.token;
+            assistantMsg.sections[0].content = assistantMsg.content;
+          }
+
+          setmessages((prev = []) => {
+            const nextMsgs = [...prev];
+            const idx = nextMsgs.findLastIndex((m) => m.role === "assistant");
+            if (idx !== -1) {
+              nextMsgs[idx] = { ...assistantMsg };
+            }
+            return nextMsgs;
+          });
+        });
+      } catch (error) {
+        if (axios.isCancel(error) || error.name === "CanceledError" || error.message === "canceled" || error.name === "AbortError") {
+          setmessages((prev = []) => prev.filter((m) => !m.isThinking && m.content !== ""));
+        } else {
+          setmessages((prev = []) => {
+            const clean = prev.filter((m) => !m.isThinking);
+            return clean.concat({
+              role: "assistant",
+              content: `Error performing gap analysis: ${error.message}`,
+              timestamp: new Date().toISOString(),
+            });
+          });
+        }
+      } finally {
+        setDisableNewChat(false);
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null;
+        }
+      }
+      return;
+
+    }
 
     const resolvedUserId = userId || localStorage.getItem("userId") || "guest";
     const sessionId = currentSessionId
@@ -191,22 +287,100 @@ const ChatWindow = ({
 
     setCurrentSessionId(sessionId);
 
-    setDisableNewChat(true);
-    const response = await sendMessage(sessionId, userMessage.content, resolvedUserId);
-    setDisableNewChat(false);
-    if (typeof fetchSessions === "function") {
-      fetchSessions();
-    }
-    setmessages((prev = []) =>
-      prev
-        .filter((m) => !m.isThinking)
-        .concat({
-          ...response,
-          category: response?.metadata?.category,
-          role: "assistant",
-        })
-    );
+    // Otherwise, text-only normal chat message
+    if (messageText.trim()) {
+      const userMessage = {
+        role: "user",
+        content: messageText.trim(),
+        timestamp: new Date().toISOString(),
+      };
 
+      setmessages((prev = []) => [...prev, userMessage]);
+      setSearchQuery("");
+
+      let assistantMsg = {
+        role: "assistant",
+        content: "",
+        isThinking: true,
+        timestamp: new Date().toISOString(),
+        videos: [],
+        images: [],
+        pdfs: [],
+        question_suggestions: [],
+        company_answer: "",
+        metadata: {},
+      };
+
+      setmessages((prev = []) => [...prev, assistantMsg]);
+      setDisableNewChat(true);
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      try {
+        await sendMessageStream(
+          sessionId,
+          messageText.trim(),
+          resolvedUserId,
+          controller.signal,
+          (chunk) => {
+            if (chunk.type === "content") {
+              assistantMsg.isThinking = false;
+              assistantMsg.content += chunk.token;
+            } else if (chunk.type === "suggestions") {
+              assistantMsg.question_suggestions = chunk.question_suggestions || [];
+            } else if (chunk.type === "media") {
+              assistantMsg.videos = chunk.videos || [];
+              assistantMsg.images = chunk.images || [];
+              assistantMsg.pdfs = chunk.pdfs || [];
+            } else if (chunk.type === "company_content") {
+              assistantMsg.company_answer = chunk.content;
+            }
+
+            setmessages((prev = []) => {
+              const nextMsgs = [...prev];
+              const idx = nextMsgs.findLastIndex((m) => m.role === "assistant");
+              if (idx !== -1) {
+                nextMsgs[idx] = { ...assistantMsg };
+              }
+              return nextMsgs;
+            });
+          }
+        );
+
+        if (typeof fetchSessions === "function") {
+          fetchSessions();
+        }
+      } catch (error) {
+        if (axios.isCancel(error) || error.name === "CanceledError" || error.message === "canceled" || error.name === "AbortError") {
+          setmessages((prev = []) => prev.filter((m) => !m.isThinking && m.content !== ""));
+        } else {
+          setmessages((prev = []) => {
+            const clean = prev.filter((m) => !m.isThinking);
+            return clean.concat({
+              role: "assistant",
+              content: `Error: ${error.message}`,
+              timestamp: new Date().toISOString(),
+            });
+          });
+        }
+      } finally {
+        setDisableNewChat(false);
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null;
+        }
+      }
+    }
+  };
+
+  const handleFileUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Reset target value so the same file can be uploaded again
+    event.target.value = null;
+
+    // Store the selected file for later sending when user clicks send
+    setSelectedFile(file);
   };
 
   const showWelcome =
@@ -356,6 +530,47 @@ const ChatWindow = ({
           alignItems: "flex-end",
         }}
       >
+        {selectedFile && (
+          <Box
+            sx={{
+              alignSelf: "flex-start",
+              display: "flex",
+              alignItems: "center",
+              gap: 1.5,
+              mb: 1.5,
+              p: "6px 12px",
+              borderRadius: "8px",
+              backgroundColor: mode === "dark" ? "rgba(28, 176, 246, 0.12)" : "rgba(16, 107, 163, 0.08)",
+              border: "1px solid",
+              borderColor: mode === "dark" ? "rgba(28, 176, 246, 0.3)" : "rgba(16, 107, 163, 0.2)",
+              width: "fit-content",
+            }}
+          >
+            <Typography
+              variant="body2"
+              sx={{
+                fontWeight: 600,
+                color: mode === "dark" ? "#1cb0f6" : "#106BA3",
+                fontSize: "0.85rem",
+              }}
+            >
+              📄 {selectedFile.name}
+            </Typography>
+            <IconButton
+              size="small"
+              onClick={() => setSelectedFile(null)}
+              sx={{
+                p: 0.25,
+                color: mode === "dark" ? "#1cb0f6" : "#106BA3",
+                "&:hover": {
+                  backgroundColor: mode === "dark" ? "rgba(28, 176, 246, 0.2)" : "rgba(16, 107, 163, 0.15)",
+                },
+              }}
+            >
+              <span style={{ fontSize: 16, fontWeight: "bold", lineHeight: 1 }}>×</span>
+            </IconButton>
+          </Box>
+        )}
         <Box
           sx={{
             position: "relative",
@@ -367,7 +582,7 @@ const ChatWindow = ({
               width: "100%",
               resize: "none",
               borderRadius: 2,
-              padding: "20px 56px 20px 50px",
+              padding: "20px 56px 20px 82px",
               fontSize: 14,
               fontFamily: "inherit",
               maxHeight: 120,
@@ -418,12 +633,37 @@ const ChatWindow = ({
             }}
           />
 
+          <IconButton
+            component="label"
+            sx={{
+              position: "absolute",
+              left: 12,
+              top: "50%",
+              transform: "translateY(-50%)",
+              color: mode === "dark" ? "#1cb0f6" : "#106BA3",
+              zIndex: 10,
+              width: 32,
+              height: 32,
+              "&:hover": {
+                backgroundColor: mode === "dark" ? "rgba(28, 176, 246, 0.15)" : "rgba(16, 107, 163, 0.15)",
+              }
+            }}
+          >
+            <input
+              type="file"
+              hidden
+              accept=".pdf,.docx,.txt,.xlsx,.csv"
+              onChange={handleFileUpload}
+            />
+            <span style={{ fontSize: 24, fontWeight: 300, lineHeight: 1, position: "relative", top: -1 }}>+</span>
+          </IconButton>
+
           <Box
             sx={{
               display: "flex",
               position: "absolute",
               transform: "translateY(-50%)",
-              left: 16,
+              left: 48,
               top: "50%",
             }}
           >
@@ -433,25 +673,54 @@ const ChatWindow = ({
             />
           </Box>
 
-          <IconButton
-            onClick={() => {
-              handleSend();
-            }}
-            sx={{
-              position: "absolute",
-              right: 16,
-              top: "50%",
-              transform: "translateY(-50%)",
-              height: 36,
-              width: 36,
-              borderRadius: 2,
-            }}
-          >
-            <SendIcon
-              size={20}
-              color={mode === "dark" ? "#1989D0" : "#106BA3"}
-            />
-          </IconButton>
+          {disableNewChat ? (
+            <IconButton
+              onClick={handleStop}
+              sx={{
+                position: "absolute",
+                right: 16,
+                top: "50%",
+                transform: "translateY(-50%)",
+                height: 32,
+                width: 32,
+                borderRadius: "50%",
+                backgroundColor: mode === "dark" ? "#1cb0f6" : "#106BA3",
+                color: "#ffffff",
+                "&:hover": {
+                  backgroundColor: mode === "dark" ? "#1577b8" : "#0d5683",
+                },
+                zIndex: 10,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <StopIcon
+                size={16}
+                color="#ffffff"
+              />
+            </IconButton>
+          ) : (
+            <IconButton
+              onClick={() => {
+                handleSend();
+              }}
+              sx={{
+                position: "absolute",
+                right: 16,
+                top: "50%",
+                transform: "translateY(-50%)",
+                height: 36,
+                width: 36,
+                borderRadius: 2,
+              }}
+            >
+              <SendIcon
+                size={20}
+                color={mode === "dark" ? "#1989D0" : "#106BA3"}
+              />
+            </IconButton>
+          )}
         </Box>
         <Typography
           variant="caption"

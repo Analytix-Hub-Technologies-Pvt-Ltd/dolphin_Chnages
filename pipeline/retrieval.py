@@ -9,6 +9,7 @@ from config import settings
 from models.database import get_pool
 from retrieval.faiss_store import DEFAULT_TOP_K
 from retrieval.postgres_loader import PostgresLoader
+from pipeline.manual_filter import is_manual_allowed_for_ship_type
 
 
 # -----------------------------
@@ -257,12 +258,13 @@ async def retrieval_node(
 
     if company_id and company_vector_store:
 
-        logger.info(f"Searching company documents for company_id={company_id}")
+        ship_type = user_profile.get("ship_type") or user_profile.get("ShipType") or ""
+        logger.info(f"Searching company documents for company_id={company_id}, ship_type={ship_type}")
 
         try:
             company_results = await company_vector_store.search_with_embeddings(
                 search_query,
-                k=5,
+                k=15,
             )
 
             logger.info(
@@ -274,9 +276,16 @@ async def retrieval_node(
                 if str(chunk.get("company_id")) != str(company_id):
                     continue
 
+                doc_title = chunk.get("document_title", "")
+                if not is_manual_allowed_for_ship_type(doc_title, ship_type):
+                    logger.info(f"Filtered out chunk ('{doc_title}') for ship type '{ship_type}'")
+                    continue
+
                 company_chunks.append(
                     normalize_chunk(chunk)
                 )
+                if len(company_chunks) >= 5:
+                    break
 
             logger.info(
                 f"Matched company chunks: {len(company_chunks)}"

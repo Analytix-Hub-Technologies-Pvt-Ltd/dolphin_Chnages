@@ -105,6 +105,7 @@ const createMessage = (role, content, timestamp = '') => {
   container.appendChild(bubble);
   chatWindow.appendChild(container);
   scrollToBottom();
+  return bubble;
 };
 
 const renderVideoSuggestions = (videos = []) => {
@@ -752,41 +753,57 @@ const sendMessage = async (messageText) => {
       throw new Error(errText);
     }
 
-    const data = await response.json();
-    const nodeResponse = data.node_response || data;
-    const quizPayload = extractQuizPayload(nodeResponse) || extractQuizPayload(data);
-    const botMessage = nodeResponse.content || 'I did not receive a response.';
-    const botTimestamp = new Date(nodeResponse.timestamp || Date.now()).toLocaleTimeString();
-    const videos =
-      nodeResponse.videos ||
-      nodeResponse.video_suggestions ||
-      nodeResponse.metadata?.videos ||
-      [];
-    const images = nodeResponse.images || nodeResponse.metadata?.images || [];
-    const pdfs = nodeResponse.pdfs || nodeResponse.metadata?.pdfs || [];
+    const botBubble = createMessage('assistant', '', new Date().toLocaleTimeString());
+    let accumulatedContent = '';
 
-    console.debug('[Chat] Response received', {
-      hasNodeResponse: Boolean(data.node_response),
-      videoSuggestions: nodeResponse.video_suggestions,
-      videos,
-      images,
-      pdfs,
-      questionSuggestions: nodeResponse.question_suggestions,
-      rawResponse: data,
-    });
+    let videos = [];
+    let images = [];
+    let pdfs = [];
+    let questionSuggestions = [];
 
-    if (quizPayload) {
-      lastQuizPrompt = lastUserPrompt;
-      renderQuizMessage(quizPayload);
-    } else {
-      createMessage('assistant', botMessage, botTimestamp);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+
+    toggleLoading(false);
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        const cleanLine = line.trim();
+        if (!cleanLine.startsWith('data: ')) continue;
+
+        const jsonStr = cleanLine.slice(6);
+        try {
+          const parsed = JSON.parse(jsonStr);
+          if (parsed.type === 'content') {
+            accumulatedContent += parsed.token;
+            botBubble.innerHTML = sanitizeMarkdown(accumulatedContent);
+            scrollToBottom();
+          } else if (parsed.type === 'suggestions') {
+            questionSuggestions = parsed.question_suggestions || [];
+          } else if (parsed.type === 'media') {
+            videos = parsed.videos || [];
+            images = parsed.images || [];
+            pdfs = parsed.pdfs || [];
+          }
+        } catch (e) {
+          console.error('Error parsing stream chunk:', e);
+        }
+      }
     }
+
     renderVideoSuggestions(videos);
     renderImageSuggestions(images);
     renderPdfSuggestions(pdfs);
-    renderQuestionSuggestions(nodeResponse.question_suggestions || []);
+    renderQuestionSuggestions(questionSuggestions);
 
-    // FIXED: safely refresh sessions without breaking loader
     try {
       await fetchSessions(sessionSearchInput.value.trim());
     } catch (e) {
@@ -796,7 +813,6 @@ const sendMessage = async (messageText) => {
   } catch (error) {
     console.error('[Chat] Failed to send message', error);
     createMessage('assistant', `⚠️ ${error.message || 'Something went wrong. Please try again.'}`);
-  } finally {
     toggleLoading(false);
   }
 };

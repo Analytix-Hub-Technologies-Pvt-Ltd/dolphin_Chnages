@@ -27,7 +27,9 @@ def safe_get(state: Any, key: str, default=None):
 
 
 # 🔹 Dynamic fallback generator (same as before)
-async def generate_dynamic_fallback(query: str, openai_service=None) -> str:
+async def generate_dynamic_fallback(query: str, openai_service=None, is_social: bool = False) -> str:
+    if not is_social:
+        return "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
 
     if not openai_service:
         import random
@@ -69,8 +71,15 @@ async def fallback_node(
 
     combined_query = " ".join(q for q in [query] + previous_questions if q)
 
+    node_type = decision.get("node_type", "").lower()
+    is_social = node_type in {"greeting", "goodbye", "thank", "well_wish"}
+    query_lower = (query or combined_query).lower().strip().rstrip("?.!")
+    social_words = {"hello", "hi", "hey", "good morning", "good evening", "how are you", "thank you", "thanks"}
+    if any(word in query_lower for word in social_words) or len(query_lower) < 3:
+        is_social = True
+
     # 🔹 Generate fallback response
-    content = await generate_dynamic_fallback(query or combined_query, openai_service)
+    content = await generate_dynamic_fallback(query or combined_query, openai_service, is_social=is_social)
 
     category = decision.get("category") or "FALLBACK"
 

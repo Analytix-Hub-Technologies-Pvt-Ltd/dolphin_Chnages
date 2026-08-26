@@ -75,22 +75,17 @@ class FallbackNode(BaseNode):
         messages = safe_get(state, "messages", [])
         combined_query = " ".join(q for q in [query] + previous_questions if q)
         
-        # Generate dynamic, varied fallback message using LLM
-        content = await self._generate_dynamic_fallback(query or combined_query)
+        # Generate a varied out-of-scope response using LLM if available, otherwise fallback to static message
+        if self.openai_service:
+            content = await self._generate_dynamic_fallback(query)
+        else:
+            content = "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
         
-        category = decision.get("category") or "FALLBACK"
-        dynamic_suggestions = self.suggestion_service.generate(
-            query=combined_query,
-            chunks=chunks,
-            history=messages,
-            short_topic=decision.get("short_topic", "marine topic"),
-            category=category,
-        )
         response = self._build_response(
             content=content,
             chunks_used=chunks,
             video_suggestions=[],
-            question_suggestions=dynamic_suggestions,
+            question_suggestions=[],
             short_topic=decision.get("short_topic", "marine"),
             routing_reason=decision.get("reason", "fallback"),
         )

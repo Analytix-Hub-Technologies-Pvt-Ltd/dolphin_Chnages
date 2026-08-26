@@ -109,6 +109,26 @@ class QueryAnalyzer:
         # Remove punctuation for matching
         query_clean = query_lower.rstrip('.,!?')
         
+        # Check spelling variations of greetings/thanks/goodbyes using regex (e.g. hii, heyyy, helloo, yoo)
+        # Check greetings
+        if re.match(r'^h+i+$', query_clean) or \
+           re.match(r'^h+e+y+$', query_clean) or \
+           re.match(r'^he+l+o+o*$', query_clean) or \
+           re.match(r'^y+o+$', query_clean) or \
+           re.match(r'^h+o+l+a+$', query_clean) or \
+           re.match(r'^howdy+$', query_clean):
+            return "GREETING"
+            
+        # Check goodbyes
+        if re.match(r'^b+y+e+$', query_clean):
+            return "GOODBYE"
+            
+        # Check thanks
+        if re.match(r'^t+h+a+n+k+s*$', query_clean) or \
+           re.match(r'^t+h+x+$', query_clean) or \
+           re.match(r'^t+y+$', query_clean):
+            return "THANK"
+        
         # Common greetings (single word or short phrases)
         greeting_patterns = {
             "hi", "hello", "hey", "yo", "hola", "howdy", "greetings",
@@ -155,29 +175,22 @@ class QueryAnalyzer:
         Check if query looks like a technical term/acronym that should skip GPT classification.
         
         Criteria:
-        - Single word or 2-3 short words
-        - Contains uppercase letters (likely acronym)
-        - Or is a known domain-specific term pattern
-        
-        Examples that return True:
-        - "EEDI", "SEEMP", "MARPOL", "ISM"
-        - "ship stability", "fire safety"
-        - "navigation", "cargo"
+        - Short acronym consisting of all-uppercase characters (e.g. "EEDI", "SEEMP", "MARPOL")
         """
         query = query.strip()
         words = query.split()
         
-        # Single word that's 3+ chars and alphanumeric
-        if len(words) == 1 and len(query) >= 3 and query.replace('-', '').replace('_', '').isalnum():
-            return True
-        
-        # 2-3 words, likely a technical phrase
-        if 2 <= len(words) <= 3:
-            return True
-        
-        # Contains uppercase (likely acronym even if in sentence)
-        if any(c.isupper() for c in query):
-            return True
+        # Check if the query is a single word or 2-word phrase consisting entirely of uppercase acronyms
+        # (e.g. "EEDI", "SEEMP", "MARPOL", "ISM CODE")
+        if 1 <= len(words) <= 2:
+            is_acronym_phrase = True
+            for w in words:
+                clean_word = w.replace('-', '').replace('_', '')
+                if not (clean_word.isupper() and clean_word.isalnum() and len(clean_word) >= 2):
+                    is_acronym_phrase = False
+                    break
+            if is_acronym_phrase:
+                return True
         
         return False
 

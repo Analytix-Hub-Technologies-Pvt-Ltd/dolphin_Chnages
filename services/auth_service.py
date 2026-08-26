@@ -224,6 +224,7 @@ class AuthService:
         ship_type=None,
         id_type=None,
         id_country=None,
+        company_id=None,
     ):
         query = """
         UPDATE users
@@ -237,6 +238,7 @@ class AuthService:
             ship_type = $8,
             id_type = $9,
             id_country = $10,
+            company_id = $11,
             updated_at = NOW()
         WHERE id = $1
         """
@@ -254,4 +256,5 @@ class AuthService:
                 ship_type,
                 id_type,
                 id_country,
+                company_id,
             )    

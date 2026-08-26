@@ -189,6 +189,7 @@ if "langgraph.graph" not in sys.modules:  # pragma: no cover - graph shim
 
 from graph.query_node import QueryNode
 from graph.retrieval_node import RetrievalNode
+from graph.fallback_node import FallbackNode
 from models.node_response import NodeResponse
 from services.chat_service import ChatService
 from services.query_analyzer import EnhancedQueryAnalyzer
@@ -365,6 +366,15 @@ def test_chatservice_graph_flow(monkeypatch):
         "classify_for_router",
         mock_classify,
     )
+    
+    async def mock_scope(self, query, chunks):
+        return "IN-SCOPE"
+        
+    monkeypatch.setattr(
+        ChatService,
+        "check_query_scope",
+        mock_scope,
+    )
 
     vector_store = StubVectorStore([
         {"title": "Hull", "content": "Hull design details", "video_id": "vh1"}
@@ -414,3 +424,168 @@ def test_node_response_validation():
     validated = NodeResponse.model_validate(data)
     assert validated.metadata["short_topic"] == "marine"
     assert validated.metadata["routing_reason"] == "query"
+
+
+def test_company_query_cow_checklist():
+    from pipeline.company_query import company_query_node
+
+    class MockOpenAIService:
+        async def chat(self, messages, temperature=0.0):
+            return """
+### 🏢 1. According to CMS Demo Company's Safety Management System (SMS / QMS)
+**Document Title:** Shipboard SMS Manual (Vol. II)-Oil Tanker 2016.docx
+**SOP Name:** Crude Oil Washing (COW) Procedures
+**Section:** COW Checklist
+
+Confirm all pre-arrival checks are performed [ ] [ ] 
+
+### 📘 2. Dolphin internal knowledge base
+Dolphin info.
+"""
+
+    state = {
+        "company_chunks": [{"document_title": "Shipboard SMS Manual (Vol. II)-Oil Tanker 2016.docx", "content": "Confirm all pre-arrival checks"}],
+        "user_profile": {"company_name": "CMS Demo Company"},
+        "standalone_query": "What is the COW checklist?",
+        "node_response": {}
+    }
+
+    updated_state = asyncio.run(company_query_node(state, MockOpenAIService()))
+    answer = updated_state["company_answer"]
+
+    assert "COW Entry and Cleaning Checklist" in answer
+    assert "**Section:** COW Checklist" in answer
+    assert "1. Confirm all pre-arrival checks are performed" in answer
+    assert "| 1. Confirm all pre-arrival checks are performed |  |  | R | |" in answer
+    assert "Dolphin info." in answer
+
+
+def test_is_company_query():
+    from pipeline.company_query import is_company_query
+    
+    # Company related
+    assert is_company_query("What is the company SMS procedure for anchor watch?", "CMS Demo Company") is True
+    assert is_company_query("Do we have a checklist for anchoring?", "CMS Demo Company") is True
+    assert is_company_query("What is the SOP on CMS Demo Company?", "CMS Demo Company") is True
+    assert is_company_query("What is on my vessel?", "CMS Demo Company") is True
+    assert is_company_query("explain handling of cargo", "CMS Demo Company") is True
+    assert is_company_query("handling of cargo", "CMS Demo Company") is True
+    assert is_company_query("Instructions to ship's staff", "CMS Demo Company") is True
+    assert is_company_query("Instructions to ship‘s staff", "CMS Demo Company") is True
+    
+    # General queries
+    assert is_company_query("what is anchor", "CMS Demo Company") is False
+    assert is_company_query("what is the definition of stockless anchor", "CMS Demo Company") is False
+    assert is_company_query("explain ship stability in general", "CMS Demo Company") is False
+
+
+def test_company_query_skipped_for_general_queries():
+    from pipeline.company_query import company_query_node
+
+    class MockOpenAIService:
+        async def chat(self, messages, temperature=0.0):
+            return "Should not be called"
+
+    state = {
+        "company_chunks": [{"document_title": "Shipboard SMS Manual (Vol. II)-Oil Tanker 2016.docx", "content": "Confirm all pre-arrival checks"}],
+        "user_profile": {"company_name": "CMS Demo Company"},
+        "standalone_query": "what is anchor",
+        "node_response": {"content": "General answer from query_node"}
+    }
+
+    updated_state = asyncio.run(company_query_node(state, MockOpenAIService()))
+    assert updated_state["company_answer"] is None
+    assert updated_state["node_response"]["content"] == "General answer from query_node"
+
+
+def test_greeting_intent_classification_variations():
+    import pytest
+    from services.query_analyzer import EnhancedQueryAnalyzer
+    from services.gpt_intent_service import GPTIntentService
+
+    # Use a dummy intent service that raises a failure if it's called
+    class DummyIntentService(GPTIntentService):
+        def __init__(self):
+            pass
+        async def classify_intent(self, message: str) -> str:
+            pytest.fail(f"GPTIntentService.classify_intent should not be called for fast-path: {message}")
+
+    analyzer = EnhancedQueryAnalyzer(DummyIntentService())
+    
+    # Test cases that should hit the fast-path as GREETING
+    greetings = ["hi", "hii", "hiii", "hello", "helloo", "hellooo", "hey", "heyy", "yoo", "yo", "hola", "holaa"]
+    for g in greetings:
+        decision = asyncio.run(analyzer.classify_for_router(g, []))
+        assert decision["category"] == "GREETING", f"Failed for greeting: {g}"
+        assert decision["node_type"] == "greeting", f"Failed for node_type: {g}"
+
+    # Test cases that should hit the fast-path as GOODBYE
+    goodbyes = ["bye", "byee"]
+    for b in goodbyes:
+        decision = asyncio.run(analyzer.classify_for_router(b, []))
+        assert decision["category"] == "GOODBYE", f"Failed for goodbye: {b}"
+        assert decision["node_type"] == "goodbye", f"Failed for node_type: {b}"
+
+    # Test cases that should hit the fast-path as THANK
+    thanks = ["thanks", "thanks a lot", "thx"]
+    for t in thanks:
+        decision = asyncio.run(analyzer.classify_for_router(t, []))
+        assert decision["category"] == "THANK", f"Failed for thank: {t}"
+        assert decision["node_type"] == "thank", f"Failed for node_type: {t}"
+
+
+def test_querynode_out_of_scope():
+    openai = StubOpenAIService()
+    suggestion = StubSuggestionService()
+    query_node = QueryNode(openai, suggestion)
+    
+    # 1. Test out-of-scope unrelated query (classification is UNRELATED or TANGENTIALLY_RELATED)
+    state = {
+        "current_query": "How do I create an array in Python?",
+        "router_decision": {"node_type": "query", "short_topic": "python", "reason": "route"},
+        "retrieval_chunks": [],
+        "video_suggestions": [],
+        "session_messages": [],
+        "meaningful_messages": [],
+        "meaningful_history": [],
+    }
+    
+    result = _run_async(query_node.run(state))
+    assert result["node_response"]["content"] == "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
+    assert result["node_response"]["question_suggestions"] == []
+    
+    # 2. Test Titanic query (Titanic terms not in chunks)
+    state_titanic = {
+        "current_query": "How did Titanic sink?",
+        "router_decision": {"node_type": "query", "short_topic": "titanic", "reason": "route"},
+        "retrieval_chunks": [{"title": "Ship Sinking General", "content": "Water ingress can cause vessels to lose stability."}],
+        "video_suggestions": [],
+        "session_messages": [],
+        "meaningful_messages": [],
+        "meaningful_history": [],
+    }
+    
+    result_titanic = _run_async(query_node.run(state_titanic))
+    assert result_titanic["node_response"]["content"] == "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
+    assert result_titanic["node_response"]["question_suggestions"] == []
+
+
+def test_fallbacknode_out_of_scope():
+    suggestion = StubSuggestionService()
+    fallback_node = FallbackNode(suggestion)
+    
+    state = {
+        "current_query": "What is the capital of France?",
+        "router_decision": {"node_type": "fallback", "short_topic": "general", "reason": "fallback"},
+        "retrieval_chunks": [],
+        "previous_questions": [],
+        "messages": [],
+    }
+    
+    result = _run_async(fallback_node.run(state))
+    assert result["node_response"]["content"] == "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
+    assert result["node_response"]["question_suggestions"] == []
+
+
+
+
