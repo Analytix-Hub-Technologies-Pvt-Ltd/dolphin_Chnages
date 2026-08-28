@@ -9,7 +9,7 @@ import { SendIcon } from "../../assets/svgIcons/sendIcon";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import WelcomeChatScreen from "./WelcomeChatScreen";
-import { ensureSession, sendMessage, checkDocumentGaps, sendMessageStream, checkDocumentGapsStream } from "../../api/fetchApi";
+import { ensureSession, sendMessageStream, checkDocumentGapsStream } from "../../api/fetchApi";
 import ChatMessage from "./ChatMessage";
 import { useThemeMode } from "../../context/ThemeModeContext";
 import { Message } from "../../assets/svgIcons/message";
@@ -22,8 +22,11 @@ import axios from "axios";
 export const sanitizeMarkdown = (markdownText) => {
   if (!markdownText) return "";
 
+  // Remove all checkbox brackets [ ], [x], [X], [  ]
+  const cleanedMarkdown = markdownText.replace(/\[\s*[xX]?\s*\]/g, "");
+
   // Pre-process tab-separated tables if any into standard markdown tables
-  const lines = markdownText.split("\n");
+  const lines = cleanedMarkdown.split("\n");
   let inTabTable = false;
   let maxCols = 0;
   let processedLines = [];
@@ -85,6 +88,7 @@ const ChatWindow = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
+  const [isCaptainMode, setIsCaptainMode] = useState(false);
   const { mode } = useThemeMode();
 
   const bottomRef = useRef(null);
@@ -344,7 +348,8 @@ const ChatWindow = ({
               }
               return nextMsgs;
             });
-          }
+          },
+          isCaptainMode ? "Captain" : ""
         );
 
         if (typeof fetchSessions === "function") {
@@ -411,7 +416,9 @@ const ChatWindow = ({
             display: "flex",
             alignItems: "center",
             gap: 1,
-            width: { xs: "50%", md: "80%" },
+            flex: 1,
+            minWidth: 0,
+            mr: 2,
           }}
         >
           <Message size={22} color={mode === "dark" ? "#1cb0f6" : "#106BA3"} />
@@ -420,7 +427,6 @@ const ChatWindow = ({
             variant="h4"
             sx={{
               color: "text.primary",
-              width: "80%",
               whiteSpace: "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -437,23 +443,87 @@ const ChatWindow = ({
           sx={{
             display: "flex",
             alignItems: "center",
-            gap: 1,
-            cursor: "pointer",
+            gap: { xs: 1, sm: 2 },
+            flexShrink: 0,
+            whiteSpace: "nowrap",
           }}
         >
-          <Saveoutlined
-            size={22}
-            color={mode === "dark" ? "#1cb0f6" : "#106BA3"}
-          />
-          {/* <SaveIcon size={22} color={mode === "dark" ? "#1cb0f6" : "#106BA3"} /> */}
-          <Typography
-            variant="body1"
+          {/* Captain Role Toggle Button */}
+          <Box
+            onClick={() => setIsCaptainMode(!isCaptainMode)}
             sx={{
-              color: "text.primary",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 0.5,
+              cursor: "pointer",
+              px: 1,
+              py: 0.35,
+              borderRadius: "14px",
+              fontSize: "0.74rem",
+              fontWeight: 600,
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+              transition: "all 0.2s ease-in-out",
+              userSelect: "none",
+              backgroundColor: isCaptainMode
+                ? (mode === "dark" ? "rgba(28, 176, 246, 0.18)" : "rgba(16, 107, 163, 0.1)")
+                : (mode === "dark" ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.04)"),
+              border: "1px solid",
+              borderColor: isCaptainMode
+                ? (mode === "dark" ? "#1cb0f6" : "#106BA3")
+                : (mode === "dark" ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.1)"),
+              color: isCaptainMode
+                ? (mode === "dark" ? "#1cb0f6" : "#106BA3")
+                : "text.secondary",
+              "&:hover": {
+                transform: "translateY(-1px)",
+                boxShadow: isCaptainMode
+                  ? (mode === "dark" ? "0 2px 6px rgba(28, 176, 246, 0.25)" : "0 2px 6px rgba(16, 107, 163, 0.18)")
+                  : (mode === "dark" ? "0 2px 6px rgba(255, 255, 255, 0.04)" : "0 2px 6px rgba(0, 0, 0, 0.04)"),
+              },
             }}
           >
-            {"Save Chat"}
-          </Typography>
+            <span style={{ fontSize: "0.78rem" }}>⚓</span>
+            <span>Captain Mode</span>
+            <Box
+              sx={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                backgroundColor: isCaptainMode ? "#22c55e" : "#94a3b8",
+                boxShadow: isCaptainMode ? "0 0 5px #22c55e" : "none",
+                ml: 0.3,
+              }}
+            />
+          </Box>
+
+          {/* Save Chat Button */}
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: 0.8,
+              cursor: "pointer",
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+            }}
+          >
+            <Saveoutlined
+              size={20}
+              color={mode === "dark" ? "#1cb0f6" : "#106BA3"}
+            />
+            {/* <SaveIcon size={22} color={mode === "dark" ? "#1cb0f6" : "#106BA3"} /> */}
+            <Typography
+              variant="body1"
+              sx={{
+                color: "text.primary",
+                whiteSpace: "nowrap",
+                fontSize: { xs: "0.85rem", sm: "0.95rem" },
+              }}
+            >
+              {"Save Chat"}
+            </Typography>
+          </Box>
         </Box>
       </Box>
 
@@ -571,6 +641,8 @@ const ChatWindow = ({
             </IconButton>
           </Box>
         )}
+
+
         <Box
           sx={{
             position: "relative",

@@ -43,7 +43,7 @@ export const ensureSession = async (currentSessionId, userId) => {
   return session.session_id;
 };
 
-export const sendMessage = async (sessionId, messageText, userId, signal) => {
+export const sendMessage = async (sessionId, messageText, userId, signal, role = "") => {
   try {
     const resolvedUserId = userId || localStorage.getItem("userId") || "guest";
     const response = await axios.post(
@@ -52,6 +52,7 @@ export const sendMessage = async (sessionId, messageText, userId, signal) => {
         content: messageText,
         session_id: sessionId,
         user_id: String(resolvedUserId),
+        role: role || "",
       },
       {
         headers: {
@@ -75,7 +76,7 @@ export const sendMessage = async (sessionId, messageText, userId, signal) => {
   }
 };
 
-export const sendMessageStream = async (sessionId, messageText, userId, signal, onChunk) => {
+export const sendMessageStream = async (sessionId, messageText, userId, signal, onChunk, role = "") => {
   try {
     const resolvedUserId = userId || localStorage.getItem("userId") || "guest";
     const response = await fetch(`${APP_URL}/chat`, {
@@ -88,6 +89,7 @@ export const sendMessageStream = async (sessionId, messageText, userId, signal, 
         content: messageText,
         session_id: sessionId,
         user_id: String(resolvedUserId),
+        role: role || "",
       }),
       signal,
     });

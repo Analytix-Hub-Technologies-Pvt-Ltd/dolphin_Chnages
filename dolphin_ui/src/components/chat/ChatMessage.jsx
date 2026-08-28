@@ -11,143 +11,142 @@ import { VideoIcon } from "../../assets/svgIcons/VideoIcon";
 import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 import { DocumentIcon } from "../../assets/svgIcons/DocumentIcon";
 import MediaPreviewModal from "./MediaPreviewModal";
+const exportMarkdownToWordDoc = (markdownText, filename = "document.doc") => {
+  const htmlBody = sanitizeMarkdown(markdownText);
 
-const drawMarkdownToPdf = (doc, markdownText) => {
-  const pageHeight = doc.internal.pageSize.height; // in mm
-  const pageWidth = doc.internal.pageSize.width;   // in mm
-  const margin = 20; // 20mm margin
-  const contentWidth = pageWidth - 2 * margin;
-  
-  let y = 25; // start at 25mm
-  
-  // Split into lines
-  const lines = markdownText.split("\n");
-  
-  for (let line of lines) {
-    line = line.trim();
-    if (!line) {
-      y += 4; // spacing for empty lines
-      continue;
-    }
-    
-    let fontSize = 10;
-    let isHeading = false;
-    let indent = 0;
-    
-    // Check heading level
-    if (line.startsWith("# ")) {
-      fontSize = 20;
-      line = line.slice(2);
-      isHeading = true;
-    } else if (line.startsWith("## ")) {
-      fontSize = 15;
-      line = line.slice(3);
-      isHeading = true;
-    } else if (line.startsWith("### ")) {
-      fontSize = 12;
-      line = line.slice(4);
-      isHeading = true;
-    } else if (line.startsWith("#### ")) {
-      fontSize = 11;
-      line = line.slice(5);
-      isHeading = true;
-    } else if (line.startsWith("- ") || line.startsWith("* ")) {
-      indent = 8;
-      line = line.slice(2);
-    } else if (/^\d+\.\s/.test(line)) {
-      indent = 8;
-    }
-    
-    const lineHeight = fontSize * 0.352778 * 1.35;
-    
-    // Page break check before drawing
-    if (y + lineHeight > pageHeight - margin) {
-      doc.addPage();
-      y = 25;
-    }
-    
-    doc.setFontSize(fontSize);
-    
-    if (isHeading) {
-      doc.setFont("Helvetica", "bold");
-      y += 4; // spacing before heading
-      
-      const wrappedHeading = doc.splitTextToSize(line, contentWidth);
-      for (const hLine of wrappedHeading) {
-        if (y + lineHeight > pageHeight - margin) {
-          doc.addPage();
-          y = 25;
-          doc.setFont("Helvetica", "bold");
-          doc.setFontSize(fontSize);
+  const wordDocumentHtml = `
+    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+    <head>
+      <meta charset="utf-8">
+      <title>${filename.replace(/\.[^/.]+$/, "")}</title>
+      <!--[if gte mso 9]>
+      <xml>
+        <w:WordDocument>
+          <w:View>Print</w:View>
+          <w:Zoom>100</w:Zoom>
+          <w:DoNotOptimizeForBrowser/>
+        </w:WordDocument>
+      </xml>
+      <![endif]-->
+      <style>
+        @page Section1 {
+          size: 8.5in 11.0in;
+          margin: 1.0in 1.0in 1.0in 1.0in;
+          mso-header-margin: 0.5in;
+          mso-footer-margin: 0.5in;
+          mso-paper-source: 0;
         }
-        doc.text(hLine, margin, y);
-        y += lineHeight;
-      }
-      y += 2; // spacing after heading
-      continue;
-    }
-    
-    // Process list bullet
-    if (indent > 0) {
-      doc.setFont("Helvetica", "bold");
-      if (line.startsWith("- ") || line.startsWith("* ")) {
-        doc.text("•", margin + 3, y);
-      }
-    }
-    
-    // Draw paragraph/list item with inline bold formatting
-    const segments = line.split("**");
-    let segmentX = margin + indent;
-    
-    // Parse segment words
-    let wordsWithStyle = [];
-    segments.forEach((seg, index) => {
-      const isBold = index % 2 === 1;
-      // Split into words while keeping spaces
-      const parts = seg.split(/(\s+)/);
-      parts.forEach(part => {
-        if (part) {
-          wordsWithStyle.push({ text: part, bold: isBold });
+        div.Section1 {
+          page: Section1;
         }
-      });
-    });
-    
-    for (let wordObj of wordsWithStyle) {
-      const style = wordObj.bold ? "bold" : "normal";
-      doc.setFont("Helvetica", style);
-      
-      const wordWidth = doc.getTextWidth(wordObj.text);
-      
-      if (segmentX + wordWidth > pageWidth - margin) {
-        // Line wrap
-        y += lineHeight;
-        if (y + lineHeight > pageHeight - margin) {
-          doc.addPage();
-          y = 25;
+        body {
+          font-family: 'Calibri', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+          font-size: 11pt;
+          line-height: 1.5;
+          color: #222222;
         }
-        segmentX = margin + indent;
-        
-        // Skip leading space on wrapped line
-        if (wordObj.text.trim() === "") continue;
-      }
-      
-      doc.setFont("Helvetica", style);
-      doc.setFontSize(fontSize);
-      doc.text(wordObj.text, segmentX, y);
-      segmentX += wordWidth;
-    }
-    
-    y += lineHeight + 1; // small gap between blocks
-  }
-  
-  // Add page numbers
-  const totalPages = doc.internal.getNumberOfPages();
-  for (let i = 1; i <= totalPages; i++) {
-    doc.setPage(i);
-    doc.setFont("Helvetica", "normal");
-    doc.setFontSize(8);
-    doc.text(`Page ${i} of ${totalPages}`, pageWidth / 2, pageHeight - 10, { align: "center" });
-  }
+        h1 {
+          font-size: 18pt;
+          font-weight: bold;
+          color: #1A365D;
+          margin-top: 18pt;
+          margin-bottom: 6pt;
+          border-bottom: 2px solid #1A365D;
+          padding-bottom: 4pt;
+        }
+        h2 {
+          font-size: 14pt;
+          font-weight: bold;
+          color: #2B6CB0;
+          margin-top: 14pt;
+          margin-bottom: 4pt;
+        }
+        h3 {
+          font-size: 12pt;
+          font-weight: bold;
+          color: #2D3748;
+          margin-top: 10pt;
+          margin-bottom: 3pt;
+        }
+        h4 {
+          font-size: 11pt;
+          font-weight: bold;
+          color: #4A5568;
+          margin-top: 8pt;
+          margin-bottom: 2pt;
+        }
+        p {
+          margin-top: 0;
+          margin-bottom: 8pt;
+        }
+        ul, ol {
+          margin-top: 0;
+          margin-bottom: 8pt;
+          padding-left: 24pt;
+        }
+        li {
+          margin-bottom: 4pt;
+        }
+        table {
+          border-collapse: collapse;
+          width: 100%;
+          margin-top: 10pt;
+          margin-bottom: 12pt;
+        }
+        th, td {
+          border: 1px solid #CBD5E0;
+          padding: 6pt 8pt;
+          text-align: left;
+          font-size: 10pt;
+        }
+        th {
+          background-color: #EDF2F7;
+          font-weight: bold;
+          color: #2D3748;
+        }
+        blockquote {
+          border-left: 3pt solid #3182CE;
+          margin: 8pt 0;
+          padding-left: 12pt;
+          color: #4A5568;
+          font-style: italic;
+        }
+        code {
+          font-family: 'Consolas', 'Courier New', monospace;
+          background-color: #F7FAFC;
+          padding: 2pt 4pt;
+          font-size: 9.5pt;
+        }
+        pre {
+          background-color: #F7FAFC;
+          border: 1px solid #E2E8F0;
+          padding: 8pt;
+          font-family: 'Consolas', 'Courier New', monospace;
+          font-size: 9.5pt;
+          margin-bottom: 8pt;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="Section1">
+        ${htmlBody}
+      </div>
+    </body>
+    </html>
+  `;
+
+  const blob = new Blob(['\ufeff', wordDocumentHtml], {
+    type: 'application/msword;charset=utf-8'
+  });
+
+  const downloadUrl = URL.createObjectURL(blob);
+  const downloadLink = document.createElement('a');
+  downloadLink.href = downloadUrl;
+  downloadLink.download = filename;
+  document.body.appendChild(downloadLink);
+  downloadLink.click();
+  document.body.removeChild(downloadLink);
+  URL.revokeObjectURL(downloadUrl);
 };
 
 const ChatMessage = ({
@@ -161,7 +160,7 @@ const ChatMessage = ({
 }) => {
   const [showAllVideos, setShowAllVideos] = useState(false);
   const [showAllPdfs, setShowAllPdfs] = useState(false);
-  const [pdfError, setPdfError] = useState("");
+  const [docError, setDocError] = useState("");
   const isUser = msg.role === "user";
   const { mode } = useThemeMode();
   const [previewMedia, setPreviewMedia] = useState({
@@ -186,18 +185,10 @@ const ChatMessage = ({
   const isGapAnalysis = msg.metadata?.category === "GAP_ANALYSIS" || (msg.sections && msg.sections[0] && msg.sections[0].topic_code === "GAP_ANALYSIS");
   const showDownloadButton = isGapAnalysis && !msg.isThinking;
 
-  const handleDownloadPdf = async () => {
+  const handleDownloadWordDoc = () => {
     try {
-      setPdfError("");
-      const { jsPDF } = await import("./jspdf_lib");
-      
-      if (!jsPDF) {
-        throw new Error("jsPDF library not loaded");
-      }
-      
-      const doc = new jsPDF();
-      drawMarkdownToPdf(doc, msg.content);
-      
+      setDocError("");
+
       let documentName = "";
       if (msg.sections && msg.sections[0] && msg.sections[0].topic_name) {
         const topicName = msg.sections[0].topic_name;
@@ -205,25 +196,25 @@ const ChatMessage = ({
           documentName = topicName.replace("Gap Analysis - ", "");
         }
       }
-      
+
       const today = new Date();
       const YYYY = today.getFullYear();
       const MM = String(today.getMonth() + 1).padStart(2, "0");
       const DD = String(today.getDate()).padStart(2, "0");
       const todayStr = `${YYYY}-${MM}-${DD}`;
-      
+
       let filename = "";
       if (documentName) {
         const safeDocName = documentName.replace(/\.[^/.]+$/, "");
-        filename = `${safeDocName}_Gap_Analysis_${todayStr}.pdf`;
+        filename = `${safeDocName}_Gap_Analysis_${todayStr}.doc`;
       } else {
-        filename = `Marine_Gap_Analysis_${todayStr}.pdf`;
+        filename = `Marine_Gap_Analysis_${todayStr}.doc`;
       }
-      
-      doc.save(filename);
+
+      exportMarkdownToWordDoc(msg.content, filename);
     } catch (err) {
-      console.error("PDF generation failed:", err);
-      setPdfError("Unable to generate PDF. Please try again.");
+      console.error("Word Doc generation failed:", err);
+      setDocError("Unable to generate Word document. Please try again.");
     }
   };
 
@@ -352,9 +343,9 @@ const ChatMessage = ({
                     borderColor: mode === "dark" ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)",
                   }}
                 >
-                  <Tooltip title="Download PDF">
+                  <Tooltip title="Download Word Document">
                     <IconButton
-                      onClick={handleDownloadPdf}
+                      onClick={handleDownloadWordDoc}
                       size="small"
                       sx={{
                         color: "primary.main",
@@ -373,15 +364,15 @@ const ChatMessage = ({
                       }}
                     >
                       <DownloadIcon fontSize="small" />
-                      <span>Download PDF</span>
+                      <span>Download Word Doc</span>
                     </IconButton>
                   </Tooltip>
-                  {pdfError && (
+                  {docError && (
                     <Typography
                       variant="caption"
                       sx={{ color: "error.main", mt: 0.5 }}
                     >
-                      {pdfError}
+                      {docError}
                     </Typography>
                   )}
                 </Box>
@@ -664,7 +655,7 @@ const ChatMessage = ({
                       display: "flex",
                       flexDirection: "column",
                       justifyContent: "space-between",
-                     width: { xs: "43%", sm: "23%" },
+                      width: { xs: "43%", sm: "23%" },
                       height: { xs: 140, sm: 170 },
                       textDecoration: "none",
                       borderRadius: 2,
