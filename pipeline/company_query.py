@@ -15,7 +15,7 @@ USER QUESTION:
 LAYER 2 — COMPANY-SPECIFIC SMS/QMS DOCUMENTS:
 {company_documents}
 
-LAYER 1 — CORE MARITIME STANDARD CONTEXT (SOLAS / MARPOL / IMO / STCW):
+LAYER 1 — DOLPHIN COURSE LESSONS & MARITIME TECHNICAL KNOWLEDGE BASE:
 {core_context}
 
 CRITICAL SYNTHESIS INSTRUCTIONS:
@@ -32,33 +32,31 @@ Structure your response into 3 DISTINCT, HIGHLY READABLE SECTIONS:
 - Include ALL relevant procedural steps, roles, responsibilities, checklist tables, and operational thresholds explicitly stated in the Company Documents.
 - Do NOT artificially shorten or omit checklist items.
 - Formatting of lists and tables:
+  - If data is present in the source text for any table column, show that real data clearly.
+  - If no data or check is present for a column, leave that table cell clean and empty/blank (do NOT output dummy `[x]` or `[ ]` brackets).
   - ONLY use the 5-column safety checklist layout (`| Check | Ship | Terminal | Code | Remarks |`) for actual Ship/Shore Safety Checklists (SSSCL), Crude Oil Washing (COW) checklists, or safety verification checklists.
-  - For other tables or lists (such as operational sequences, responsibility matrices, activity lists, equipment tables), you MUST use a normal markdown table matching the actual columns from the source document (e.g., `| Activity | Responsibility |`). Do NOT add `Ship`, `Terminal`, `Code` columns or checkboxes `[ ]` to these general tables.
-  - In safety checklist tables, populate the columns exactly as follows:
-    - The first column `Check` must contain only the description of the check/procedure item.
-    - The second column `Ship` must contain a checkbox (`[ ]` or `[x]`) ONLY if a check/data is explicitly applicable or indicated for the Ship in the source text. If no check/data is present for the Ship, leave the Ship column completely empty/blank (do NOT put `[ ]`).
-    - The third column `Terminal` must contain a checkbox (`[ ]` or `[x]`) ONLY if a check/data is explicitly applicable or indicated for the Terminal in the source text. If no check/data is present for the Terminal, leave the Terminal column completely empty/blank (do NOT put `[ ]`).
-    - The fourth column `Code` MUST contain the verification code (like `R`, `A`, `P`) ONLY if it is explicitly specified in the source document. Do NOT fill the Code column with default values; leave it empty if no code is specified.
-    - The fifth column `Remarks` must contain any remarks, notes, explanations, or conditions (e.g., "such as failure of IG system, increase in O2 content, or drop in pressure" must go in the Remarks column, not in the Check or Code columns). Leave it empty if there are no remarks.
-    - Ensure that every row strictly aligns with this column order. Do NOT default to putting `[ ]` in the Ship or Terminal columns; leave them empty if no check/data is specified in the source text.
+  - For other tables or lists (such as operational sequences, responsibility matrices, activity lists, equipment tables), you MUST use a normal markdown table matching the actual columns from the source document (e.g., `| Activity | Responsibility |`).
 - Use ONLY facts from the Company Documents for this section. Never invent company procedures.
 
 ### 📘 2. Dolphin internal knowledge base
-- Provide the comparative international maritime framework (SOLAS, MARPOL, STCW, ISM Code, or IMO Resolutions).
-- Summarize the global regulatory baseline and industry best practices.
+- You MUST synthesize comprehensive, step-by-step practical technical knowledge, engineering principles, operating precautions, tool usage, inspection criteria, and operational procedures directly from Dolphin's internal course lessons and knowledge base provided in LAYER 1.
+- DO NOT output generic summaries of international conventions or convention acronyms (STRICTLY DO NOT output lists of SOLAS, MARPOL, STCW, ISM Code bullet points).
+- Instead, provide the substantive, detailed technical procedure and operational guide from the Dolphin course lessons (e.g., explaining equipment functioning, step-by-step overhaul/testing procedures, pocket cleaning, lapping with jigs, nozzle hole inspection with magnifying glass or go/no-go gauges, atomizer spray hole cleaning with special hand drills, spray pattern testing on test pumps, pressure adjustment, and operational precautions).
+- Present this in substantive paragraphs and detailed procedural points based directly on Dolphin's course content.
 
 ### 🔍 3. Comparison & AI Advisory Observations
-- **Alignment:** Highlight where {company_name}'s procedures align with international standards.
+- **Alignment:** Highlight where {company_name}'s procedures align with international standards and technical best practices.
 - **💡 AI Advisory Observation(s):** 
   • Identify any safety controls, updated regulatory requirements, or industry recommendations that could enhance safety or operational clarity.
-  • Clearly state the rationale and supporting regulatory/industry reference.
+  • Clearly state the rationale and supporting technical/industry reference.
   • If company procedures are fully comprehensive and aligned, state that no gaps were identified.
 - **Governance Notice:** End this section with the mandatory notice:
   *(AI Advisory Observation only — any procedure update must be reviewed by Company HSQE and processed through formal Management of Change [MoC]).*
 
 RULES:
 - If the Company Documents do not contain information addressing the question, output ONLY: NO_COMPANY_DATA
-- If the document contains a safety verification checklist (like Ship/Shore Safety Checklist or COW checklist), you MUST format it as a 5-column table: `| Check | Ship | Terminal | Code | Remarks |`. Do NOT default to putting `[ ]` checkboxes in the Ship/Terminal columns; leave them completely empty/blank unless the check/data is explicitly specified for that column in the source text. For other lists, tables or sequences (like cargo operations, activity schedules, or responsibility grids), use normal markdown tables with columns matching the source document. Do NOT use bullet points or numbered lists.
+- In all tables: show real text data if present; leave cells blank if absent. NEVER output `[x]`, `[X]`, or `[ ]` brackets.
+- Section 2 must contain detailed, step-by-step engineering/operational procedures from Dolphin lessons, NOT generic SOLAS/MARPOL convention lists.
 - Maintain clear Markdown headings and clean spacing.
 """
 
@@ -141,10 +139,24 @@ async def company_query_node(
         for chunk in company_chunks
     )
 
+    def _format_core_chunk(c: Dict[str, Any]) -> str:
+        topic = c.get("topic_name") or c.get("title") or c.get("topic") or "Dolphin Course Lesson"
+        course = c.get("course_name") or c.get("course") or ""
+        content = (
+            c.get("topic_content")
+            or c.get("content")
+            or c.get("text")
+            or c.get("summary")
+            or ""
+        ).strip()
+        header = f"Course: {course} | Topic: {topic}" if course else f"Topic: {topic}"
+        return f"{header}\n{content}"
+
     core_chunks = state.get("retrieval_chunks", [])
     core_context_text = "\n\n---\n\n".join(
-        f"Topic: {c.get('topic_name', 'Maritime Standard')}\n{c.get('content', '')}"
-        for c in core_chunks[:4]
+        _format_core_chunk(c)
+        for c in core_chunks[:6]
+        if _format_core_chunk(c).strip()
     )
 
     prompt = COMPANY_HSQE_PROMPT.format(
@@ -294,7 +306,7 @@ async def company_query_node(
                                     ship_check = normalize_checkbox(brackets[0])
                         
                         # Format row: | Check | Ship | Terminal | Code | Remarks |
-                        rows_str.append(f"| {item_num}. {item_desc} | {ship_check} | {terminal_check} | R | |")
+                        rows_str.append(f"| {item_num}. {item_desc} |  |  | R | |")
                     
                     # Determine doc title dynamically from retrieved chunks
                     doc_title_val = "Shipboard SMS Manual (Vol. II)-Oil Tanker 2016.docx"
@@ -324,6 +336,9 @@ COW Entry and Cleaning Checklist
                             answer = custom_sec1.strip() + "\n\n" + answer[match2.start():]
                         else:
                             answer = custom_sec1.strip()
+
+            # Sanitize any accidental bracket checkboxes
+            answer = re.sub(r'\[\s*[xX]?\s*\]', '', answer)
 
             state["company_answer"] = answer
             logger.info("✅ Company HSQE answer synthesized successfully")
