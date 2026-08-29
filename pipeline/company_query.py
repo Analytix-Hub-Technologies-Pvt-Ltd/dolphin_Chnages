@@ -119,13 +119,6 @@ async def company_query_node(
     role = user_profile.get("role") or user_profile.get("Role") or "Seafarer"
     ship_type = user_profile.get("ship_type") or user_profile.get("ShipType") or "Vessel"
 
-    # Check if the query is company-related
-    query = state.get("standalone_query") or state.get("current_query", "")
-    if not is_company_query(query, company_name):
-        logger.info(f"Query '{query}' is not classified as company-related. Skipping company query node.")
-        state["company_answer"] = None
-        return state
-
     logger.info("========== COMPANY QUERY NODE ==========")
     logger.info(f"company_id = {user_profile.get('company_id') or user_profile.get('CompanyId')}")
     logger.info(f"company_chunks = {len(company_chunks)}")
