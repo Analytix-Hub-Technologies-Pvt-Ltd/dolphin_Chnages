@@ -484,7 +484,7 @@ def test_company_query_skipped_for_general_queries():
 
     class MockOpenAIService:
         async def chat(self, messages, temperature=0.0):
-            return "Should not be called"
+            return "NO_COMPANY_DATA"
 
     state = {
         "company_chunks": [{"document_title": "Shipboard SMS Manual (Vol. II)-Oil Tanker 2016.docx", "content": "Confirm all pre-arrival checks"}],

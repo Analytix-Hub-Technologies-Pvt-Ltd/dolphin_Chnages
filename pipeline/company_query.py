@@ -1,3 +1,4 @@
+import re
 from typing import Any, Dict
 from loguru import logger
 
@@ -62,7 +63,6 @@ RULES:
 
 
 def is_company_query(query: str, company_name: str) -> bool:
-    import re
     q = query.lower()
     
     # 1. Check for explicit company words/identifiers
@@ -196,8 +196,6 @@ async def company_query_node(
             )
             
             if is_cow_query or is_cow_in_answer:
-                import re
-                
                 # Check if there is actual COW checklist data in the company chunks or answer.
                 # If there's no COW reference or checks in chunks, or LLM generated NO_COMPANY_DATA,
                 # we don't blindly generate the checklist. We only proceed if we find some indications of COW checklist

@@ -4,6 +4,19 @@ from loguru import logger
 from pipeline.manual_filter import is_manual_allowed_for_ship_type
 
 
+def is_company_match(chunk_cid: Any, user_cid: Any, company_name: str = "") -> bool:
+    c_chunk = str(chunk_cid).strip() if chunk_cid is not None else ""
+    c_user = str(user_cid).strip() if user_cid is not None else ""
+    c_name = company_name.lower().strip() if company_name else ""
+
+    if c_chunk == c_user:
+        return True
+    # CMS Demo Company (Company ID 8 in CMS database/login API, 824866 in FAISS index)
+    if (c_chunk in {"8", "824866"} and c_user in {"8", "824866"}) or ("cms" in c_name and c_chunk == "824866"):
+        return True
+    return False
+
+
 async def company_retrieval_node(
     state: dict,
     company_vector_store,
@@ -12,9 +25,15 @@ async def company_retrieval_node(
 
     user_profile = state.get("user_profile", {}) or {}
     company_id = user_profile.get("company_id")
+    company_name = (
+        user_profile.get("company_name")
+        or user_profile.get("CompanyName")
+        or user_profile.get("company")
+        or ""
+    )
     ship_type = user_profile.get("ship_type") or user_profile.get("ShipType") or ""
 
-    if not company_id:
+    if not company_id and not company_name:
         logger.warning("No company_id found in user profile")
         state["company_chunks"] = []
         return state
@@ -47,7 +66,7 @@ async def company_retrieval_node(
     for i, chunk in enumerate(chunks):
         chunk_company_id = chunk.get("company_id")
 
-        if str(chunk_company_id) != str(company_id):
+        if not is_company_match(chunk_company_id, company_id, company_name):
             logger.info(
                 f"❌ Company mismatch for chunk {i}: chunk={chunk_company_id}, user={company_id}"
             )
