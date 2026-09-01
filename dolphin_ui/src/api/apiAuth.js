@@ -59,3 +59,42 @@ export const logout = async () => {
     localStorage.removeItem("userData");
   }
 };
+
+export const fetchUserProfile = async (userId) => {
+  try {
+    const resolvedUserId = userId || localStorage.getItem("userId");
+    if (!resolvedUserId) return null;
+
+    const response = await axios.get(`${APP_URL}/login/user/${resolvedUserId}`, {
+      withCredentials: true,
+    });
+
+    if (response.data) {
+      const formattedData = {
+        user_id: response.data.id || response.data.user_id,
+        name: response.data.name,
+        email: response.data.email,
+        role: response.data.role,
+        company_name: response.data.company_name,
+        user_type: response.data.user_type,
+        ship_name: response.data.ship_name,
+        ship_type: response.data.ship_type,
+        user_name: response.data.user_name,
+      };
+      localStorage.setItem("userData", JSON.stringify(formattedData));
+      return formattedData;
+    }
+  } catch (error) {
+    console.error("Unable to fetch user profile:", error);
+  }
+
+  // Fallback to local storage if available
+  try {
+    const stored = localStorage.getItem("userData");
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (e) {}
+
+  return null;
+};

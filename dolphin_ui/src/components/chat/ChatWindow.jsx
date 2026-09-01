@@ -18,6 +18,7 @@ import DolphinIconW from "../../assets/images/dolphin_w.png";
 import { getContentWidth } from "../../theme/layoutScale";
 import { StopIcon } from "../../assets/svgIcons/StopIcon";
 import axios from "axios";
+import { fetchUserProfile } from "../../api/apiAuth";
 
 export const sanitizeMarkdown = (markdownText) => {
   if (!markdownText) return "";
@@ -90,6 +91,44 @@ const ChatWindow = ({
   const [selectedFile, setSelectedFile] = useState(null);
   const [isCaptainMode, setIsCaptainMode] = useState(false);
   const { mode } = useThemeMode();
+
+  const [userProfile, setUserProfile] = useState(() => {
+    try {
+      const stored = localStorage.getItem("userData");
+      return stored ? JSON.parse(stored) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      const currentUserId = userId || localStorage.getItem("userId");
+      if (currentUserId) {
+        const profile = await fetchUserProfile(currentUserId);
+        if (profile) {
+          setUserProfile(profile);
+        }
+      }
+    };
+    loadProfile();
+  }, [userId]);
+
+  const isCaptainOrMaster = Boolean(
+    userProfile &&
+      ((userProfile.role &&
+        (userProfile.role.toLowerCase().includes("captain") ||
+          userProfile.role.toLowerCase().includes("master"))) ||
+        (userProfile.user_type &&
+          (userProfile.user_type.toLowerCase().includes("captain") ||
+            userProfile.user_type.toLowerCase().includes("master"))) ||
+        (userProfile.rank &&
+          (userProfile.rank.toLowerCase().includes("captain") ||
+            userProfile.rank.toLowerCase().includes("master"))) ||
+        (userProfile.designation &&
+          (userProfile.designation.toLowerCase().includes("captain") ||
+            userProfile.designation.toLowerCase().includes("master"))))
+  );
 
   const bottomRef = useRef(null);
   const abortControllerRef = useRef(null);
@@ -333,11 +372,85 @@ const ChatWindow = ({
             } else if (chunk.type === "suggestions") {
               assistantMsg.question_suggestions = chunk.question_suggestions || [];
             } else if (chunk.type === "media") {
-              assistantMsg.videos = chunk.videos || [];
-              assistantMsg.images = chunk.images || [];
-              assistantMsg.pdfs = chunk.pdfs || [];
+              const isOutOfScope =
+                assistantMsg.metadata?.category === "OUT_OF_SCOPE" ||
+                (typeof assistantMsg.content === "string" && assistantMsg.content.includes("This is not part of the available course material"));
+              if (isOutOfScope) {
+                assistantMsg.videos = [];
+                assistantMsg.images = [];
+                assistantMsg.pdfs = [];
+              } else {
+                const currentVideos = assistantMsg.videos || [];
+                const incomingVideos = chunk.videos || [];
+                const seenKeys = new Set();
+                const mergedVideos = [];
+
+                const addVid = (v) => {
+                  const url = v?.url || v?.Url || v?.videourl || "";
+                  const id = v?.id || v?.Id || v?.video_id || "";
+                  const title = (v?.title || v?.Title || "").trim().toLowerCase();
+                  const uuidMatch = (url + " " + id).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+                  const uuid = uuidMatch ? uuidMatch[0].toLowerCase() : "";
+                  const key = uuid || id || title || url;
+                  if (!key || seenKeys.has(key)) return;
+                  seenKeys.add(key);
+                  if (title && title.length > 3) {
+                    if (seenKeys.has(`title:${title}`)) return;
+                    seenKeys.add(`title:${title}`);
+                  }
+                  mergedVideos.push(v);
+                };
+
+                for (const v of currentVideos) addVid(v);
+                for (const v of incomingVideos) addVid(v);
+
+                assistantMsg.videos = mergedVideos;
+                assistantMsg.images = chunk.images || assistantMsg.images || [];
+                assistantMsg.pdfs = chunk.pdfs || assistantMsg.pdfs || [];
+              }
             } else if (chunk.type === "company_content") {
               assistantMsg.company_answer = chunk.content;
+            } else if (chunk.type === "transcript_result") {
+              const isOutOfScope =
+                assistantMsg.metadata?.category === "OUT_OF_SCOPE" ||
+                (typeof assistantMsg.content === "string" && assistantMsg.content.includes("This is not part of the available course material"));
+              if (isOutOfScope) {
+                assistantMsg.videos = [];
+              } else {
+                const currentVideos = assistantMsg.videos || [];
+                const incomingChunks = chunk.chunks || [];
+                const seenKeys = new Set();
+                const mergedVideos = [];
+
+                const addVid = (v) => {
+                  const url = v?.url || v?.Url || v?.videourl || "";
+                  const id = v?.id || v?.Id || v?.video_id || "";
+                  const title = (v?.title || v?.Title || "").trim().toLowerCase();
+                  const uuidMatch = (url + " " + id).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+                  const uuid = uuidMatch ? uuidMatch[0].toLowerCase() : "";
+                  const key = uuid || id || title || url;
+                  if (!key || seenKeys.has(key)) return;
+                  seenKeys.add(key);
+                  if (title && title.length > 3) {
+                    if (seenKeys.has(`title:${title}`)) return;
+                    seenKeys.add(`title:${title}`);
+                  }
+                  mergedVideos.push(v);
+                };
+
+                for (const v of currentVideos) addVid(v);
+                for (const c of incomingChunks) {
+                  const v = {
+                    id: c.video_id || c.id,
+                    title: c.video_title || c.title || "Video",
+                    thumbnail: c.video_thumbnail || c.thumbnail || "",
+                    url: c.video_url || c.url || (c.video_id ? `/storage/videos/${c.video_id}.mp4` : ""),
+                    duration: c.video_duration || c.duration || "",
+                  };
+                  addVid(v);
+                }
+                assistantMsg.videos = mergedVideos;
+              }
             }
 
             setmessages((prev = []) => {
@@ -349,7 +462,7 @@ const ChatWindow = ({
               return nextMsgs;
             });
           },
-          isCaptainMode ? "Captain" : ""
+          isCaptainMode && isCaptainOrMaster ? "Captain" : ""
         );
 
         if (typeof fetchSessions === "function") {
@@ -448,54 +561,56 @@ const ChatWindow = ({
             whiteSpace: "nowrap",
           }}
         >
-          {/* Captain Role Toggle Button */}
-          <Box
-            onClick={() => setIsCaptainMode(!isCaptainMode)}
-            sx={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 0.5,
-              cursor: "pointer",
-              px: 1,
-              py: 0.35,
-              borderRadius: "14px",
-              fontSize: "0.74rem",
-              fontWeight: 600,
-              flexShrink: 0,
-              whiteSpace: "nowrap",
-              transition: "all 0.2s ease-in-out",
-              userSelect: "none",
-              backgroundColor: isCaptainMode
-                ? (mode === "dark" ? "rgba(28, 176, 246, 0.18)" : "rgba(16, 107, 163, 0.1)")
-                : (mode === "dark" ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.04)"),
-              border: "1px solid",
-              borderColor: isCaptainMode
-                ? (mode === "dark" ? "#1cb0f6" : "#106BA3")
-                : (mode === "dark" ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.1)"),
-              color: isCaptainMode
-                ? (mode === "dark" ? "#1cb0f6" : "#106BA3")
-                : "text.secondary",
-              "&:hover": {
-                transform: "translateY(-1px)",
-                boxShadow: isCaptainMode
-                  ? (mode === "dark" ? "0 2px 6px rgba(28, 176, 246, 0.25)" : "0 2px 6px rgba(16, 107, 163, 0.18)")
-                  : (mode === "dark" ? "0 2px 6px rgba(255, 255, 255, 0.04)" : "0 2px 6px rgba(0, 0, 0, 0.04)"),
-              },
-            }}
-          >
-            <span style={{ fontSize: "0.78rem" }}>⚓</span>
-            <span>Captain Mode</span>
+          {/* Captain Role Toggle Button - only visible for Captain or Master of ship */}
+          {isCaptainOrMaster && (
             <Box
+              onClick={() => setIsCaptainMode(!isCaptainMode)}
               sx={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                backgroundColor: isCaptainMode ? "#22c55e" : "#94a3b8",
-                boxShadow: isCaptainMode ? "0 0 5px #22c55e" : "none",
-                ml: 0.3,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 0.5,
+                cursor: "pointer",
+                px: 1,
+                py: 0.35,
+                borderRadius: "14px",
+                fontSize: "0.74rem",
+                fontWeight: 600,
+                flexShrink: 0,
+                whiteSpace: "nowrap",
+                transition: "all 0.2s ease-in-out",
+                userSelect: "none",
+                backgroundColor: isCaptainMode
+                  ? (mode === "dark" ? "rgba(28, 176, 246, 0.18)" : "rgba(16, 107, 163, 0.1)")
+                  : (mode === "dark" ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.04)"),
+                border: "1px solid",
+                borderColor: isCaptainMode
+                  ? (mode === "dark" ? "#1cb0f6" : "#106BA3")
+                  : (mode === "dark" ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.1)"),
+                color: isCaptainMode
+                  ? (mode === "dark" ? "#1cb0f6" : "#106BA3")
+                  : "text.secondary",
+                "&:hover": {
+                  transform: "translateY(-1px)",
+                  boxShadow: isCaptainMode
+                    ? (mode === "dark" ? "0 2px 6px rgba(28, 176, 246, 0.25)" : "0 2px 6px rgba(16, 107, 163, 0.18)")
+                    : (mode === "dark" ? "0 2px 6px rgba(255, 255, 255, 0.04)" : "0 2px 6px rgba(0, 0, 0, 0.04)"),
+                },
               }}
-            />
-          </Box>
+            >
+              <span style={{ fontSize: "0.78rem" }}>⚓</span>
+              <span>Captain Mode</span>
+              <Box
+                sx={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  backgroundColor: isCaptainMode ? "#22c55e" : "#94a3b8",
+                  boxShadow: isCaptainMode ? "0 0 5px #22c55e" : "none",
+                  ml: 0.3,
+                }}
+              />
+            </Box>
+          )}
 
           {/* Save Chat Button */}
           <Box
@@ -550,25 +665,49 @@ const ChatWindow = ({
               [];
             const seenVideoKeys = new Set();
             const videos_suggestions = raw_videos.filter((v) => {
-              const key = v?.url || v?.Url || v?.videourl || v?.id || v?.Id || v?.title || v?.Title;
+              const url = v?.url || v?.Url || v?.videourl || "";
+              const id = v?.id || v?.Id || v?.video_id || "";
+              const title = (v?.title || v?.Title || "").trim().toLowerCase();
+              const uuidMatch = (url + " " + id).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+              const uuid = uuidMatch ? uuidMatch[0].toLowerCase() : "";
+              const key = uuid || id || title || url;
               if (!key || seenVideoKeys.has(key)) return false;
               seenVideoKeys.add(key);
+              if (title && title.length > 3) {
+                if (seenVideoKeys.has(`title:${title}`)) return false;
+                seenVideoKeys.add(`title:${title}`);
+              }
               return true;
             });
 
             const raw_images = msg?.images || msg?.metadata?.images || [];
             const seenImageKeys = new Set();
             const images_suggestions = raw_images.filter((img) => {
-              const key = img?.url || img?.Url || img?.id || img?.Id || img?.base64;
+              if (!img) return false;
+              const url = img?.url || img?.Url || "";
+              const id = img?.id || img?.Id || "";
+              const b64 = img?.base64 && typeof img?.base64 === "string" && img.base64.startsWith("data:image/") ? img.base64 : "";
+              if (!b64 && !url) return false;
+              if (url.includes("pdf_images")) return false;
+
+              const title = (img?.title || img?.Title || "").trim().toLowerCase();
+              const cleanTitle = title.replace(/[^a-z0-9]+/g, " ").trim();
+              const uuidMatch = (url + " " + id).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+              const uuid = uuidMatch ? uuidMatch[0].toLowerCase() : (id ? id.toLowerCase() : "");
+              const key = uuid || cleanTitle || url;
               if (!key || seenImageKeys.has(key)) return false;
               seenImageKeys.add(key);
+              if (cleanTitle && cleanTitle.length > 3) {
+                if (seenImageKeys.has(`title:${cleanTitle}`)) return false;
+                seenImageKeys.add(`title:${cleanTitle}`);
+              }
               return true;
             });
 
             const raw_pdfs = msg?.pdfs || msg?.metadata?.pdfs || [];
             const seenPdfKeys = new Set();
             const pdf_suggestions = raw_pdfs.filter((pdf) => {
-              const key = pdf?.url || pdf?.Url || pdf?.id || pdf?.Id || pdf?.title || pdf?.Title;
+              const key = pdf?.url || pdf?.Url || pdf?.link || pdf?.Link || pdf?.id || pdf?.Id || pdf?.title || pdf?.Title;
               if (!key || seenPdfKeys.has(key)) return false;
               seenPdfKeys.add(key);
               return true;

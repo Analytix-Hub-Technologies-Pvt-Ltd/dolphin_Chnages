@@ -46,6 +46,15 @@ const ChatSideBar = ({
 
   const [searchTerm, setSearchTerm] = useState("");
 
+  const [userData, setUserData] = useState(() => {
+    try {
+      const stored = localStorage.getItem("userData");
+      return stored ? JSON.parse(stored) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
       fetchSessions(searchTerm);
@@ -77,8 +86,6 @@ const ChatSideBar = ({
       color: "text.white",
     },
   });
-
-  const userData = JSON.parse(localStorage.getItem("userData"));
 
   const { fontLevel } = useThemeMode();
   return (
@@ -285,7 +292,9 @@ const ChatSideBar = ({
       </Box>
 
       <Box sx={{ display: "flex", alignItems: "center" }}>
-        <Avatar sx={{ width: 35, height: 35, bgcolor: "primary.main" }} />
+        <Avatar sx={{ width: 35, height: 35, bgcolor: "primary.main", fontSize: "0.9rem", fontWeight: 700 }}>
+          {userData?.name ? userData.name.charAt(0).toUpperCase() : "U"}
+        </Avatar>
         <Box
           sx={{ display: "flex", flexDirection: "column", width: "70%", pl: 1 }}
         >
@@ -295,7 +304,7 @@ const ChatSideBar = ({
               : ""}
           </Typography>
           <Typography variant="caption" color="primary.main" fontWeight={500}>
-            {userData.email}
+            {userData?.email || ""}
           </Typography>
         </Box>
         <IconButton

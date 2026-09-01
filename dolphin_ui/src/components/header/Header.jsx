@@ -11,13 +11,21 @@ import {
   Drawer,
   useMediaQuery,
   Divider,
+  Avatar,
+  Chip,
+  Tooltip,
 } from "@mui/material";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import LogoutOutlinedIcon from "@mui/icons-material/LogoutOutlined";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import MenuIcon from "@mui/icons-material/Menu";
 import TextFieldsIcon from "@mui/icons-material/TextFields";
+import BadgeOutlinedIcon from "@mui/icons-material/BadgeOutlined";
+import BusinessOutlinedIcon from "@mui/icons-material/BusinessOutlined";
+import DirectionsBoatOutlinedIcon from "@mui/icons-material/DirectionsBoatOutlined";
+import MailOutlineRoundedIcon from "@mui/icons-material/MailOutlineRounded";
+import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined";
 
 import DolphinIconB from "../../assets/images/dolphin_b.png";
 import DolphinIconW from "../../assets/images/dolphin_w.png";
@@ -31,8 +39,10 @@ import DarkModeIcon from "@mui/icons-material/DarkMode";
 
 import LightModeIcon from "@mui/icons-material/LightMode";
 import ChatSidebar from "../chat/ChatSideBar";
+import { fetchUserProfile } from "../../api/apiAuth";
 
 const Header = ({
+  userId,
   onLogout,
   setActiveIndex,
   setCurrentSessionId,
@@ -54,6 +64,29 @@ const Header = ({
   const isTablet = useMediaQuery(theme.breakpoints.between("sm", "md"));
 
   const [anchorElFont, setAnchorElFont] = useState(null);
+  const [anchorElUser, setAnchorElUser] = useState(null);
+
+  const [userProfile, setUserProfile] = useState(() => {
+    try {
+      const stored = localStorage.getItem("userData");
+      return stored ? JSON.parse(stored) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      const currentUserId = userId || localStorage.getItem("userId");
+      if (currentUserId) {
+        const profile = await fetchUserProfile(currentUserId);
+        if (profile) {
+          setUserProfile(profile);
+        }
+      }
+    };
+    loadProfile();
+  }, [userId]);
 
   const { fontLevel, setFontLevel } = useThemeMode();
 
@@ -61,7 +94,25 @@ const Header = ({
     setAnchorElFont(event.currentTarget);
   };
 
+  const handleOpenUserMenu = (event) => {
+    setAnchorElUser(event.currentTarget);
+  };
+
   const openFontMenu = Boolean(anchorElFont);
+  const openUserMenu = Boolean(anchorElUser);
+
+  const getUserInitial = () => {
+    if (userProfile?.name && userProfile.name.trim()) {
+      return userProfile.name.trim().charAt(0).toUpperCase();
+    }
+    if (userProfile?.user_name && userProfile.user_name.trim()) {
+      return userProfile.user_name.trim().charAt(0).toUpperCase();
+    }
+    if (userProfile?.email && userProfile.email.trim()) {
+      return userProfile.email.trim().charAt(0).toUpperCase();
+    }
+    return "U";
+  };
 
   const handleCreateNewSession = async () => {
     setCurrentSessionData();
@@ -223,6 +274,34 @@ const Header = ({
               {!isMobile && !isTablet && "Settings"}
             </Button>
 
+            {/* User Profile Logo Button (Left side of Logout button) */}
+            <Tooltip title="User Info">
+              <IconButton
+                id="user-profile-button"
+                onClick={handleOpenUserMenu}
+                sx={{
+                  p: 0.5,
+                  borderRadius: "50%",
+                  backgroundColor: openUserMenu ? "background.light" : "transparent",
+                  "&:hover": {
+                    backgroundColor: "background.light",
+                  },
+                }}
+              >
+                <Avatar
+                  sx={{
+                    width: 32,
+                    height: 32,
+                    bgcolor: "primary.main",
+                    color: "#ffffff",
+                    cursor: "pointer",
+                  }}
+                >
+                  <PersonOutlineOutlinedIcon sx={{ fontSize: 20 }} />
+                </Avatar>
+              </IconButton>
+            </Tooltip>
+
             {/* Logout */}
             <Button
               startIcon={<LogoutOutlinedIcon sx={{ color: "text.primary" }} />}
@@ -365,6 +444,212 @@ const Header = ({
             onClick={toggleMode}
           >
             Dark Mode
+          </Button>
+        </Stack>
+      </Popover>
+
+      {/* ================= USER INFO POPOVER ================= */}
+      <Popover
+        id="user-info-popover"
+        open={openUserMenu}
+        anchorEl={anchorElUser}
+        onClose={() => setAnchorElUser(null)}
+        anchorOrigin={{
+          vertical: "bottom",
+          horizontal: "right",
+        }}
+        transformOrigin={{
+          vertical: "top",
+          horizontal: "right",
+        }}
+        PaperProps={{
+          sx: {
+            py: 2.5,
+            px: 3,
+            width: { xs: 290, sm: 350 },
+            borderRadius: 4,
+            mt: 1.5,
+            boxShadow: "0 10px 30px rgba(0, 0, 0, 0.18)",
+            border: "1px solid",
+            borderColor: "primary.main",
+            backgroundColor: "background.paper",
+          },
+        }}
+      >
+        {/* User Card Header */}
+        <Stack direction="row" spacing={2} alignItems="center" mb={1.5}>
+          <Avatar
+            sx={{
+              width: 50,
+              height: 50,
+              bgcolor: "primary.main",
+              color: "#ffffff",
+              fontSize: "1.3rem",
+              fontWeight: 700,
+              boxShadow: "0 4px 10px rgba(17, 135, 214, 0.35)",
+            }}
+          >
+            {getUserInitial()}
+          </Avatar>
+          <Box sx={{ overflow: "hidden", flex: 1 }}>
+            <Typography
+              variant="h4"
+              fontWeight={700}
+              sx={{
+                color: "text.primary",
+                fontSize: "1.1rem",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {userProfile?.name || "Mariner"}
+            </Typography>
+            <Typography
+              variant="body2"
+              sx={{
+                color: "text.secondary",
+                fontSize: "0.82rem",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {userProfile?.email || "No email"}
+            </Typography>
+            {(userProfile?.role || userProfile?.user_type) && (
+              <Chip
+                label={userProfile?.role || userProfile?.user_type}
+                size="small"
+                sx={{
+                  mt: 0.5,
+                  height: 20,
+                  fontSize: "0.7rem",
+                  fontWeight: 600,
+                  bgcolor: "primary.main",
+                  color: "#ffffff",
+                  borderRadius: 1,
+                }}
+              />
+            )}
+          </Box>
+        </Stack>
+
+        <Divider sx={{ my: 1.5 }} />
+
+        {/* User Details list */}
+        <Stack spacing={1.2} my={1.5}>
+          {/* User ID / Username */}
+          {(userProfile?.user_name || userProfile?.user_id || userId) && (
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <BadgeOutlinedIcon fontSize="small" sx={{ color: "primary.main" }} />
+              <Box sx={{ overflow: "hidden" }}>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  User ID / Login ID
+                </Typography>
+                <Typography variant="body2" fontWeight={600} color="text.primary">
+                  {userProfile?.user_name || userProfile?.user_id || userId}
+                </Typography>
+              </Box>
+            </Stack>
+          )}
+
+          {/* Email */}
+          {userProfile?.email && (
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <MailOutlineRoundedIcon fontSize="small" sx={{ color: "primary.main" }} />
+              <Box sx={{ overflow: "hidden" }}>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Email
+                </Typography>
+                <Typography variant="body2" fontWeight={600} color="text.primary">
+                  {userProfile.email}
+                </Typography>
+              </Box>
+            </Stack>
+          )}
+
+          {/* Company */}
+          {userProfile?.company_name && (
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <BusinessOutlinedIcon fontSize="small" sx={{ color: "primary.main" }} />
+              <Box sx={{ overflow: "hidden" }}>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Company
+                </Typography>
+                <Typography variant="body2" fontWeight={600} color="text.primary">
+                  {userProfile.company_name}
+                </Typography>
+              </Box>
+            </Stack>
+          )}
+
+          {/* Ship Name */}
+          {userProfile?.ship_name && (
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <DirectionsBoatOutlinedIcon fontSize="small" sx={{ color: "primary.main" }} />
+              <Box sx={{ overflow: "hidden" }}>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Ship Name
+                </Typography>
+                <Typography variant="body2" fontWeight={600} color="text.primary">
+                  {userProfile.ship_name}
+                </Typography>
+              </Box>
+            </Stack>
+          )}
+
+          {/* Ship Type */}
+          {userProfile?.ship_type && (
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <DirectionsBoatOutlinedIcon fontSize="small" sx={{ color: "primary.main" }} />
+              <Box sx={{ overflow: "hidden" }}>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Ship Type
+                </Typography>
+                <Typography variant="body2" fontWeight={600} color="text.primary">
+                  {userProfile.ship_type}
+                </Typography>
+              </Box>
+            </Stack>
+          )}
+        </Stack>
+
+        <Divider sx={{ my: 1.5 }} />
+
+        {/* Popover Actions */}
+        <Stack direction="row" spacing={1} justifyContent="flex-end" mt={1.5}>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => setAnchorElUser(null)}
+            sx={{
+              borderRadius: 2,
+              textTransform: "none",
+              fontWeight: 600,
+              fontSize: "0.8rem",
+            }}
+          >
+            Close
+          </Button>
+          <Button
+            size="small"
+            variant="contained"
+            color="error"
+            startIcon={<LogoutOutlinedIcon fontSize="small" />}
+            onClick={() => {
+              setAnchorElUser(null);
+              onLogout();
+            }}
+            sx={{
+              borderRadius: 2,
+              textTransform: "none",
+              fontWeight: 600,
+              fontSize: "0.8rem",
+              boxShadow: "none",
+            }}
+          >
+            Logout
           </Button>
         </Stack>
       </Popover>

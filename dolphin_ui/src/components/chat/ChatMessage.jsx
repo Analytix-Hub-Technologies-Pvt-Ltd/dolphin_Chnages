@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { Box, Typography, Avatar, Tooltip, IconButton } from "@mui/material";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
@@ -8,6 +8,7 @@ import { sanitizeMarkdown } from "./ChatWindow";
 import DolphinIconW from "../../assets/images/dolphin_w.png";
 import { useThemeMode } from "../../context/ThemeModeContext";
 import { VideoIcon } from "../../assets/svgIcons/VideoIcon";
+import { ImageIcon } from "../../assets/svgIcons/ImageIcon";
 import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 import { DocumentIcon } from "../../assets/svgIcons/DocumentIcon";
 import MediaPreviewModal from "./MediaPreviewModal";
@@ -159,6 +160,7 @@ const ChatMessage = ({
   handleSend,
 }) => {
   const [showAllVideos, setShowAllVideos] = useState(false);
+  const [showAllImages, setShowAllImages] = useState(false);
   const [showAllPdfs, setShowAllPdfs] = useState(false);
   const [docError, setDocError] = useState("");
   const isUser = msg.role === "user";
@@ -177,6 +179,40 @@ const ChatMessage = ({
     setPreviewMedia({ open: false, type: null, src: null });
   };
 
+  const validImages = useMemo(() => {
+    if (!images_suggestions || !Array.isArray(images_suggestions)) return [];
+    const seen = new Set();
+    const result = [];
+    for (const img of images_suggestions) {
+      if (!img) continue;
+      const b64 = img.base64 && typeof img.base64 === "string" && img.base64.startsWith("data:image/") ? img.base64 : "";
+      const directUrl = img.url || img.Url || img.thumbnail || img.Thumbnail || "";
+      const imgSrc = b64 || directUrl || "";
+      if (!imgSrc) continue;
+
+      const rawId = String(img.id || img.Id || "").trim().toLowerCase();
+      const rawTitle = String(img.title || img.Title || img.name || img.Name || "Reference Image").trim();
+      const cleanTitle = rawTitle.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const uuidMatch = (rawId + " " + directUrl).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+      const uuid = uuidMatch ? uuidMatch[0].toLowerCase() : rawId;
+
+      const dedupeKey = uuid || cleanTitle || directUrl;
+      if (dedupeKey && seen.has(dedupeKey)) continue;
+      if (cleanTitle && cleanTitle.length > 3 && seen.has(`title:${cleanTitle}`)) continue;
+
+      if (dedupeKey) seen.add(dedupeKey);
+      if (cleanTitle && cleanTitle.length > 3) seen.add(`title:${cleanTitle}`);
+
+      result.push({
+        ...img,
+        imgSrc,
+        imgTitle: rawTitle,
+        b64,
+      });
+    }
+    return result;
+  }, [images_suggestions]);
+
   const handleFollowUpQuestion = async (query) => {
     setSearchQuery(query);
     await handleSend(query);
@@ -184,6 +220,10 @@ const ChatMessage = ({
 
   const isGapAnalysis = msg.metadata?.category === "GAP_ANALYSIS" || (msg.sections && msg.sections[0] && msg.sections[0].topic_code === "GAP_ANALYSIS");
   const showDownloadButton = isGapAnalysis && !msg.isThinking;
+  const isOutOfScope =
+    msg.metadata?.category === "OUT_OF_SCOPE" ||
+    msg.metadata?.routing_reason === "out_of_scope" ||
+    (typeof msg.content === "string" && msg.content.includes("This is not part of the available course material"));
 
   const handleDownloadWordDoc = () => {
     try {
@@ -382,7 +422,7 @@ const ChatMessage = ({
             <QuizDisplay quizContet={msg.content} />
           )}
 
-          {videos_suggestions?.length > 0 && (
+          {videos_suggestions?.length > 0 && !isOutOfScope && (
             <Box sx={{ mt: 2 }}>
               <Box
                 sx={{
@@ -514,7 +554,7 @@ const ChatMessage = ({
             </Box>
           )}
 
-          {/* {images_suggestions?.length > 0 && (
+          {validImages?.length > 0 && !isOutOfScope && (
             <Box sx={{ mt: 2 }}>
               <Box
                 sx={{
@@ -525,7 +565,7 @@ const ChatMessage = ({
               >
                 <ImageIcon
                   size={24}
-                  color={mode == "dark" ? "#e8f1fb" : "#0f1c2e"}
+                  color={mode === "dark" ? "#e8f1fb" : "#0f1c2e"}
                 />
                 <Typography variant="h3" sx={{ color: "text.primary" }}>
                   Reference Images
@@ -537,20 +577,21 @@ const ChatMessage = ({
                   display: "flex",
                   gap: 2,
                   flexWrap: "wrap",
-                  maxHeight: showAllVideos ? "none" : { xs: 150, sm: 180 },
+                  maxHeight: showAllImages ? "none" : { xs: 150, sm: 180 },
                   overflow: "hidden",
                   py: 1,
                 }}
               >
-                {images_suggestions.map((img, i) => (
+                {validImages.map((img, i) => (
                   <Box
-                    key={i}
+                    key={img.id || i}
+                    className="ref-image-item"
                     sx={{
                       position: "relative",
                       display: "flex",
                       flexDirection: "column",
                       justifyContent: "space-between",
-                     width: { xs: "43%", sm: "23%" },
+                      width: { xs: "43%", sm: "23%" },
                       height: { xs: 140, sm: 170 },
                       textDecoration: "none",
                       borderRadius: 2,
@@ -559,20 +600,29 @@ const ChatMessage = ({
                       transition: "0.2s",
                       border: "1px solid",
                       borderColor: "text.caption",
+                      cursor: "pointer",
                       "&:hover": {
                         borderColor: "primary.main",
                         transform: "translateY(-2px)",
                       },
                     }}
-                      onClick={() => openPreview("image", img.Url)}
+                    onClick={() => openPreview("image", img.imgSrc)}
                   >
                     <Box
                       component="img"
-                      src={img.thumbnail || img.Url}
-                      alt={img.Title || "image"}
+                      src={img.imgSrc}
+                      alt={img.imgTitle}
+                      onError={(e) => {
+                        if (img.b64 && e.target.src !== img.b64) {
+                          e.target.src = img.b64;
+                        } else {
+                          const card = e.currentTarget.closest(".ref-image-item") || e.currentTarget.parentElement;
+                          if (card) card.style.display = "none";
+                        }
+                      }}
                       sx={{
                         width: "100%",
-                        height: 130,
+                        height: { xs: 80, sm: 130 },
                         borderRadius: 1,
                         objectFit: "cover",
                       }}
@@ -589,13 +639,13 @@ const ChatMessage = ({
                         textOverflow: "ellipsis",
                       }}
                     >
-                      {img.Title || "Reference Image"}
+                      {img.imgTitle}
                     </Typography>
                   </Box>
                 ))}
               </Box>
 
-              {images_suggestions.length > 4 && (
+              {validImages.length > 4 && (
                 <Typography
                   onClick={() => setShowAllImages((prev) => !prev)}
                   variant="body1"
@@ -617,9 +667,9 @@ const ChatMessage = ({
                 </Typography>
               )}
             </Box>
-          )} */}
+          )}
 
-          {pdf_suggestions?.length > 0 && (
+          {pdf_suggestions?.length > 0 && !isOutOfScope && (
             <Box sx={{ mt: 2 }}>
               <Box
                 sx={{
@@ -647,61 +697,67 @@ const ChatMessage = ({
                   py: 1,
                 }}
               >
-                {pdf_suggestions.map((pdf, i) => (
-                  <Box
-                    key={i}
-                    sx={{
-                      position: "relative",
-                      display: "flex",
-                      flexDirection: "column",
-                      justifyContent: "space-between",
-                      width: { xs: "43%", sm: "23%" },
-                      height: { xs: 140, sm: 170 },
-                      textDecoration: "none",
-                      borderRadius: 2,
-                      p: 0.5,
-                      backgroundColor: "background.light",
-                      transition: "0.2s",
-                      border: "1px solid",
-                      borderColor: "text.caption",
-                      "&:hover": {
-                        borderColor: "primary.main",
-                        transform: "translateY(-2px)",
-                      },
-                    }}
-                    onClick={() => openPreview("pdf", pdf.Link)}
-                  >
-                    {/* PDF Thumbnail */}
+                {pdf_suggestions.map((pdf, i) => {
+                  const pdfUrl = pdf.url || pdf.Url || pdf.link || pdf.Link || pdf.file_url || "";
+                  const pdfTitle = pdf.title || pdf.Title || pdf.name || pdf.Name || "Reference PDF";
+                  return (
                     <Box
+                      key={i}
                       sx={{
-                        width: "100%",
-                        height: 130,
-                        borderRadius: 1,
+                        position: "relative",
                         display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        backgroundColor: "background.paper",
+                        flexDirection: "column",
+                        justifyContent: "space-between",
+                        width: { xs: "43%", sm: "23%" },
+                        height: { xs: 140, sm: 170 },
+                        textDecoration: "none",
+                        borderRadius: 2,
+                        p: 0.5,
+                        backgroundColor: "background.light",
+                        transition: "0.2s",
+                        border: "1px solid",
+                        borderColor: "text.caption",
+                        cursor: "pointer",
+                        "&:hover": {
+                          borderColor: "primary.main",
+                          transform: "translateY(-2px)",
+                        },
                       }}
+                      onClick={() => openPreview("pdf", pdfUrl)}
                     >
-                      📄
-                    </Box>
+                      {/* PDF Thumbnail */}
+                      <Box
+                        sx={{
+                          width: "100%",
+                          height: { xs: 80, sm: 130 },
+                          borderRadius: 1,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          backgroundColor: "background.paper",
+                          fontSize: 32,
+                        }}
+                      >
+                        📄
+                      </Box>
 
-                    {/* Title */}
-                    <Typography
-                      variant="caption"
-                      sx={{
-                        width: "100%",
-                        textAlign: "center",
-                        color: "primary.main",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {pdf?.Title || "Reference PDF"}
-                    </Typography>
-                  </Box>
-                ))}
+                      {/* Title */}
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          width: "100%",
+                          textAlign: "center",
+                          color: "primary.main",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {pdfTitle}
+                      </Typography>
+                    </Box>
+                  );
+                })}
               </Box>
 
               {pdf_suggestions.length > 4 && (

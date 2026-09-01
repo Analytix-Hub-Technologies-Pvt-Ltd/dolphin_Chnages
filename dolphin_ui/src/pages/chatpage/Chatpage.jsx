@@ -84,6 +84,7 @@ const Chatpage = ({ userId, setUserId, onLogout }) => {
     <Grid container height="100vh" width="100vw" flexDirection="column">
       <Grid item xs={12} sx={{ height: "10vh" }}>
         <Header
+          userId={userId}
           onLogout={onLogout}
           setSessionData={setSessionData}
           setCurrentSessionData={setCurrentSessionData}
