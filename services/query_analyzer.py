@@ -27,6 +27,31 @@ def extract_name(text: str) -> str | None:
     return None
 
 
+def is_gap_analysis_request(query: str) -> bool:
+    """Detect if query is requesting an SMS Gap Analysis or comparing SMS with standards."""
+    if not query or not isinstance(query, str):
+        return False
+    q = query.lower().strip()
+
+    # Direct upload intent for SMS / gap analysis
+    if re.search(r"\bupload\s+(file\s+for\s+)?(sms|gap)", q) or re.search(r"\bupload\s+sms\b", q):
+        return True
+
+    # Gap analysis patterns
+    if re.search(r"\bgap\s*analysis\b", q) or re.search(r"\bgap\s*check\b", q):
+        return True
+
+    # Comparison of SMS / company manual / safety management system with standards
+    is_sms = bool(re.search(r"\b(sms|safety\s+management\s+system|company\s+manual|our\s+sms|my\s+sms)\b", q))
+    is_comparison_verb = bool(re.search(r"\b(compare|comparison|check|benchmark|audit|evaluate|verify)\b", q))
+    is_standards = bool(re.search(r"\b(industry\s+standards?|solas|marpol|stcw|ism\s+code|standards?)\b", q))
+
+    if is_sms and is_comparison_verb and (is_standards or "with" in q or "against" in q):
+        return True
+
+    return False
+
+
 class QueryAnalyzer:
     """Improved analyzer with stronger greeting logic + name extraction."""
 
@@ -447,6 +472,17 @@ class EnhancedQueryAnalyzer(QueryAnalyzer):
         }
 
         detected_name = extract_name(standalone_query)
+
+        # Check for gap analysis request
+        if is_gap_analysis_request(current_query) or is_gap_analysis_request(standalone_query):
+            return {
+                "node_type": "gap_analysis_request",
+                "short_topic": "sms gap analysis",
+                "reason": f"Query classified as GAP_ANALYSIS_REQUEST: {current_query}",
+                "user_name": detected_name,
+                "category": "GAP_ANALYSIS_REQUEST",
+                "standalone_query": standalone_query,
+            }
 
         normalized_category = category_mapping.get(category, "FALLBACK")
 

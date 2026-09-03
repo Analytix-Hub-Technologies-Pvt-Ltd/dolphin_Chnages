@@ -1089,32 +1089,31 @@ class ChatService:
 
         prompt = f"""
 You are a strict scope control classifier for Marine Tutor AI.
-Analyze the User Question and determine whether it is relevant to the available Marine/Maritime course material or the provided Course Context.
+Analyze the User Question and determine whether it is relevant to Marine/Maritime topics or the provided Course Context.
 
 Answering Rules:
-1. A question is IN-SCOPE if it relates to:
+1. A question is ALWAYS IN-SCOPE if it relates to ANY maritime, nautical, or shipboard subject, including:
 - Marine engineering or Engine-room operations
-- Marine operations, Ship operations, Deck operations
-- Navigation, Port operations, Ship management
-- Cargo operations, Cargo loading/unloading
-- Ballast operations
-- Safety procedures, Maritime safety, Fire safety
+- Marine operations, Ship operations, Deck operations, Seamanship
+- Navigation, Port operations, Ship management, Watchkeeping
+- Cargo operations, Cargo loading/unloading, Tank cleaning, Bunkering
+- Ballast operations, Stability, Hydrodynamics
+- Safety procedures, Maritime safety, Fire safety, Emergency response
 - Maritime regulations/conventions (SOLAS, MARPOL, STCW, ISM, ISPS, COLREG)
 - Shipboard procedures, Emergency procedures, Lifesaving appliances
-- Pollution prevention, Marine environmental protection
-- Company procedures
-- Any other topic explicitly covered by the available Course Context.
+- Pollution prevention, Marine environmental protection, Marpol annexes
+- Company procedures, SMS, SOPs, Checklists
+- Any other topic covered by the available Course Context.
 
-2. A question is OUT-OF-SCOPE if it is:
-- Clearly unrelated (e.g. Python/Java programming, math, sports, movies, pop culture, geography, general world history).
-- About a famous historical ship, maritime event, accident, or disaster (e.g., Titanic sinking, Estonia sinking, Costa Concordia, Exxon Valdez) UNLESS there is explicit, specific information about that event/ship in the provided Course Context.
-- Conversational/general world knowledge that is not covered in the Course Context.
-Note: General words like "ship", "sea", "ocean", "marine", "boat", "captain", "sailor" do not make a question in-scope if the actual subject is unrelated to the available course material.
+2. A question is OUT-OF-SCOPE ONLY if it is:
+- Clearly non-marine / unrelated to maritime (e.g. Python/Java programming, non-marine math, sports, movies, video games, pop culture, cooking, general world history).
+- About a famous historical ship accident (e.g., Titanic sinking, Estonia sinking, Costa Concordia) UNLESS there is explicit, specific information about that event/ship in the provided Course Context.
+Note: If the query is about genuine commercial maritime, shipping, navigation, engine, or cargo operations, it is ALWAYS IN-SCOPE.
 
-3. Simple conversational phrases or acknowledgements (e.g. 'ok', 'yes', 'sure', 'understand', 'cool', 'continue', 'next') should be classified as IN-SCOPE so they are not rejected.
+3. Simple conversational phrases or acknowledgements (e.g. 'ok', 'yes', 'sure', 'understand', 'cool', 'continue', 'next') are IN-SCOPE.
 
 4. A question is MIXED if:
-- It contains both an in-scope Marine topic and an unrelated/out-of-scope topic.
+- It contains both an in-scope Marine topic and a completely unrelated non-marine topic (e.g. "Explain boiler design and write a Python script for a calculator").
 
 Course Context:
 {course_context}
