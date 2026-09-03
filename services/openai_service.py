@@ -6,7 +6,9 @@ from openai import AsyncOpenAI
 from loguru import logger
 from config import settings
 from models.database import get_pool
+import asyncio
 import json
+import re
 
 class OpenAIService:
     """Wrapper around the OpenAI async client for chat and embeddings."""
@@ -48,19 +50,7 @@ class OpenAIService:
             [m.get("content", "") if isinstance(m, dict) else str(m) for m in messages]
         )
         debug_ctx = getattr(self, "debug_prompt_context", None)
-        # if debug_ctx is not None:
         if debug_ctx and debug_ctx.get("session_messages"):
-            # context_parts = [
-            #     f"node_type: {debug_ctx.get('node_type')}",
-            #     f"standalone_query: {debug_ctx.get('standalone_query')}",
-            #     f"previous_successful_messages: {debug_ctx.get('previous_successful_messages')}",
-            #     f"previous_successful_questions: {debug_ctx.get('previous_successful_questions')}",
-            #     f"chunk_context: {debug_ctx.get('chunk_context')}",
-            #     f"video_suggestions: {debug_ctx.get('video_suggestions')}",
-            #     f"question_suggestions: {debug_ctx.get('question_suggestions')}",
-            #     "LLM Prompt:",
-            #     prompt_string,
-            # ]
             context_parts = [
                 f"node_type: {debug_ctx.get('node_type')}",
                 f"standalone_query: {debug_ctx.get('standalone_query')}",
@@ -111,12 +101,23 @@ class OpenAIService:
                 content=content,
             )
 
+        cleaned_messages = []
+        for m in messages:
+            if isinstance(m, dict):
+                c = m.get("content", "")
+                if isinstance(c, str):
+                    c = re.sub(r'\.{4,}', '...', c)
+                    c = re.sub(r'_{4,}', '___', c)
+                cleaned_messages.append({**m, "content": c})
+            else:
+                cleaned_messages.append(m)
+
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
                 temperature=active_temperature,
                 max_tokens=active_max_tokens,
-                messages=messages,
+                messages=cleaned_messages,
             )
 
             choice = response.choices[0]
@@ -128,14 +129,15 @@ class OpenAIService:
             response_content = getattr(getattr(choice, "message", None), "content", "")
             logger.info("LLM response content", content=response_content)
 
-            await self._log_llm_call(prompt_string, response_content, normalized_category)
+            # ⚡ OPTIMIZATION: Fire DB logging in background (non-blocking) to avoid remote DB network latency
+            asyncio.create_task(self._log_llm_call(prompt_string, response_content, normalized_category))
 
             return response_content
 
         except Exception as e:
             logger.error(f"❌ OpenAI chat completion error: {e}")
             try:
-                await self._log_llm_call(prompt_string, f"ERROR: {e}", normalized_category)
+                asyncio.create_task(self._log_llm_call(prompt_string, f"ERROR: {e}", normalized_category))
             except Exception:
                 logger.exception("Failed to log LLM error response")
             return "I apologize, but I encountered an error processing your request."

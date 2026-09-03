@@ -149,15 +149,15 @@ class AuthService:
                 payload.email,
                 payload.phone_number,
                 payload.birth_date,
-                payload.user_name,
-                payload.company_name,
-                payload.role,
-                payload.user_type,
-                payload.ship_name,
-                payload.ship_type,
-                payload.id_type,
-                payload.id_country,
-                payload.company_id
+                str(payload.user_name) if payload.user_name is not None else None,
+                str(payload.company_name) if payload.company_name is not None else None,
+                str(payload.role) if payload.role is not None else None,
+                str(payload.user_type) if payload.user_type is not None else None,
+                str(payload.ship_name) if payload.ship_name is not None else None,
+                str(payload.ship_type) if payload.ship_type is not None else None,
+                str(payload.id_type) if payload.id_type is not None else None,
+                str(payload.id_country) if payload.id_country is not None else None,
+                int(payload.company_id) if payload.company_id is not None and str(payload.company_id).isdigit() else None
             )
 
             record = await conn.fetchrow(
@@ -186,15 +186,17 @@ class AuthService:
         return User(**dict(record))
     
     async def authenticateDolphin(self, payload: dict):
-
         url = settings.auth_api_base_url
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
-
-            data = response.json()
-            return data
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(url, json=payload)
+                if response.status_code != 200:
+                    logger.warning(f"DolphinLogin returned status {response.status_code}")
+                    return None
+                return response.json()
+        except Exception as e:
+            logger.error(f"DolphinLogin request failed: {e}")
+            return None
         
     async def get_user_by_useremail(self, email: str):
 
@@ -246,15 +248,15 @@ class AuthService:
         async with self.pool.acquire() as conn:
             await conn.execute(
                 query,
-                user_id,
-                name,
-                user_name,
-                company_name,
-                role,
-                user_type,
-                ship_name,
-                ship_type,
-                id_type,
-                id_country,
-                company_id,
-            )    
+                str(user_id) if user_id is not None else None,
+                str(name) if name is not None else None,
+                str(user_name) if user_name is not None else None,
+                str(company_name) if company_name is not None else None,
+                str(role) if role is not None else None,
+                str(user_type) if user_type is not None else None,
+                str(ship_name) if ship_name is not None else None,
+                str(ship_type) if ship_type is not None else None,
+                str(id_type) if id_type is not None else None,
+                str(id_country) if id_country is not None else None,
+                int(company_id) if company_id is not None and str(company_id).isdigit() else None,
+            )

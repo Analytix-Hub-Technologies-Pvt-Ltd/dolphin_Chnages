@@ -252,19 +252,25 @@ async def retrieval_node(
     # -----------------------------
     # COMPANY RETRIEVAL
     # -----------------------------
-    company_chunks = []
+    existing_company_chunks = state.get("company_chunks", []) or []
+    company_chunks = list(existing_company_chunks)
 
-    company_vector_store = safe_get(state, "company_vector_store")
-
-    if company_id and company_vector_store:
+    if company_id and company_vector_store and not company_chunks:
+        from pipeline.company_retrieval import is_company_match
 
         ship_type = user_profile.get("ship_type") or user_profile.get("ShipType") or ""
+        company_name = (
+            user_profile.get("company_name")
+            or user_profile.get("CompanyName")
+            or user_profile.get("company")
+            or ""
+        )
         logger.info(f"Searching company documents for company_id={company_id}, ship_type={ship_type}")
 
         try:
             company_results = await company_vector_store.search_with_embeddings(
                 search_query,
-                k=15,
+                k=40,
             )
 
             logger.info(
@@ -272,8 +278,9 @@ async def retrieval_node(
             )
 
             for chunk in company_results:
-
-                if str(chunk.get("company_id")) != str(company_id):
+                chunk_company_id = chunk.get("company_id")
+                chunk_cname = chunk.get("company_name", "")
+                if not is_company_match(chunk_company_id, company_id, company_name, chunk_cname):
                     continue
 
                 doc_title = chunk.get("document_title", "")
@@ -284,7 +291,7 @@ async def retrieval_node(
                 company_chunks.append(
                     normalize_chunk(chunk)
                 )
-                if len(company_chunks) >= 5:
+                if len(company_chunks) >= 20:
                     break
 
             logger.info(

@@ -430,7 +430,7 @@ def test_company_query_cow_checklist():
     from pipeline.company_query import company_query_node
 
     class MockOpenAIService:
-        async def chat(self, messages, temperature=0.0):
+        async def chat(self, messages, temperature=0.0, **kwargs):
             return """
 ### 🏢 1. According to CMS Demo Company's Safety Management System (SMS / QMS)
 **Document Title:** Shipboard SMS Manual (Vol. II)-Oil Tanker 2016.docx
@@ -483,7 +483,7 @@ def test_company_query_skipped_for_general_queries():
     from pipeline.company_query import company_query_node
 
     class MockOpenAIService:
-        async def chat(self, messages, temperature=0.0):
+        async def chat(self, messages, temperature=0.0, **kwargs):
             return "NO_COMPANY_DATA"
 
     state = {
@@ -585,6 +585,181 @@ def test_fallbacknode_out_of_scope():
     result = _run_async(fallback_node.run(state))
     assert result["node_response"]["content"] == "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
     assert result["node_response"]["question_suggestions"] == []
+
+
+def test_basic_course_vs_company_routing():
+    from pipeline.company_query import is_company_query, company_query_node
+
+    company_name = "CMS Demo Company"
+
+    # Basic theoretical/educational questions must NOT be company queries
+    assert is_company_query("What is boiler design?", company_name) is False
+    assert is_company_query("Explain working principle of 2-stroke diesel engine", company_name) is False
+    assert is_company_query("What is cavitation in centrifugal pumps?", company_name) is False
+    assert is_company_query("What is sensible heat?", company_name) is False
+    assert is_company_query("Explain Archimedes principle", company_name) is False
+
+    # Procedural/SMS/Company questions MUST be company queries
+    assert is_company_query("What specific equipment should i check before starting the cow process?", company_name) is True
+    assert is_company_query("Can you provide a checklist from the SMS for my COW entry and cleaning work?", company_name) is True
+    assert is_company_query("What is the company policy on boiler back fire precautions?", company_name) is True
+    assert is_company_query("What are the procedures for bunkering on board our vessel?", company_name) is True
+    assert is_company_query("Show me the permit to work procedure", company_name) is True
+
+    # When company_query_node is called with a basic course question, LLM outputs NO_COMPANY_DATA
+    class MockOpenAIService:
+        async def chat(self, messages, temperature=0.0, **kwargs):
+            return "NO_COMPANY_DATA"
+
+    state_basic = {
+        "company_chunks": [{"document_title": "Boiler SMS Manual", "content": "Emergency firing sequence"}],
+        "user_profile": {"company_name": company_name, "company_id": "1"},
+        "standalone_query": "What is boiler design?",
+        "node_response": {
+            "content": "# Boiler Design\nBoilers generate steam by transferring heat...",
+            "sections": []
+        }
+    }
+
+    updated_state = asyncio.run(company_query_node(state_basic, MockOpenAIService()))
+    assert updated_state["company_answer"] is None
+    assert updated_state["node_response"]["content"] == "# Boiler Design\nBoilers generate steam by transferring heat..."
+
+
+def test_sms_gap_analysis_intent():
+    from services.query_analyzer import is_gap_analysis_request, EnhancedQueryAnalyzer
+    from services.gpt_intent_service import GPTIntentService
+
+    analyzer = EnhancedQueryAnalyzer(GPTIntentService())
+
+    test_queries = [
+        "I want to compare my sms with industry standards",
+        "Can you compare my sms with industry standards?",
+        "Compare our SMS with SOLAS and MARPOL",
+        "I want to perform a gap analysis on my safety management system",
+        "Check my SMS against industry standards",
+        "Gap analysis of company manual",
+        "i want to upload file for sms gap",
+        "upload file for sms gap",
+        "upload sms for gap analysis",
+        "upload file for gap check",
+        "upload sms",
+    ]
+
+    for q in test_queries:
+        assert is_gap_analysis_request(q) is True, f"Failed is_gap_analysis_request for '{q}'"
+        decision = asyncio.run(analyzer.classify_for_router(q, []))
+        assert decision["category"] == "GAP_ANALYSIS_REQUEST", f"Failed category for '{q}': {decision}"
+        assert decision["node_type"] == "gap_analysis_request", f"Failed node_type for '{q}': {decision}"
+
+    # Non-gap normal queries
+    assert is_gap_analysis_request("What is SOLAS convention?") is False
+    assert is_gap_analysis_request("Explain boiler overhaul procedure") is False
+    assert is_gap_analysis_request("Implementing SMS on Ship") is False
+    assert is_gap_analysis_request("What is an SMS on ship?") is False
+
+
+def test_company_query_metadata_positioning():
+    from pipeline.company_query import company_query_node
+
+    class MockOpenAIServiceLeadingMetadata:
+        async def chat(self, messages, temperature=0.0, **kwargs):
+            return """Document Title: Shipboard SMS Manual (Chemical)-Completed (1).docx
+SOP Name: Ship Operations (Cargo Procedures)
+Section: Unloading
+
+🏢 1. According to CMS Demo Company's Safety Management System (SMS / QMS)
+Cargo Unloading Operational Sequence
+Document Title: Shipboard SMS Manual (Chemical)-Completed (1).docx
+SOP Name: Ship Operations (Cargo Procedures)
+Section: Unloading
+
+#### Statement of Facts & Departure Reporting Protocols
+- **Timing & Preconditions:** Immediately upon arrival.
+
+### 📘 2. Dolphin internal knowledge base
+#### Boil-Off Gas Management
+- **Boil-Off Gas:** Maintain parameters.
+
+### 🔍 3. Comparison & AI Advisory Observations
+- Comparison observations.
+"""
+
+    state = {
+        "company_chunks": [
+            {
+                "document_title": "Shipboard SMS Manual (Chemical)-Completed (1).docx",
+                "content": "Cargo Unloading Operational Sequence and checks."
+            }
+        ],
+        "user_profile": {"company_name": "CMS Demo Company"},
+        "standalone_query": "Explain cargo unloading procedure",
+        "node_response": {}
+    }
+
+    updated_state = asyncio.run(company_query_node(state, MockOpenAIServiceLeadingMetadata()))
+    answer = updated_state["company_answer"]
+
+    lines = [line.strip() for line in answer.split("\n") if line.strip()]
+    assert lines[0] == "#### 🏢 1. According to CMS Demo Company's Safety Management System (SMS / QMS)"
+    assert lines[1] == "**Document Title:** Shipboard SMS Manual (Chemical)-Completed (1).docx"
+    assert lines[2] == "**SOP Name:** Ship Operations (Cargo Procedures)"
+    assert lines[3] == "**Section:** Unloading"
+    assert lines[4] == "#### Cargo Unloading Operational Sequence"
+    assert lines[5] == "#### Statement of Facts & Departure Reporting Protocols"
+
+
+def test_company_query_table_preservation():
+    from pipeline.company_query import company_query_node
+
+    class MockOpenAIServiceWithTable:
+        async def chat(self, prompt: str, history=None, **kwargs) -> str:
+            return """#### 🏢 1. According to CMS Demo Company's Safety Management System (SMS / QMS)
+**Document Title:** Shipboard SMS Manual (Chemical)-Completed (1).docx
+**SOP Name:** Ship Operations (Cargo Procedures)
+**Section:** Unloading
+
+| Activity | Responsibility |
+|---|---|
+| Cargo unloading plan | Prepared by Ch. Off, Approved by Master |
+| Pre-arrival ship/shore information exchange | Master |
+| Comply Checklist – Form: CT 001 | Chief Officer |
+
+#### Cargo Unloading Plan Preparation
+- **Timing & Preconditions:** Prior to arrival.
+- **Mandatory Forms:** Form CT 001.
+
+### 📘 2. Dolphin internal knowledge base
+#### Operational Standards
+- **Standard Checks:** Must be performed.
+
+### 🔍 3. Comparison & AI Advisory Observations
+- Comparison observations.
+*(AI Advisory Observation only — any procedure update must be reviewed by Company HSQE and processed through formal Management of Change [MoC]).*
+"""
+
+    state = {
+        "company_chunks": [
+            {
+                "document_title": "Shipboard SMS Manual (Chemical)-Completed (1).docx",
+                "content": "Cargo Unloading operational sequence | Activity | Responsibility |"
+            }
+        ],
+        "user_profile": {"company_name": "CMS Demo Company"},
+        "standalone_query": "Cargo Unloading operational sequence",
+        "node_response": {}
+    }
+
+    updated_state = asyncio.run(company_query_node(state, MockOpenAIServiceWithTable()))
+    answer = updated_state["company_answer"]
+
+    assert "| Activity | Responsibility |" in answer
+    assert "| Cargo unloading plan | Prepared by Ch. Off, Approved by Master |" in answer
+    assert "#### 🏢 1. According to CMS Demo Company's Safety Management System (SMS / QMS)" in answer
+
+
+
+
 
 
 

@@ -16,7 +16,7 @@ class GPTIntentService:
     def __init__(self):
         self.client = AsyncOpenAI(
             api_key=Settings().openai_api_key,
-            timeout=30.0,  # ⚡ Prevent indefinite hangs
+            timeout=10.0,  # ⚡ Prevent hangs
         )
 
     async def classify_intent(self, message: str) -> str:

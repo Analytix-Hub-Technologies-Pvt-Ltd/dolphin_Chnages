@@ -16,7 +16,7 @@ from retrieval.postgres_loader import PostgresLoader
 from services.embedding_config import EMBEDDING_DIM
 from services.embedding_service import EmbeddingService
 from services.openai_service import OpenAIService
-from services.query_analyzer import EnhancedQueryAnalyzer
+from services.query_analyzer import EnhancedQueryAnalyzer, is_gap_analysis_request
 from services.session_service import SessionService
 from services.suggestion_service import SuggestionService
 from models.node_response import NodeResponse
@@ -24,10 +24,21 @@ from models.database import get_pool
 from services.gpt_intent_service import GPTIntentService
 from config import settings
 
+from services.image_manager import ImageManager
 from pipeline.chat_pipeline import ChatPipeline
 
 from pipeline.router import router_node
-from pipeline.retrieval import retrieval_node
+from pipeline.retrieval import (
+    retrieval_node,
+    extract_videos,
+    extract_images,
+    normalize_video_item,
+    normalize_image_item,
+    compute_video_relevance_score,
+    compute_image_relevance_score,
+    search_matching_videos_in_db,
+    search_matching_images_in_db,
+)
 from pipeline.query import query_node
 from pipeline.summary import summary_node
 from pipeline.quiz import quiz_node
@@ -42,7 +53,7 @@ from fastapi import APIRouter, HTTPException
 from retrieval.faiss_store import FAISSStore
 from config import settings
 from services.image_service import ImageService
-from pipeline.company_query import company_query_node
+from pipeline.company_query import company_query_node, is_company_query
 
 def normalize_video_url(url: str) -> str:
     """
@@ -273,7 +284,7 @@ class ChatService:
     # 🔹 Utilities
     # ============================================================
     def _normalize_category(self, raw_value: Any, default: str = "QUERY") -> str:
-        allowed = {"GREETING", "QUERY", "QUIZ", "SUMMARY", "FALLBACK"}
+        allowed = {"GREETING", "QUERY", "QUIZ", "SUMMARY", "FALLBACK", "GAP_ANALYSIS_REQUEST"}
         if isinstance(raw_value, str):
             candidate = raw_value.strip().upper()
             if candidate in allowed:
@@ -463,8 +474,8 @@ class ChatService:
 
         if self.session_service and session_id:
             try:
-                await self.session_service.update_session_messages(
-                    session_id, messages
+                asyncio.create_task(
+                    self.session_service.update_session_messages(session_id, messages)
                 )
             except Exception:
                 logger.exception("Failed to persist appended message")
@@ -598,16 +609,6 @@ class ChatService:
 
     def _normalize_chunk(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         """Ensure retrieval chunks have consistent fields for downstream nodes."""
-        logger.error(
-            "RAW CHUNK KEYS = {}",
-            list(raw.keys())
-        )
-
-        logger.error(
-            "RAW TOPIC CODE = {}",
-            raw.get("topic_code")
-        )
-
         topic_name = raw.get("topic_name") or raw.get("title") or raw.get("topic") or ""
         topic_content = raw.get("topic_content") or raw.get("content") or raw.get("text") or ""
         combined_content = (
@@ -615,25 +616,29 @@ class ChatService:
             if topic_name or topic_content
             else ""
         )
-        # topic_code = str(raw.get("topic_code") or "")
         topic_code = str(raw.get("topic_code") or "")
 
-        logger.error(
-            "IMAGE DEBUG topic_code={}",
-            topic_code
-        )
+        # Extract DB images and local image service images
+        db_raw_images = self._coerce_media(raw.get("topic_image") or raw.get("images"))
+        local_images = []
+        if self.image_service and topic_code:
+            try:
+                local_images = self.image_service.get_images_by_topic_code(topic_code) or []
+            except Exception as e:
+                logger.debug(f"ImageService lookup failed: {e}")
 
-        images = self.image_service.get_images_by_topic_code(
-            topic_code
-        )
+        combined_images = []
+        seen_image_keys = set()
 
-        logger.error(
-            "IMAGE DEBUG image_count={}",
-            len(images)
-        )
-        topic_code = str(raw.get("topic_code") or "")
+        for img in (db_raw_images + local_images):
+            norm_img = normalize_image_item(img, default_title=topic_name)
+            if not norm_img:
+                continue
+            key = norm_img.get("url") or norm_img.get("id")
+            if key and key not in seen_image_keys:
+                seen_image_keys.add(key)
+                combined_images.append(norm_img)
 
-        
         return {
             "content_id": raw.get("content_id") or raw.get("id"),
             "topic_name": topic_name,
@@ -641,8 +646,7 @@ class ChatService:
             "topic_content": topic_content,
             "content": combined_content,
             "videos": self._coerce_media(raw.get("topic_video") or raw.get("videos")),
-            # "images": self._coerce_media(raw.get("topic_image") or raw.get("images")),
-            "images": images,
+            "images": combined_images,
             "pdfs": self._coerce_media(raw.get("topic_pdf") or raw.get("pdfs")),
             "keywords": raw.get("keywords") or raw.get("tags") or [],
         }
@@ -650,8 +654,9 @@ class ChatService:
     def _build_video_suggestions(
             self,
             chunks: List[Dict[str, Any]],
+            query: str = "",
     ) -> List[Dict[str, str]]:
-        """Create unique video suggestion payloads from retrieved chunks."""
+        """Create unique video suggestion payloads from retrieved chunks, filtered by relevance to query."""
 
         suggestions: List[Dict[str, str]] = []
         seen_urls: set[str] = set()
@@ -661,9 +666,11 @@ class ChatService:
         logger.debug(
             "Building video suggestions from retrieval chunks",
             chunk_count=len(chunks),
+            query=query,
         )
 
         for chunk in chunks:
+            t_name = chunk.get("topic_name") or ""
             videos = chunk.get("videos") or []
             if not isinstance(videos, list):
                 continue
@@ -687,6 +694,18 @@ class ChatService:
                 title = str(title_raw).strip() if title_raw else ""
                 normalized_title = title.lower().strip() if title else ""
                 
+                # If query is provided, check precision relevance
+                if query and query.strip():
+                    norm_candidate = {
+                        "id": video_id,
+                        "title": title or t_name,
+                        "about": str(video.get("about") or video.get("About") or ""),
+                        "url": raw_url,
+                    }
+                    score = compute_video_relevance_score(norm_candidate, query, t_name)
+                    if score < 0.70:
+                        continue
+
                 # Normalize URL for deduplication
                 normalized_url = normalize_video_url(raw_url)
                 
@@ -721,7 +740,7 @@ class ChatService:
 
                 suggestions.append(
                     {
-                        "title": title if title else "Course video",
+                        "title": title if title else (t_name or "Course video"),
                         "url": display_url,
                         "videourl": display_url,
                         "video_id": video_id_display,
@@ -806,7 +825,7 @@ class ChatService:
                     merged
                 )
                 retrieval_chunks.append(self._normalize_chunk(merged))
-            video_suggestions = self._build_video_suggestions(retrieval_chunks)
+            video_suggestions = self._build_video_suggestions(retrieval_chunks, query=query)
 
             logger.info(
                 "🟩 Retriever returned chunks",
@@ -844,69 +863,79 @@ class ChatService:
     #             f"🎥 Transcript retrieval returned {len(transcript_chunks)} chunks"
     #         )
 
-    #         return transcript_chunks or []
-
-    #     except Exception as e:
-    #         logger.exception(
-    #             f"❌ Transcript retrieval failed: {e}"
-    #         )
-    #         return []
-
     async def _retrieve_transcript_chunks(
         self,
         query: str,
-        k: int = 3,
+        k: int = 5,
     ) -> List[Dict[str, Any]]:
         """
         Search the transcript FAISS index and return matching transcript chunks.
+        Fallback to targeted database search if transcript index is empty.
+        Only returns videos relevant to the query.
         """
-
         if not query or not query.strip():
             return []
 
+        results = []
+        seen = set()
+
         try:
-            transcript_chunks = await self.transcribe_vector_store.search_with_embeddings(
-                query,
-                k=k,
-            )
-
-            logger.info(
-                f"🎥 Transcript retrieval returned {len(transcript_chunks)} chunks"
-            )
-
-            # Log missing video metadata
-            for i, chunk in enumerate(transcript_chunks or [], start=1):
-                logger.info(
-                    "🎥 Chunk %d | video_id=%s | title=%s | duration=%s | thumbnail=%s",
-                    i,
-                    chunk.get("video_id"),
-                    chunk.get("video_title"),
-                    chunk.get("video_duration"),
-                    chunk.get("video_thumbnail"),
+            if hasattr(self, "transcribe_vector_store") and getattr(self.transcribe_vector_store.store, "is_loaded", False):
+                transcript_chunks = await self.transcribe_vector_store.search_with_embeddings(
+                    query,
+                    k=k,
                 )
-
-                if (
-                    chunk.get("video_title") is None
-                    or chunk.get("video_duration") is None
-                    or chunk.get("video_thumbnail") is None
-                ):
-                    logger.warning(
-                        "⚠️ Missing metadata for video_id=%s "
-                        "(title=%s, duration=%s, thumbnail=%s)",
-                        chunk.get("video_id"),
-                        chunk.get("video_title"),
-                        chunk.get("video_duration"),
-                        chunk.get("video_thumbnail"),
-                    )
-
-            return transcript_chunks or []
-
+                for chunk in (transcript_chunks or []):
+                    vid_id = chunk.get("video_id") or chunk.get("id")
+                    url = chunk.get("video_url") or chunk.get("url") or (f"/storage/videos/{vid_id}.mp4" if vid_id else "")
+                    title = chunk.get("video_title") or chunk.get("title") or "Video"
+                    # Check relevance
+                    if compute_video_relevance_score({"title": title, "about": chunk.get("about", "")}, query) < 0.70:
+                        continue
+                    if url and url not in seen:
+                        seen.add(url)
+                        results.append({
+                            "id": vid_id,
+                            "video_id": vid_id,
+                            "title": title,
+                            "video_title": title,
+                            "url": url,
+                            "video_url": url,
+                            "thumbnail": chunk.get("video_thumbnail") or chunk.get("thumbnail") or "",
+                            "video_thumbnail": chunk.get("video_thumbnail") or chunk.get("thumbnail") or "",
+                            "duration": chunk.get("video_duration") or chunk.get("duration") or "",
+                            "video_duration": chunk.get("video_duration") or chunk.get("duration") or "",
+                        })
         except Exception as e:
-            logger.exception(
-                f"❌ Transcript retrieval failed: {e}"
-            )
-            return []
+            logger.debug(f"Transcript store retrieval error: {e}")
 
+        # Fallback to targeted database search for matching videos
+        if not results:
+            try:
+                db_matched = await search_matching_videos_in_db(query, limit=k)
+                for v in db_matched:
+                    url = v.get("url") or v.get("Url") or ""
+                    vid_id = v.get("id") or v.get("Id") or ""
+                    title = v.get("title") or v.get("Title") or "Course Video"
+                    key = url or vid_id
+                    if key and key not in seen:
+                        seen.add(key)
+                        results.append({
+                            "id": vid_id,
+                            "video_id": vid_id,
+                            "title": title,
+                            "video_title": title,
+                            "url": url,
+                            "video_url": url,
+                            "thumbnail": v.get("thumbnail") or v.get("Thumbnail") or "",
+                            "video_thumbnail": v.get("thumbnail") or v.get("Thumbnail") or "",
+                            "duration": v.get("duration") or v.get("Duration") or "",
+                            "video_duration": v.get("duration") or v.get("Duration") or "",
+                        })
+            except Exception as e:
+                logger.debug(f"Targeted DB video search fallback failed: {e}")
+
+        return results[:k]
 
     async def get_video_by_topic_and_video_id(
         self,
@@ -971,6 +1000,24 @@ class ChatService:
             if not previous_questions:
                 return current_query
 
+            q_clean = current_query.strip().lower()
+            words = q_clean.split()
+            # ⚡ Fast-path: If the question is long (>= 4 words) and contains standard question words
+            # and no ambiguous pronouns/anaphora, it is already standalone.
+            ambiguous_terms = {
+                "it", "this", "that", "these", "those", "above", "he", "she", "they", "them",
+                "point", "option", "step", "first", "second", "third", "last", "previous",
+                "why so", "explain more", "tell more", "what about it", "why", "how so"
+            }
+            has_ambiguity = any(term in words or term in q_clean for term in ambiguous_terms)
+            is_clear_question = len(words) >= 4 and any(
+                q_clean.startswith(w) for w in ("what", "how", "why", "when", "where", "explain", "describe", "tell me", "can you", "could you", "define")
+            )
+
+            if is_clear_question and not has_ambiguity:
+                logger.info(f"⚡ Fast-path: '{current_query}' is already a standalone question (skipped LLM rewrite)")
+                return current_query
+
             last_question = previous_questions[-1]
 
             prompt = f"""
@@ -998,32 +1045,12 @@ class ChatService:
     - Do not change meaning
     - Do not add extra information
     - Output only the final question
-
-    Examples:
-
-    Q1: What is human error?
-    Q2: advantages and disadvantages
-    → What are the advantages and disadvantages of human error?
-
-    Answer:
-    1. Reduced efficiency
-    2. Safety risks
-    3. Increased cost
-
-    Q: explain point 2
-    → Explain safety risks of human error
-
-    Q: explain this
-    → Explain safety risks of human error
-
-    Q1: What is AI?
-    Q2: What is ML?
-    → What is ML?
     """
 
             response = await self.openai_service.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.0,
+                max_tokens=30,
             )
 
             rewritten = response.strip()
@@ -1043,38 +1070,9 @@ class ChatService:
         query: str
     ) -> str:
         """
-        Generate user-friendly understanding summary
+        Generate user-friendly understanding summary (bypassed for high-speed response latency).
         """
-
-        try:
-            prompt = f"""
-        You are Marine Tutor AI.
-
-        User question:
-        {query}
-
-        Task:
-        Write a short understanding summary ONLY if the question is related to marine education.
-
-        Rules:
-        - If the question is related to marine topics, write 1 short friendly summary
-        - If the question is NOT related to marine topics, return exactly: EMPTY
-        - Do NOT answer the question
-        - Do NOT provide general knowledge
-        - Do NOT explain non-marine topics
-        - Output ONLY the summary or EMPTY
-        """
-
-            response = await self.openai_service.chat(
-                [{"role": "user", "content": prompt}],
-                temperature=0.3,   # slightly creative
-            )
-
-            return response.strip()
-
-        except Exception as e:
-            logger.exception(f"❌ Understanding failed: {e}")
-            return ""    
+        return ""
 
     async def check_query_scope(self, query: str, chunks: List[Dict[str, Any]]) -> str:
         """
@@ -1181,7 +1179,9 @@ Rewritten Question:
         current_query: str,
         category: str | None = None,
         user_details: dict | None = None,
-    ) -> Tuple[NodeResponse, List[Dict[str, Any]], str, str,Dict[str, Any]]:
+        standalone_query: str | None = None,
+        understanding_summary: str | None = None,
+    ) -> Tuple[NodeResponse, List[Dict[str, Any]], str, str, Dict[str, Any]]:
 
         logger.info("Running chat pipeline")
 
@@ -1208,7 +1208,7 @@ Rewritten Question:
         ]
 
         # -----------------------------
-        #  QUERY REWRITE (NEW)
+        #  QUERY REWRITE (REUSE IF PASSED)
         # -----------------------------
         last_answer = None
         for msg in reversed(cleaned_messages):
@@ -1216,56 +1216,51 @@ Rewritten Question:
                 last_answer = msg.get("content")
                 break
 
-        standalone_query = await self.rewrite_query(
-            current_query=current_query,
-            previous_questions=previous_questions,
-            last_answer=last_answer,
-        )
-
-        # understanding_summary = await self.generate_understanding(
-        #     standalone_query
-        # )
-        router_decision = await self.analyzer.classify_for_router(
-            current_query,
-            previous_questions
-        )
+        if not standalone_query:
+            rewrite_task = asyncio.create_task(
+                self.rewrite_query(
+                    current_query=current_query,
+                    previous_questions=previous_questions,
+                    last_answer=last_answer,
+                )
+            )
+            router_task = asyncio.create_task(
+                self.analyzer.classify_for_router(
+                    current_query,
+                    previous_questions
+                )
+            )
+            standalone_query, router_decision = await asyncio.gather(rewrite_task, router_task)
+        else:
+            router_decision = await self.analyzer.classify_for_router(
+                current_query,
+                previous_questions
+            )
 
         node_type = router_decision.get("node_type", "").lower()
 
-        if node_type == "query":
-            understanding_summary = await self.generate_understanding(
-                standalone_query
-            )
-        else:
-            understanding_summary = ""
+        if understanding_summary is None:
+            if node_type == "query":
+                understanding_summary = await self.generate_understanding(
+                    standalone_query
+                )
+            else:
+                understanding_summary = ""
 
         logger.info(f"🧠 Understanding Summary:\n{understanding_summary}\n")
 
         logger.info("\n🧾 ===== QUERY DEBUG =====")
-
         logger.info(f"👉 Current Query:\n{current_query}\n")
-
-        logger.info("Previous Questions:")
-        for i, q in enumerate(previous_questions[-3:], 1):  # last 3 only
-            logger.info(f"   {i}. {q}")
-
-        logger.info(f"\n💡 Previous Answer:\n{last_answer}\n")
-
         logger.info(f"🧠 Rewritten Query:\n{standalone_query}")
-
         logger.info("===== END DEBUG =====\n")
 
-        logger.info(f"🧠 Rewritten Query: {standalone_query}")
-
-        # -----------------------------
-        # 2️⃣ ROUTER
-        # -----------------------------
-        router_decision = await self.analyzer.classify_for_router(
-            current_query, previous_questions
-        )
-
-        node_type = router_decision.get("node_type", "").lower()
         is_social = node_type in {"greeting", "goodbye", "thank", "well_wish"}
+        is_gap_analysis = (
+            node_type in {"gap_analysis_request", "gap_analysis"}
+            or router_decision.get("category") == "GAP_ANALYSIS_REQUEST"
+            or is_gap_analysis_request(current_query)
+            or is_gap_analysis_request(standalone_query)
+        )
 
         # -----------------------------
         # ⚡ FAST MODE
@@ -1282,22 +1277,31 @@ Rewritten Question:
             messages_with_user = cleaned_messages
             checkpoint_state = {}
 
+        elif is_gap_analysis:
+            logger.info("⚡ FAST MODE: GAP_ANALYSIS_REQUEST")
+
+            user_category = "GAP_ANALYSIS_REQUEST"
+            full_history = cleaned_messages
+            history_for_llm = []
+            meaningful_history = []
+            retrieval_chunks = []
+            video_suggestions = []
+            messages_with_user = cleaned_messages
+            checkpoint_state = {}
+
         # -----------------------------
         # 🧠 NORMAL MODE
         # -----------------------------
         else:
             logger.info(f"🧠 NORMAL MODE: {node_type}")
 
-            if self.session_service and session_id:
+            if self.session_service and session_id and current_query:
                 try:
-                    session = await self.session_service.get_session(session_id, user_id)
-                    existing_title = (session or {}).get("title") if session else None
-
-                    if (not existing_title or existing_title == "Untitled session") and current_query:
-                        await self.session_service.update_session_title(session_id, current_query)
-
+                    asyncio.create_task(
+                        self.session_service.update_session_title(session_id, current_query)
+                    )
                 except Exception:
-                    logger.exception("❌ Failed to set session title")
+                    pass
 
             user_category = self._normalize_category(
                 category or router_decision.get("category"),
@@ -1322,6 +1326,12 @@ Rewritten Question:
             logger.info(f"[MEMORY] Loaded meaningful_history: {len(meaningful_history)}")
 
         # -----------------------------
+        # 🔥 USER PROFILE
+        # -----------------------------
+        user_profile = user_details or {}
+        logger.info(f"✅ USER PROFILE USED: {user_profile}")
+
+        # -----------------------------
         # 🕵️ SCOPE CONTROL CHECK
         # -----------------------------
         is_out_of_scope = False
@@ -1334,9 +1344,10 @@ Rewritten Question:
             # Check scope using LLM
             scope_decision = await self.check_query_scope(standalone_query, retrieval_chunks)
             if scope_decision == "OUT-OF-SCOPE":
-                is_out_of_scope = True
-                retrieval_chunks = []
-                video_suggestions = []
+                if not is_company_query(standalone_query, user_profile.get("company_name", "")):
+                    is_out_of_scope = True
+                    retrieval_chunks = []
+                    video_suggestions = []
             elif scope_decision == "MIXED":
                 # Rewrite mixed query to keep only the in-scope marine portion
                 cleaned_query = await self.rewrite_mixed_query(standalone_query)
@@ -1352,12 +1363,6 @@ Rewritten Question:
         video_suggestions = self._normalize_video_suggestions(
             video_suggestions
         )
-
-        # -----------------------------
-        # 🔥 USER PROFILE
-        # -----------------------------
-        user_profile = user_details or {}
-        logger.info(f"✅ USER PROFILE USED: {user_profile}")
 
         # -----------------------------
         # 3️⃣ BUILD STATE
@@ -1396,7 +1401,38 @@ Rewritten Question:
 
         try:
 
-            if is_out_of_scope:
+            if is_gap_analysis:
+                logger.info("📑 SMS GAP ANALYSIS INQUIRY DETECTED")
+                gap_prompt_content = (
+                    "To compare your Safety Management System (SMS) with international maritime industry standards "
+                    "(SOLAS, MARPOL, STCW, ISM Code), please upload your SMS document. "
+                    "Would you like to upload your document to proceed with the gap analysis?"
+                )
+                state["node_response"] = {
+                    "type": "query",
+                    "content": gap_prompt_content,
+                    "sections": [
+                        {
+                            "topic_code": "SMS_GAP_ANALYSIS",
+                            "topic_name": "Safety Management System (SMS) Gap Analysis",
+                            "content": gap_prompt_content,
+                        }
+                    ],
+                    "chunks_used": [],
+                    "videos": [],
+                    "images": [],
+                    "pdfs": [],
+                    "question_suggestions": [
+                        "What maritime standards are covered in the gap analysis?",
+                        "What file formats are supported (.pdf, .docx)?",
+                    ],
+                    "metadata": {
+                        "category": "GAP_ANALYSIS_REQUEST",
+                        "requires_upload": True,
+                    }
+                }
+
+            elif is_out_of_scope:
 
                 logger.info("🚫 OUT OF SCOPE QUESTION REJECTED")
 
@@ -1419,25 +1455,32 @@ Rewritten Question:
                 }
 
             elif node_type == "query":
-
-                    state = await retrieval_node(
-                        state,
-                        self.vector_store,
-                        None
-                    )
-
+                has_company = bool(
+                    user_profile.get("company_id")
+                    or user_profile.get("company_name")
+                    or user_profile.get("CompanyName")
+                    or user_profile.get("company")
+                )
+                if has_company and self.company_vector_store:
                     state = await company_retrieval_node(
-                            state,
-                            self.company_vector_store,
-                        )
-
-                    state = await query_node(
                         state,
-                        self.openai_service,
-                        self.suggestion_service,
-                        self.vector_store,
+                        self.company_vector_store,
                     )
 
+                state = await retrieval_node(
+                    state,
+                    self.vector_store,
+                    None
+                )
+
+                state = await query_node(
+                    state,
+                    self.openai_service,
+                    self.suggestion_service,
+                    self.vector_store,
+                )
+
+                if has_company and state.get("company_chunks"):
                     state = await company_query_node(
                         state,
                         self.openai_service,
@@ -1486,48 +1529,90 @@ Rewritten Question:
 
         final_cleaned_history = self._clean_messages(updated_messages)
 
-        # return validated, final_cleaned_history, standalone_query
+        # Media allowed only for genuine in-scope course/company query responses
+        is_media_allowed = (
+            node_type == "query"
+            and not is_social
+            and not is_gap_analysis
+            and not is_out_of_scope
+            and user_category not in {"GREETING", "GOODBYE", "THANK", "WELL_WISH", "FALLBACK", "GAP_ANALYSIS_REQUEST", "OUT_OF_SCOPE"}
+        )
+
+        all_videos = []
         all_images = []
-
-        seen = set()
-
-        for chunk in retrieval_chunks:
-            for image in chunk.get("images", []):
-
-                key = image.get("id") or image.get("base64")
-
-                if key in seen:
-                    continue
-
-                seen.add(key)
-                all_images.append(image)
-
-        # all_pdfs = []
-
-        # for chunk in retrieval_chunks:
-        #     all_pdfs.extend(chunk.get("pdfs", []))
-
         all_pdfs = []
-        seen_pdfs = set()
-
-        for chunk in retrieval_chunks:
-            for pdf in chunk.get("pdfs", []):
-
-                key = pdf.get("id") or pdf.get("url")
-
-                if key in seen_pdfs:
-                    continue
-
-                seen_pdfs.add(key)
-                all_pdfs.append(pdf)
-
         all_topic_codes = []
 
-        for chunk in retrieval_chunks:
-            topic_code = chunk.get("topic_code")
+        if is_media_allowed:
+            # Collect active and company chunks
+            active_chunks = state.get("retrieval_chunks", []) or retrieval_chunks or []
+            company_chunks = state.get("company_chunks", []) or []
+            all_chunks = list(active_chunks) + list(company_chunks)
 
-            if topic_code and topic_code not in all_topic_codes:
-                all_topic_codes.append(topic_code)
+            # Collect videos from all sources
+            state_videos = state.get("video_suggestions", []) or []
+            node_videos = getattr(validated, "videos", None) or []
+            if isinstance(node_videos, list):
+                combined_video_sources = state_videos + (video_suggestions or []) + node_videos
+            effective_q = standalone_query or current_query
+            all_videos = extract_videos(all_chunks, combined_video_sources, query=effective_q)
+
+            # Fallback database search for matching videos if none found and in-scope
+            if not all_videos and effective_q:
+                try:
+                    db_vids = await search_matching_videos_in_db(effective_q, limit=5)
+                    if db_vids:
+                        all_videos = db_vids
+                except Exception as e:
+                    logger.debug(f"Video search fallback failed: {e}")
+
+            node_images = getattr(validated, "images", None) or []
+            combined_images = node_images + (state.get("images") or [])
+            all_images = extract_images(all_chunks, combined_images, query=effective_q, max_images=6)
+
+            # Search matching images in database if none or few found and in-scope
+            if len(all_images) < 3 and effective_q:
+                try:
+                    db_imgs = await search_matching_images_in_db(effective_q, limit=6)
+                    seen_img_keys = {
+                        (img.get("id") or img.get("title") or img.get("url") or "").strip().lower()
+                        for img in all_images
+                    }
+                    for img in db_imgs:
+                        k = (img.get("id") or img.get("title") or img.get("url") or "").strip().lower()
+                        if k and k not in seen_img_keys:
+                            seen_img_keys.add(k)
+                            all_images.append(img)
+                except Exception as e:
+                    logger.debug(f"Image search fallback failed: {e}")
+
+            # Process and cache images, deduplicate, and attach embedded base64 data
+            if all_images:
+                try:
+                    all_images = await ImageManager.process_and_cache_images(all_images, max_images=6)
+                except Exception as e:
+                    logger.debug(f"Image processing and caching failed: {e}")
+
+            seen_pdfs = set()
+            for chunk in all_chunks:
+                for pdf in chunk.get("pdfs", []):
+                    key = pdf.get("id") or pdf.get("url") or pdf.get("Url") or pdf.get("Link") or pdf.get("link")
+                    if not key or key in seen_pdfs:
+                        continue
+                    seen_pdfs.add(key)
+                    all_pdfs.append(pdf)
+
+            node_pdfs = getattr(validated, "pdfs", None) or []
+            for pdf in node_pdfs:
+                key = pdf.get("id") or pdf.get("url") or pdf.get("Url") or pdf.get("Link") or pdf.get("link")
+                if key and key not in seen_pdfs:
+                    seen_pdfs.add(key)
+                    all_pdfs.append(pdf)
+
+            for chunk in all_chunks:
+                topic_code = chunk.get("topic_code")
+                if topic_code and topic_code not in all_topic_codes:
+                    all_topic_codes.append(topic_code)
 
         state["messages"] = updated_messages
         self._last_state = state
@@ -1537,9 +1622,9 @@ Rewritten Question:
             standalone_query,
             understanding_summary,
             {
-                "videos": video_suggestions,
-                "images": all_images,   # add later if you have image retrieval
-                "pdfs": all_pdfs,     # add later if needed
+                "videos": all_videos,
+                "images": all_images,
+                "pdfs": all_pdfs,
                 "topic_codes": all_topic_codes,
                 "company_answer": state.get("company_answer"),
             }

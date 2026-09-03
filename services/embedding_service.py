@@ -17,6 +17,7 @@ class EmbeddingService:
         self.openai_service = openai_service
         self.embedding_model = EMBEDDING_MODEL
         self.embedding_dim = EMBEDDING_DIM
+        self._query_cache: dict[str, List[float]] = {}
         logger.info("🔧 Embedding model: text-embedding-3-large (3072 dims)")
 
     async def embed_documents(self, documents: List[str]) -> List[List[float]]:
@@ -44,6 +45,12 @@ class EmbeddingService:
         return fixed_embeddings
 
     async def embed_query(self, query: str) -> List[float]:
+        cleaned = (query or "").strip().lower()
+        if not cleaned:
+            return [0.0] * self.embedding_dim
+        if cleaned in self._query_cache:
+            return self._query_cache[cleaned]
+
         embedding = await self.openai_service.embed(query)
         if len(embedding) != self.embedding_dim:
             logger.warning(
@@ -52,10 +59,17 @@ class EmbeddingService:
                 len(embedding),
             )
             embedding = (embedding + [0.0] * self.embedding_dim)[: self.embedding_dim]
+
+        if len(self._query_cache) > 1000:
+            self._query_cache.pop(next(iter(self._query_cache)))
+        self._query_cache[cleaned] = embedding
         return embedding
 
     def embed_text(self, text: str) -> List[float]:
         logger.error("🧠 Embedding input text = '{}'", text[:200])
+        cleaned = (text or "").strip().lower()
+        if cleaned and cleaned in self._query_cache:
+            return self._query_cache[cleaned]
         embedding = asyncio.run(self.openai_service.embed(text))
         if len(embedding) != self.embedding_dim:
             logger.warning(
@@ -64,4 +78,9 @@ class EmbeddingService:
                 len(embedding),
             )
             embedding = (embedding + [0.0] * self.embedding_dim)[: self.embedding_dim]
+        if cleaned:
+            if len(self._query_cache) > 1000:
+                self._query_cache.pop(next(iter(self._query_cache)))
+            self._query_cache[cleaned] = embedding
         return embedding
+

@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     openai_model: str = Field("gpt-4-turbo", alias="OPENAI_MODEL")
     openai_temperature: float = Field(0.0, alias="OPENAI_TEMPERATURE")
-    openai_max_tokens: int = Field(3000, alias="OPENAI_MAX_TOKENS")
+    openai_max_tokens: int = Field(4000, alias="OPENAI_MAX_TOKENS")
     chunk_size: int = Field(500, alias="CHUNK_SIZE")
     faiss_knn: int = Field(10, alias="FAISS_KNN")  # Balanced: increased from 3 to 10 for better video suggestions while maintaining reasonable latency
     faiss_index_path: str = Field("./storage/faiss_index", alias="FAISS_INDEX_PATH")

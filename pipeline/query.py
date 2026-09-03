@@ -9,6 +9,84 @@ from services.acronym_disambiguation_service import AcronymDisambiguationService
 from services.conversation_context_service import ConversationContextService
 
 
+def format_structured_markdown(text: str) -> str:
+    if not text:
+        return ""
+    lines = text.strip().split("\n")
+    formatted = []
+
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            formatted.append("")
+            continue
+
+        if line.startswith("|"):
+            formatted.append(raw)
+            continue
+
+        clean = re.sub(r"^#+\s*", "", line).strip()
+        clean_no_stars = re.sub(r"^\*+|\*+$", "", clean).rstrip(":").strip()
+
+        # Check if already a markdown header
+        if line.startswith("#"):
+            match = re.match(r"^#+", line)
+            level = min(len(match.group(0)), 4) if match else 4
+            hashes = "#" * level
+            formatted.append(f"\n{hashes} **{clean_no_stars}**\n")
+            continue
+
+        # Detect Subheadings
+        is_subheading = False
+        if (
+            not clean.startswith(("-", "*", "•", "1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9."))
+            and len(clean) < 80
+            and (
+                line.endswith(":")
+                or re.match(r"^(?:\d+\.|\bOverview\b|\bOperational\b|\bComponents\b|\bPrinciples\b|\bProcedures\b|\bPrevention\b|\bStarting\b|\bStopping\b|\bOperation\b|\bWorking\b|\bCore\b|\bKey\b|\bOperating\b|\bSafety\b|\bChecklist\b|\bStep-by-Step\b|\bArchitecture\b)", clean, re.IGNORECASE)
+                or (not any(clean.endswith(p) for p in [".", "!", ";", ","]) and ":" not in clean)
+            )
+            and ":" not in clean[:-1]
+        ):
+            is_subheading = True
+
+        if is_subheading:
+            formatted.append(f"\n#### **{clean_no_stars}**\n")
+            continue
+
+        # Numbered list
+        num_m = re.match(r"^(\d+\.)\s+(.+)$", clean)
+        if num_m:
+            prefix, body = num_m.group(1), num_m.group(2).strip()
+            col_m = re.match(r"^([A-Za-z0-9\s/&,()_-]{2,50}):\s*(.+)$", body)
+            if col_m and not body.startswith("**"):
+                formatted.append(f"{prefix} **{col_m.group(1).strip()}:** {col_m.group(2).strip()}")
+            else:
+                formatted.append(f"{prefix} {body}")
+            continue
+
+        # Bullet list
+        if re.match(r"^[-*•]\s+", clean):
+            body = re.sub(r"^[-*•]\s+", "", clean).strip()
+            col_m = re.match(r"^([A-Za-z0-9\s/&,()_-]{2,50}):\s*(.+)$", body)
+            if col_m and not body.startswith("**"):
+                formatted.append(f"- **{col_m.group(1).strip()}:** {col_m.group(2).strip()}")
+            else:
+                formatted.append(f"- {body}")
+            continue
+
+        # Key-Value property line without bullet
+        col_m = re.match(r"^([A-Za-z0-9\s/&,()_-]{2,50}):\s+(.+)$", clean)
+        if col_m and len(clean) < 250 and not clean.startswith(("http", "Note:")):
+            formatted.append(f"- **{col_m.group(1).strip()}:** {col_m.group(2).strip()}")
+            continue
+
+        # Regular paragraph text
+        formatted.append(clean)
+
+    res = "\n".join(formatted)
+    res = re.sub(r"\n{3,}", "\n\n", res)
+    return res.strip()
 
 
 QUERY_PROMPT = """
@@ -29,16 +107,22 @@ COURSE CONTEXT:
 
 CRITICAL FORMATTING & SYNTHESIS INSTRUCTIONS:
 
-1. STRUCTURED & PROFESSIONAL MARITIME PRESENTATION:
-- Begin with a clear, natural conversational overview introducing the subject, its operational importance, and safety objectives.
-- Provide smooth narrative transitions between sections so the response flows logically rather than abruptly presenting raw tables.
+STRICT RULES:
+- Answer ONLY from COURSE CONTEXT. No hallucination. Zero external knowledge fabrication.
+- Structure the response with clear headings, structured tables, sequential steps, and formatted bullet points.
+
+1. STRUCTURED & VISUALLY STUNNING MARITIME PRESENTATION:
+- Begin with a clear, professional technical overview introducing the subject and its operational/engineering significance.
+- Provide smooth narrative transitions between sections.
 - Format the response using clean, expressive Markdown:
-  • Clear Headings: `### Main Topic / Section`
-  • Subheadings: `#### Sub-Phase or Verification Category`
-  • Bold key terms, limits, and safety-critical numbers (e.g., `**O₂ content ≤ 8%**`, `**Positive pressure**`, `**Safe access**`)
-  • Numbered lists (`1. `, `2. `) for sequential procedures
-  • Bullet points (`- `) for safety checks, equipment lists, and precautions
-  • Double line breaks between paragraphs and sections for clear readability
+  • Clear Headings: `### Main Topic / Concept`
+  • Subheadings: `#### Sub-Phase or Technical Category`
+  • Comparison & Parameter Tables: Use clean Markdown tables to summarize component functions, operational parameters, pressure/flow limits, or comparison matrices where applicable.
+  • Numbered sequential steps (`1. `, `2. `, `3. `) for operational workflows (e.g. Starting, Running, Stopping, Testing).
+  • Bullet points (`- `) with bold labels for key parameters, formulas, and safety rules (`- **Parameter:** description`).
+  • Bold critical engineering thresholds (e.g. `**O₂ content ≤ 8%**`, `**NPSH Margin ≥ 0.5m**`, `**Positive Suction Head**`).
+  • Maintain clean paragraph explanations under each subheading instead of dumping flat unformatted lists.
+  • Double line breaks between paragraphs and sections for clear readability.
 
 2. CHECKLISTS, FORMS & MARITIME PROCEDURES (FLOW & READABILITY):
 - When presenting a checklist, form, or procedure:
@@ -426,6 +510,9 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
                     pdfs.append(pdf)
 
     # RESPONSE
+    for section in sections:
+        if isinstance(section, dict) and "content" in section:
+            section["content"] = format_structured_markdown(section["content"])
 
     full_content = "\n\n".join(
         section.get("content", "")

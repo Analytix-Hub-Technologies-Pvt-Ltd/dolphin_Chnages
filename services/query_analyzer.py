@@ -67,22 +67,19 @@ class QueryAnalyzer:
         elif any(kw in query_lower for kw in self.PRIORITIZED_KEYWORDS):
             logger.info(f"Prioritized keyword detected in query: {standalone}. Forcing category QUERY.")
             category = "QUERY"
+        elif self._is_obvious_query(standalone) or self._looks_like_technical_term(standalone):
+            logger.info(f"[ANALYZER] ⚡ Fast-path: '{standalone}' identified as obvious query/technical term (skipped GPT)")
+            category = await self._classify_query(standalone)
         else:
-            # NEW: Check if this looks like a technical query (short, uppercase, alphanumeric)
-            # Skip expensive GPT call for obvious technical terms like "EEDI", "SEEMP", etc.
-            if self._looks_like_technical_term(standalone):
-                logger.info(f"[ANALYZER] '{standalone}' looks like technical term, skipping GPT, using rule-based classification")
-                category = await self._classify_query(standalone)
-            else:
-                # ✅ FIX: await GPT intent service
-                gpt_intent = await self.intent_service.classify_intent(standalone)
+            # ✅ FIX: await GPT intent service
+            gpt_intent = await self.intent_service.classify_intent(standalone)
 
-                dynamic_categories = {"GREETING", "GOODBYE", "THANK", "WELL_WISH", "THREADING", "NEGATIVE"}
-                if gpt_intent in dynamic_categories:
-                    category = gpt_intent
-                else:
-                    # ✅ FIX: await async call
-                    category = await self._classify_query(standalone)
+            dynamic_categories = {"GREETING", "GOODBYE", "THANK", "WELL_WISH", "THREADING", "NEGATIVE"}
+            if gpt_intent in dynamic_categories:
+                category = gpt_intent
+            else:
+                # ✅ FIX: await async call
+                category = await self._classify_query(standalone)
 
         # ✅ FIX: await async call
         messages = await self._create_analysis_prompt(
@@ -90,6 +87,36 @@ class QueryAnalyzer:
         )
 
         return standalone, category, messages
+
+    def _is_obvious_query(self, query: str) -> bool:
+        """Fast check for standard questions and marine technical terms to skip LLM classification."""
+        q = query.lower().strip()
+        if not q or len(q) < 3:
+            return False
+        
+        starters = (
+            "what", "why", "how", "when", "where", "which", "who",
+            "explain", "describe", "tell", "detail", "list", "define",
+            "procedure", "checklist", "guideline", "guidelines", "steps",
+            "can you", "could you", "please explain", "give me", "show me"
+        )
+        if any(q.startswith(s) for s in starters):
+            return True
+        if "?" in q and not self._is_simple_intent(q):
+            return True
+        
+        domain_terms = {
+            "solas", "marpol", "ism", "stcw", "colreg", "eedi", "seemp", "cow", "igs", "ows",
+            "tank", "cargo", "ship", "vessel", "engine", "boiler", "oil", "fuel", "safety",
+            "ballast", "anchor", "pump", "valve", "bridge", "deck", "navigation", "rudder",
+            "propeller", "generator", "turbine", "steering", "voyage", "bunker", "mooring",
+            "lifeboat", "liferaft", "fire", "extinguisher", "bilge", "sludge", "oily", "draft",
+            "trim", "stability", "hatch", "holds", "crane", "winch", "radar", "ecdis", "ais"
+        }
+        words = set(re.findall(r'\b[a-z0-9]+\b', q))
+        if words.intersection(domain_terms):
+            return True
+        return False
     
     def _is_simple_intent(self, query: str) -> str | None:
         """
@@ -135,7 +162,7 @@ class QueryAnalyzer:
             "good morning", "good afternoon", "good evening", "good day",
             "morning", "afternoon", "evening"
         }
-        if query_clean in greeting_patterns:
+        if query_clean in greeting_patterns or any(query_clean.startswith(gw) for gw in ("hello ", "hi ", "hey ", "good morning", "good afternoon", "good evening", "good day")):
             return "GREETING"
         
         # Well-wishes (how are you, etc.)

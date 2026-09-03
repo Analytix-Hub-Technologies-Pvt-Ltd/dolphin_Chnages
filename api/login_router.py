@@ -36,10 +36,6 @@ async def debug_db(pool: Pool = Depends(get_db_pool)):
     return cols
 
 @router.post("", response_model=LoginResponse)
-@rate_limit_auth
-
-
-
 @router.post("/login1", response_model=LoginResponse)
 async def login(
     request: Request,
@@ -55,7 +51,12 @@ async def login(
     # -------------------------------------------------
     async def create_or_update_user(user_data: UserCreate):
 
-        email = user_data.email.lower()
+        email = (user_data.email or "").lower().strip()
+        if not email:
+            raise HTTPException(
+                status_code=400,
+                detail="Email address is required"
+            )
 
         existing_user = await auth_service.get_user_by_useremail(email)
 
@@ -103,8 +104,8 @@ async def login(
                 algorithms=["HS256"]
             )
 
-            email = decoded["email"].lower()
-            username = decoded["name"]
+            email = (decoded.get("email") or "").lower().strip()
+            username = decoded.get("name", "")
 
         except jwt.ExpiredSignatureError:
             raise HTTPException(
@@ -143,13 +144,15 @@ async def login(
         if (
             not dolphin_result
             or dolphin_result.get("Status") == "Error"
+            or not dolphin_result.get("EmailId")
+            or not dolphin_result.get("FullName")
         ):
             raise HTTPException(
                 status_code=401,
                 detail="Invalid credentials"
             )
 
-        email = dolphin_result.get("EmailId", "").lower()
+        email = (dolphin_result.get("EmailId") or "").lower().strip()
 
         user = await create_or_update_user(
             UserCreate(
@@ -201,9 +204,7 @@ async def login(
         str(user.id)
     )
 
-    print("\n🧠 ===== REDIS USER STORED =====")
-    print(redis_user)
-    print("================================\n")
+    logger.debug(f"User stored in Redis: {user.id}")
 
     # -------------------------------------------------
     # RESPONSE

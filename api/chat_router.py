@@ -25,6 +25,7 @@ from services.session_service import SessionService
 from retrieval.faiss_store import FAISSStore
 from core.redis_client import redis_service
 from models.database import get_pool
+from pipeline.retrieval import compute_video_relevance_score
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 MAX_MESSAGE_LENGTH = 4000
@@ -281,6 +282,20 @@ async def chat(
         except Exception as e:
             print(f"❌ Failed to fetch user details fallback from PostgreSQL: {e}")
 
+    # Dynamic resolution: if user has company_name but missing company_id, resolve from DB
+    if not user_details.get("company_id") and user_details.get("company_name"):
+        try:
+            async with pool.acquire() as conn:
+                cid_row = await conn.fetchrow(
+                    "SELECT company_id FROM users WHERE LOWER(company_name) = LOWER($1) AND company_id IS NOT NULL LIMIT 1",
+                    user_details.get("company_name")
+                )
+                if cid_row and cid_row.get("company_id"):
+                    user_details["company_id"] = str(cid_row["company_id"])
+                    print(f"Dynamically resolved company_id: {user_details['company_id']} for {user_details.get('company_name')}")
+        except Exception as e:
+            print(f"Could not dynamically resolve company_id: {e}")
+
     company_id = user_details.get("company_id")
     print(company_id)
 
@@ -322,144 +337,33 @@ async def chat(
                 last_answer=last_answer
             )
 
-            rewrite_text = standalone_query or ""
-
-            for token in re.findall(r'\s+|\S+', rewrite_text):
-
-                payload_data = {
-                    "type": "rewrite_token",
-                    "token": token
-                }
-
-                yield (
-                    f"data: {json.dumps(payload_data)}\n\n"
-                )
-
-                await asyncio.sleep(0.01)
-
-            # ✅ rewrite done
-            rewrite_done_payload = {
-                "type": "rewrite_done"
-            }
-
-            yield (
-                f"data: {json.dumps(rewrite_done_payload)}\n\n"
+            # Start Understanding, Chat Pipeline, and Transcript search concurrently
+            understanding_task = asyncio.create_task(
+                chat_service.generate_understanding(standalone_query)
             )
-
-            # -----------------------------
-            # 🧠 STEP 2: UNDERSTANDING
-            # -----------------------------
-            understanding_summary = (
-                await chat_service.generate_understanding(
-                    standalone_query
-                )
-            )
-
-            understanding_text = (
-                understanding_summary or ""
-            ).strip()
-
-            # ✅ Skip EMPTY / blank responses
-            if (
-                understanding_text
-                and understanding_text.upper() != "EMPTY"
-            ):
-
-                for token in re.findall(r'\s+|\S+', understanding_text):
-
-                    payload_data = {
-                        "type": "understanding_token",
-                        "token": token
-                    }
-
-                    yield (
-                        f"data: {json.dumps(payload_data)}\n\n"
-                    )
-
-                    await asyncio.sleep(0.01)
-
-                understanding_done_payload = {
-                    "type": "understanding_done"
-                }
-
-                yield (
-                    f"data: {json.dumps(understanding_done_payload)}\n\n"
-                )
-
-            # -----------------------------
-            # 🤖 STEP 3: CHAT PIPELINE
-            # -----------------------------
-            # (
-            #     node_response,
-            #     updated_messages,
-            #     _,
-            #     _,
-            #     media
-            # ) = await chat_service.run_chat(
-            #     user_id=user_id,
-            #     session_id=session_id,
-            #     db_messages=messages,
-            #     current_query=standalone_query,
-            #     category=payload.category,
-            #     user_details=user_details
-            # )
 
             chat_task = asyncio.create_task(
                 chat_service.run_chat(
                     user_id=user_id,
                     session_id=session_id,
                     db_messages=messages,
-                    current_query=standalone_query,
+                    current_query=user_content,
                     category=payload.category,
                     user_details=user_details,
+                    standalone_query=standalone_query,
                 )
             )
-
-            # transcript_task = asyncio.create_task(
-            #     chat_service._retrieve_transcript_chunks(
-            #         standalone_query
-            #     )
-            # )
 
             async def transcript_search():
                 try:
                     logger.info("🎥 Preparing transcript search...")
-
-                    cleaned_messages = chat_service._clean_messages(messages)
-
-                    previous_questions = [
-                        m.get("content")
-                        for m in cleaned_messages
-                        if m.get("role") == "user"
-                    ]
-
-                    last_answer = next(
-                        (
-                            m.get("content")
-                            for m in reversed(cleaned_messages)
-                            if m.get("role") == "assistant"
-                        ),
-                        None,
-                    )
-
-                    transcript_query = await chat_service.rewrite_query(
-                        current_query=user_content,
-                        previous_questions=previous_questions,
-                        last_answer=last_answer,
-                    )
-
-                    logger.info(f"🎥 Transcript Rewrite Query: {transcript_query}")
-
                     transcript_chunks = await chat_service._retrieve_transcript_chunks(
-                        transcript_query
+                        standalone_query
                     )
-
                     logger.info(
                         f"🎥 Transcript Search returned {len(transcript_chunks)} chunks"
                     )
-
                     return transcript_chunks
-
                 except Exception:
                     logger.exception("❌ Transcript search failed")
                     return []
@@ -468,6 +372,41 @@ async def chat(
                 transcript_search()
             )
 
+            rewrite_text = standalone_query or ""
+
+            for token in re.findall(r'\s+|\S+', rewrite_text):
+                payload_data = {
+                    "type": "rewrite_token",
+                    "token": token
+                }
+                yield f"data: {json.dumps(payload_data)}\n\n"
+
+            # ✅ rewrite done
+            yield f"data: {json.dumps({'type': 'rewrite_done'})}\n\n"
+
+            # -----------------------------
+            # 🧠 STEP 2: UNDERSTANDING
+            # -----------------------------
+            understanding_summary = await understanding_task
+            understanding_text = (understanding_summary or "").strip()
+
+            # ✅ Skip EMPTY / blank responses
+            if (
+                understanding_text
+                and understanding_text.upper() != "EMPTY"
+            ):
+                for token in re.findall(r'\s+|\S+', understanding_text):
+                    payload_data = {
+                        "type": "understanding_token",
+                        "token": token
+                    }
+                    yield f"data: {json.dumps(payload_data)}\n\n"
+
+                yield f"data: {json.dumps({'type': 'understanding_done'})}\n\n"
+
+            # -----------------------------
+            # 🤖 STEP 3: CHAT PIPELINE
+            # -----------------------------
             (
                 node_response,
                 updated_messages,
@@ -476,42 +415,33 @@ async def chat(
                 media
             ) = await chat_task
 
-           
             sections = node_response.sections or []
 
             if sections:
-
                 for section in sections:
-
                     source_data = {
                         "type": "source_topic",
                         "topic_code": section.get("topic_code"),
                         "topic_name": section.get("topic_name")
                     }
-
                     yield f"data: {json.dumps(source_data)}\n\n"
 
                     for token in re.findall(r'\s+|\S+', section.get("content", "") or ""):
-
                         content_data = {
                             "type": "content",
                             "token": token
                         }
-
                         yield f"data: {json.dumps(content_data)}\n\n"
-                        await asyncio.sleep(0.02)
+                        await asyncio.sleep(0.0005)
 
             else:
-
                 for token in re.findall(r'\s+|\S+', node_response.content or ""):
-
                     content_data = {
                         "type": "content",
                         "token": token
                     }
-
                     yield f"data: {json.dumps(content_data)}\n\n"
-                    await asyncio.sleep(0.02)
+                    await asyncio.sleep(0.0005)
 
 
             # ✅ suggestions
@@ -529,12 +459,21 @@ async def chat(
             # -----------------------------
             # 🎥 STEP 4: MEDIA
             # -----------------------------
+            node_meta = getattr(node_response, "metadata", None) or {}
+            media = media or {}
+            is_non_query_response = (
+                node_meta.get("category") in {"GREETING", "GOODBYE", "THANK", "WELL_WISH", "FALLBACK", "GAP_ANALYSIS_REQUEST", "OUT_OF_SCOPE"}
+                or node_meta.get("routing_reason") == "out_of_scope"
+                or bool(node_meta.get("requires_upload"))
+                or (bool(node_response.content) and "This is not part of the available course material" in node_response.content)
+            )
+
             media_payload = {
                 "type": "media",
-                "videos": media.get("videos", [])[:5],
-                "images": media.get("images", [])[:3],
-                "pdfs": media.get("pdfs", [])[:2],
-                "topic_codes": media.get("topic_codes", [])
+                "videos": [] if is_non_query_response else media.get("videos", [])[:5],
+                "images": [] if is_non_query_response else media.get("images", [])[:6],
+                "pdfs": [] if is_non_query_response else media.get("pdfs", [])[:2],
+                "topic_codes": [] if is_non_query_response else media.get("topic_codes", [])
             }
 
             yield (
@@ -543,7 +482,7 @@ async def chat(
 
             company_answer = media.get("company_answer")
 
-            if company_answer:
+            if company_answer and not is_non_query_response:
                 yield (
                     "data: "
                     + json.dumps(
@@ -562,16 +501,56 @@ async def chat(
             transcript_chunks = await transcript_task
 
             unique_chunks = []
-            seen_videos = set()
+            if not is_non_query_response:
+                seen_video_ids = set()
+                seen_video_titles = set()
+                # Initialize seen sets with videos already delivered in media event
+                for mv in (media.get("videos", []) or []):
+                    m_id = str(mv.get("id") or mv.get("video_id") or mv.get("Id") or "").strip().lower()
+                    m_title = str(mv.get("title") or mv.get("Title") or "").strip().lower()
+                    if m_id:
+                        seen_video_ids.add(m_id)
+                    if m_title and len(m_title) > 3:
+                        seen_video_titles.add(m_title)
 
-            for chunk in transcript_chunks:
-                video_id = chunk.get("video_id")
+                eff_transcript_q = transcript_query or user_content
+                for chunk in transcript_chunks:
+                    video_id = str(chunk.get("video_id") or chunk.get("id") or "").strip().lower()
+                    video_url = chunk.get("video_url") or chunk.get("url") or (f"/storage/videos/{video_id}.mp4" if video_id else "")
+                    video_title = chunk.get("video_title") or chunk.get("title") or "Video"
+                    video_title_clean = video_title.strip().lower()
+                    video_about = chunk.get("about") or chunk.get("topic_name") or ""
+                    video_thumb = chunk.get("video_thumbnail") or chunk.get("thumbnail") or ""
+                    video_duration = chunk.get("video_duration") or chunk.get("duration") or ""
 
-                if video_id in seen_videos:
-                    continue
+                    # Strict relevance filtering (>= 0.70)
+                    rel_score = compute_video_relevance_score({"title": video_title, "about": video_about}, eff_transcript_q)
+                    if rel_score < 0.70:
+                        continue
 
-                seen_videos.add(video_id)
-                unique_chunks.append(chunk)
+                    # Deduplication against already sent videos and within transcript
+                    if video_id and video_id in seen_video_ids:
+                        continue
+                    if video_title_clean and len(video_title_clean) > 3 and video_title_clean in seen_video_titles:
+                        continue
+
+                    if video_id:
+                        seen_video_ids.add(video_id)
+                    if video_title_clean and len(video_title_clean) > 3:
+                        seen_video_titles.add(video_title_clean)
+
+                    unique_chunks.append({
+                        "id": video_id,
+                        "video_id": video_id,
+                        "title": video_title,
+                        "video_title": video_title,
+                        "url": video_url,
+                        "video_url": video_url,
+                        "thumbnail": video_thumb,
+                        "video_thumbnail": video_thumb,
+                        "duration": video_duration,
+                        "video_duration": video_duration,
+                    })
 
             yield (
                 "data: "
@@ -590,6 +569,21 @@ async def chat(
             # -----------------------------
             # 💾 SAVE
             # -----------------------------
+            if updated_messages and isinstance(updated_messages[-1], dict) and updated_messages[-1].get("role") == "assistant":
+                if is_out_of_scope_response:
+                    updated_messages[-1]["videos"] = []
+                    updated_messages[-1]["images"] = []
+                    updated_messages[-1]["pdfs"] = []
+                elif unique_chunks:
+                    existing_vids = updated_messages[-1].get("videos") or []
+                    seen_urls = {v.get("url") or v.get("id") for v in existing_vids if isinstance(v, dict)}
+                    for uv in unique_chunks:
+                        k = uv.get("url") or uv.get("id")
+                        if k and k not in seen_urls:
+                            seen_urls.add(k)
+                            existing_vids.append(uv)
+                    updated_messages[-1]["videos"] = existing_vids
+
             await redis_service.set_session_messages(
                 session_id,
                 updated_messages
@@ -597,12 +591,14 @@ async def chat(
 
             print("📤 Redis updated")
 
-            await session_service.update_session_messages(
-                session_id,
-                updated_messages
+            asyncio.create_task(
+                session_service.update_session_messages(
+                    session_id,
+                    updated_messages
+                )
             )
 
-            print("💾 PostgreSQL updated")
+            print("💾 PostgreSQL update scheduled")
 
             print("✅ STREAM COMPLETE")
 
