@@ -20,7 +20,7 @@ class User(BaseModel):
     id_country: str | None = None
     user_bio: str | None = None
     user_courses: str | None = None
-    company_id : int |  None = None
+    company_id: str | int | None = None
 
 class UserCreate(BaseModel):
     name: str
@@ -36,7 +36,7 @@ class UserCreate(BaseModel):
     ship_type: str | None = None
     id_type: str | None =  None
     id_country: str | None = None
-    company_id : int | None = None
+    company_id: str | int | None = None
 
 class LoginRequest(BaseModel):
     email: Optional[str] = None

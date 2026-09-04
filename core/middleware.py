@@ -20,9 +20,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "Permissions-Policy": (
                 "geolocation=(), microphone=(), camera=(), payment=(), usb=()"
             ),
-            "Cross-Origin-Embedder-Policy": "same-origin",
-            "Cross-Origin-Opener-Policy": "same-origin",
-            "Cross-Origin-Resource-Policy": "same-origin",
+            "Cross-Origin-Resource-Policy": "cross-origin",
         }
 
 

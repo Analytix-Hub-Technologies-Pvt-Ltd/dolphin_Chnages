@@ -513,7 +513,7 @@ async def chat(
                     if m_title and len(m_title) > 3:
                         seen_video_titles.add(m_title)
 
-                eff_transcript_q = transcript_query or user_content
+                eff_transcript_q = standalone_query or user_content
                 for chunk in transcript_chunks:
                     video_id = str(chunk.get("video_id") or chunk.get("id") or "").strip().lower()
                     video_url = chunk.get("video_url") or chunk.get("url") or (f"/storage/videos/{video_id}.mp4" if video_id else "")
@@ -570,7 +570,7 @@ async def chat(
             # 💾 SAVE
             # -----------------------------
             if updated_messages and isinstance(updated_messages[-1], dict) and updated_messages[-1].get("role") == "assistant":
-                if is_out_of_scope_response:
+                if is_non_query_response:
                     updated_messages[-1]["videos"] = []
                     updated_messages[-1]["images"] = []
                     updated_messages[-1]["pdfs"] = []

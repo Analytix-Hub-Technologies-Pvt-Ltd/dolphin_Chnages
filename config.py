@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     db_user: str = Field("postgres", alias="DB_USER")
     db_password: str = Field("root", alias="DB_PASSWORD")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
-    openai_model: str = Field("gpt-4-turbo", alias="OPENAI_MODEL")
+    openai_model: str = Field("gpt-4o", alias="OPENAI_MODEL")
     openai_temperature: float = Field(0.0, alias="OPENAI_TEMPERATURE")
     openai_max_tokens: int = Field(4000, alias="OPENAI_MAX_TOKENS")
     chunk_size: int = Field(500, alias="CHUNK_SIZE")

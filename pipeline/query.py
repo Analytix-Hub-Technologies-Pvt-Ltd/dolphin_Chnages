@@ -291,12 +291,8 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
         for field in ["content", "topic_content", "summary", "text"]:
             val = c.get(field)
             if val:
-                return val[:8000]
+                return val[:3500]
         return ""
-
-    # chunks_text = "\n\n---\n\n".join(
-    #     [format_chunk(c) for c in chunks if format_chunk(c)]
-    # )
 
     chunk_blocks = []
     seen_chunk_texts = set()
@@ -322,7 +318,7 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
     {formatted}
     """
         )
-        if len(chunk_blocks) >= 5:
+        if len(chunk_blocks) >= 4:
             break
 
     chunks_text = "\n\n---\n\n".join(chunk_blocks)

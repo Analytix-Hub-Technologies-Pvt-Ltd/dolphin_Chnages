@@ -867,6 +867,27 @@ async def retrieval_node(
         logger.error(f"Retrieval failed: {e}")
         chunks = []
 
+    # Direct database keyword search fallback if FAISS index returns 0 results
+    if not chunks and search_query:
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                keywords = [w for w in re.split(r'[^a-zA-Z0-9]+', search_query.strip()) if len(w) > 2 and w.lower() not in {"what", "is", "the", "and", "explain", "how", "process", "for", "with", "about", "tell"}]
+                if keywords:
+                    clauses = []
+                    params = []
+                    for idx, kw in enumerate(keywords[:4], 1):
+                        clauses.append(f"(topic_name ILIKE ${idx} OR topic_content ILIKE ${idx})")
+                        params.append(f"%{kw}%")
+                    if clauses:
+                        sql = f"SELECT content_id, topic_name, topic_code, topic_content, topic_video, topic_image, topic_pdf FROM course_content WHERE {' OR '.join(clauses)} LIMIT 10"
+                        db_matches = await conn.fetch(sql, *params)
+                        if db_matches:
+                            chunks = [dict(r) for r in db_matches]
+                            logger.info(f"Fallback DB search retrieved {len(chunks)} chunks")
+        except Exception as e:
+            logger.debug(f"Direct DB fallback search failed: {e}")
+
     # -----------------------------
     # DB FETCH
     # -----------------------------

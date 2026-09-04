@@ -26,77 +26,71 @@ CRITICAL DYNAMIC RELEVANCE & EXHAUSTIVE SYNTHESIS INSTRUCTIONS:
 - If the question is a basic theoretical/educational definition or generic technical concept (e.g., "What is boiler design?", "What is Archimedes principle?", "Explain 4-stroke cycle") and the Company Documents do NOT contain specific company rules/SOPs defining or regulating that subject, output ONLY: NO_COMPANY_DATA
 - If the Company Documents only mention the topic incidentally/peripherally without answering the user's specific question, output ONLY: NO_COMPANY_DATA
 
-2. TARGET LENGTH & EXHAUSTIVENESS REQUIREMENT (3000 to 4000 TOKENS):
-- You MUST synthesize an exhaustive, in-depth, comprehensive technical response targeting 3000 to 4000 tokens.
-- NEVER provide high-level summaries, brief outlines, or superficial one-line bullet points.
-- Extract, elaborate, and present EVERY SINGLE technical requirement, procedural step, sub-clause, formula, valve line-up, checklist item, operational threshold, temperature/pressure parameter, crew responsibility, log-keeping duty, and safety precaution found in the provided contexts.
-- Structure your response into 3 DISTINCT, HIGHLY READABLE SECTIONS:
+2. TARGET EXHAUSTIVENESS & DEPTH (SUBSTANTIAL, RICH, AND FAST):
+- You MUST synthesize an exhaustive, in-depth technical response with maximum procedural detail.
+- Extract, elaborate, and present EVERY SINGLE technical requirement, procedural step, sub-clause, checklist item, operational threshold, temperature/pressure/gas parameter, crew responsibility, log-keeping duty, and safety precaution found in the provided contexts.
+- Structure your response into 3 DISTINCT, HIGHLY PROFESSIONAL SECTIONS:
 
 ### 🏢 1. According to {company_name}'s Safety Management System (SMS / QMS)
 - You MUST always display the following metadata directly under the Section 1 header (and NEVER before it), using exactly this format:
   **Document Title:** [Exact title of the document, e.g. Shipboard SMS Manual (Chemical)-Completed (1).docx]
-  **SOP Name:** [Exact name of the SOP, e.g. Ship Operations (Cargo Procedures) or Handling of Cargo]
-  **Section:** [Section number/name/ID, e.g. Loaded Passage or III.5.5.3 Handling of Cargo or 7.1.2.6 Ice and Cold Weather Procedures]
-  *(If any of the Document Title, SOP Name, or Section details are missing or not explicitly stated in the chunk headers, you must extract/infer them from the context or content of the retrieved documents. You must always prioritize extracting and displaying specific hierarchical section numbers/headings present within the retrieved text, excluding parenthetical form numbers. You must always output all three fields: Document Title, SOP Name, and Section. Do not omit any of them.)*
+  **SOP Name:** [Exact name of the SOP, e.g. Documentation or Entry into Enclosed Spaces]
+  **Section:** [Section number/name/ID, e.g. Circulation and Acknowledgment Procedures or Maintenance]
+  *(Extract/infer all three fields from the retrieved company text. Do not omit any of them.)*
 
-- **FULL PROCEDURAL EXTRACTION & ELABORATION (DO NOT SHORTEN):**
+- **FULL PROCEDURAL EXTRACTION & ELABORATION (DO NOT CONDENSE OR SHORTEN):**
   • **CRITICAL MANDATORY TABLE & CHECKLIST REPRODUCTION:**
-    - If ANY table, sequence table, checklist, matrix, or structured list exists in the retrieved Company Documents (such as `| Activity | Responsibility |`, operational sequence tables, checklist matrices, inspection tables, or equipment tables), you MUST ALWAYS reproduce and output the COMPLETE, FULL Markdown Table at the very beginning of Section 1 (immediately after the Document Title, SOP Name, and Section metadata).
-    - NEVER omit, skip, summarize, or convert tables into plain bullet points or numbered lists. Include every single activity and responsibility row present in the source text.
-    - If data is present in the source text for any table column, show that real data clearly.
-    - If no data or check is present for a column, leave that table cell clean and empty/blank (do NOT output dummy `[x]` or `[ ]` brackets).
-    - NEVER output empty tables, isolated table headers, or table headers with 0 rows (such as isolated `Check\tShip\tTerminal...` or `| Check | Ship | Terminal | Code | Remarks |` with no rows). ONLY output a table if there are actual rows of data/items present in the source text to populate the table.
-    - For operational sequences, responsibility matrices, activity lists, and equipment tables, use a standard markdown table matching the actual columns from the source document (e.g., `| Activity | Responsibility |`).
-  • **EXHAUSTIVE PROCEDURAL ELABORATION UNDER SUBHEADINGS:**
-    - After the Markdown table (if applicable), provide full, comprehensive, step-by-step procedural coverage of every phase and requirement related to the topic in the Company Documents.
-    - Group procedures under clear, logical Markdown sub-headers (e.g. `#### Pre-Entry Risk Assessment & Authorizations`, `#### Atmosphere Testing Criteria & Gas Tolerances`, `#### Ventilation Protocols & Entry Sequences`, `#### Emergency Rescue Equipment & Drills`).
-    - For EVERY procedure, include:
-      - **Timing & Preconditions:** When exactly the operation commences, triggers, or is completed.
-      - **Mandatory Forms & Communications:** Specific form numbers, codes, and transmission channels (e.g., Form SS 004, CT 001, logbook entries).
-      - **Technical Sequences & Line-ups:** Step-by-step operational sequences, equipment configurations, and testing protocols.
-      - **Specific Cargo Precautions:** Detailed instructions for specific hazards, volatility, temperature/pressure limits.
-      - **Personnel Responsibilities:** Exact roles and oversight (Master, Chief Officer, Competent Officer, Safety Officer).
-  • Use ONLY facts from the Company Documents for this section. Never invent company procedures.
+    - If ANY table, responsibility matrix, or checklist exists in the retrieved Company Documents (such as `| Activity | Responsibility |` or procedural action tables), you MUST ALWAYS output the COMPLETE, FULL Markdown Table at the very beginning of Section 1.
+    - Include every single activity and responsibility row present in the source text without omitting or summarizing any row.
+    - If a multi-item checklist exists, break it down into clean, structured individual rows or distinct bullet points. Never compress multiple items into one cell.
+  • **EXHAUSTIVE MULTI-PROCEDURAL BREAKDOWN:**
+    - Provide deep, comprehensive procedural coverage for EVERY distinct procedure present in the Company Documents (e.g. `#### Despatch of SMS Documents:`, `#### Maintenance of SMS Documentation:`, etc.).
+    - For EVERY single procedure, extract and detail:
+      - **Timing & Preconditions:** When exactly the process commences, what triggers it, and required milestones.
+      - **Mandatory Forms & Communications:** Specific form numbers, transmittal notes, acknowledgments, logbook entries, and transmission channels (e.g., Transmittal Note, Form SS 004, ISM Cell acknowledgments).
+      - **Responsibilities / Personnel Duties:** Exact duties and oversight roles (e.g., Division Officers (DOs), Group In-Charge (Group I/C), Recipients, Master, ISM Cell).
+      - **Technical Sequences & Line-ups (if applicable):** Step-by-step operational workflows, controls, and checks.
+      - **Specific Precautions (if applicable):** Specific hazard controls, verification steps, and contingency measures.
+  • Base Section 1 STRICTLY on the retrieved Company Documents. Never invent company procedures.
 
 ### 📘 2. Dolphin internal knowledge base
-- You MUST synthesize an exhaustive, comprehensive maritime technical masterclass directly from Dolphin's internal course lessons and knowledge base provided in LAYER 1.
-- STRICT GROUNDING RULES:
-  • Answer ONLY from COURSE CONTEXT (LAYER 1). No hallucination. Zero external knowledge fabrication.
-  • Structure the response with clear headings, comparison tables, sequential steps, and formatted bullet points.
-- DO NOT output generic summaries of international conventions or convention acronyms (STRICTLY DO NOT output lists of SOLAS, MARPOL, STCW, ISM Code bullet points).
-- Instead, provide the substantive, detailed technical engineering principles and operational guide from the Dolphin course lessons.
-- RICH VISUAL & STRUCTURAL FORMATTING FOR THIS SECTION:
-  • Group topics under distinct numbered Markdown subheadings (e.g. `#### 1. Working Principles & Hydrodynamic Theory`, `#### 2. Core Components & Construction`, `#### 3. Operating Parameters & Key Metrics`, `#### 4. Step-by-Step Operational Procedures`, `#### 5. Cavitation Hazards & Protection Measures`).
-  • Present technical comparisons, parameter definitions, or component summaries in clear Markdown tables where applicable (e.g., `| Parameter | Description | Operational Significance |` or `| Component | Function | Operating Characteristics |`).
-  • Use numbered steps (`1. `, `2. `, `3. `) for operational workflows and sequences (e.g. Starting the Pump, Stopping the Pump).
-  • Use bullet points with bold labels (`- **Label:** description`) for technical specifications, features, and safety precautions.
-  • Maintain smooth introductory paragraphs explaining core physics and engineering concepts under each heading before listing steps or parameters.
-  • Blend clean subheadings, rich explanations, tables, and structured points for maximum visual appeal and professional presentation.
+- Synthesize an exhaustive, authoritative, deeply elaborate maritime technical masterclass drawn directly and comprehensively from the Dolphin course lessons provided in LAYER 1.
+- MANDATORY ELABORATE STRUCTURE & TECHNICAL DEPTH:
+  • Do NOT provide brief, condensed, or high-level summaries. Fully unpack every technical concept, engineering detail, operational phase, and regulatory requirement found in the course content with thorough narrative explanations and structured breakdowns.
+  • Divide the synthesis into distinct, rich Markdown subheadings:
+    - `#### Regulatory Framework & International Conventions`: Detail the applicable international conventions , specific mandatory regulations, statutory requirements, and industry guidelines.
+    - `#### Core Technical Principles & Operational Mechanics`: Thoroughly explain the underlying technical, physical, and engineering mechanisms (e.g., fluid dynamics, pressure/temperature thresholds, gas freeing dynamics, vapor control, mechanical safeguards, fail-safe systems).
+    - `#### Step-by-Step Operational Procedures & Workflows`: Provide comprehensive numbered sequential steps detailing:
+      1. Pre-operational preparation, system line-up, and safety checks.
+      2. Step-by-step execution protocols during active operations.
+      3. Monitoring, parameter verification, and watchkeeping duties.
+      4. Post-operational securing, debriefing, and restoring systems.
+    - `#### Critical Safety Limits, Hazard Controls & Risk Mitigations`: Highlight explicit numerical safety parameters (e.g., O₂ content ≤ 5% / 8%, LEL < 1%, toxic gas PPM limits, max pressure, relief valve settings), PPE requirements, emergency stops, and fail-safe interlocks.
+    - `#### Shipboard Documentation, Verification & Audit Protocols`: Detail logbook entries, statutory record books (e.g., Oil Record Book, Cargo Record Book, Garbage Record Book), checklists, management sign-offs, and audit trails.
+- RICH PRESENTATION & HIGHLIGHTS:
+  • Include clear markdown tables for comparison matrices, parameter thresholds, equipment specifications, or responsibility grids where applicable from the course lessons.
+  • Use bold key terms (`- **[Key Concept / Term]:** [Detailed explanation with practical shipboard context]`).
+  • Maintain 100% topic relevance strictly aligned with the user query and the retrieved course materials.
 
 ### 🔍 3. Comparison & AI Advisory Observations
 - **Direct Comparative Analysis (Section 1 vs Section 2):**
-  • Explicitly compare **Section 1 (According to {company_name}'s Safety Management System (SMS / QMS))** with **Section 2 (Dolphin internal knowledge base)**.
-  • **Procedural Alignment:** Point out specifically and thoroughly where {company_name}'s SMS requirements and Dolphin's internal technical knowledge base align (e.g., shared baseline safety controls, mandatory valve verifications, routine inspection duties, regulatory compliance points).
-  • **Missing Technical Elements & Gaps in {company_name}'s Company Document:** Exhaustively identify and list what technical details, operational steps, numerical tolerances/thresholds, diagnostic methods, tool specifications, or safety precautions present in Dolphin's internal knowledge base are **MISSING, INCOMPLETE, OR NOT SPECIFIED in {company_name}'s SMS/QMS document**.
-  • **CRITICAL RULE — NEVER CRITIQUE OR LIST WHAT IS MISSING IN DOLPHIN:** Do NOT state or list what is missing in Dolphin's internal knowledge base. Dolphin's internal knowledge base is the reference maritime technical benchmark. Your gap evaluation MUST focus strictly on identifying what is missing or lacking in **{company_name}'s Company Document**.
+  • Explicitly compare **Section 1 ({company_name}'s SMS)** with **Section 2 (Dolphin internal knowledge base)**.
+  • **Procedural Alignment:** Detail specifically where {company_name}'s SMS requirements and the maritime industry benchmarks align (e.g., controlled transmittals, formal receipt acknowledgments, defined DO/Group I/C roles).
+  • **Missing Technical Elements & Gaps in {company_name}'s Company Document:** Exhaustively identify specific technical details, verification steps, tracking mechanisms, or regulatory controls that are **MISSING, INCOMPLETE, OR NOT SPECIFIED in {company_name}'s SMS document**.
+  • **CRITICAL RULE — NEVER CRITIQUE OR LIST WHAT IS MISSING IN DOLPHIN:** Evaluate only what is lacking or missing in **{company_name}'s Company Document**.
 - **💡 AI Advisory Observation(s):** 
-  • Provide specific, concrete technical observations and actionable advisory notes focused entirely on what should be added, updated, or improved in **{company_name}'s Company Document / SMS**.
-  • STRICTLY DO NOT output generic platitudes (e.g., DO NOT say generic things like "conduct regular training", "ensure PPE is worn", or "follow manufacturer guidelines").
-  • Highlight specific technical additions or operational safeguards from Dolphin's internal knowledge base (such as exact numerical thresholds, specialized inspection tools, environmental parameters, or verification steps) that are missing from {company_name}'s SMS and should be incorporated to strengthen their company procedure.
-  • If {company_name}'s SMS already contains all the technical details and steps found in Dolphin's knowledge base, clearly state that the company SMS is fully comprehensive with no procedural or technical gaps identified.
-- **Governance Notice:** End this section with the mandatory notice:
+  • Provide specific, concrete technical recommendations for what should be incorporated into **{company_name}'s Company Document / SMS** to close the identified gaps.
+  • Highlight actionable improvements (e.g., digital receipt tracking, specific revision audit logs, automated acknowledgment timelines).
+  • If the SMS is already fully comprehensive, state that no procedural gaps were identified.
+- **Governance Notice:** End with:
   *(AI Advisory Observation only — any procedure update must be reviewed by Company HSQE and processed through formal Management of Change [MoC]).*
 
 RULES:
-- PRIORITY RULE: Always give first priority to company_doc (Section 1: According to {company_name}'s Safety Management System). If the Company Documents do not contain information addressing the question, output ONLY: NO_COMPANY_DATA (the system will immediately fetch and deliver the response directly from the Course Content).
-- STRICT GROUNDING: Answer Section 2 ONLY from COURSE CONTEXT (LAYER 1). Zero hallucination.
-- Structure responses with clear headings, bullet points, and key comparisons.
-- The response MUST start on the very first line with "### 🏢 1. According to {company_name}'s Safety Management System (SMS / QMS)". NEVER output Document Title, SOP Name, Section, or any introductory text before this heading. Document Title, SOP Name, and Section MUST appear directly underneath this Section 1 heading.
-- MANDATORY TABLE RULE: If ANY table exists in the company documents (such as an Operational Sequence table with Activity and Responsibility columns, or a Checklist table), you MUST output the complete Markdown Table in Section 1. Do NOT omit it or convert it to plain text.
-- In all tables: show real text data if present; leave cells blank if absent. NEVER output `[x]`, `[X]`, or `[ ]` brackets. NEVER output empty tables with 0 rows.
-- Section 2 must ALWAYS use proper Markdown subheadings (`#### ...`), clean paragraphs, comparison tables, and properly aligned bullet points (`- **Title:** description`) or numbered steps. Never dump raw unformatted lists.
-- Section 3 MUST be a direct, concrete evaluation of what is missing or can be enhanced in {company_name}'s Company Document (SMS/QMS) compared to Dolphin's Internal Knowledge Base. Under NO circumstances should it list what is missing in Dolphin's internal knowledge base.
-- Maintain clear Markdown headings and clean spacing.
+- Start directly on line 1 with "### 🏢 1. According to {company_name}'s Safety Management System (SMS / QMS)".
+- Output Document Title, SOP Name, and Section directly under the Section 1 header.
+- In Section 1, reproduce the complete multi-row table and exhaustively detail all sub-procedures.
+- In Section 2, ensure 100% topic relevance (never output unrelated bulk carrier design for documentation questions).
+- Maintain clean Markdown formatting, bold headings, and professional maritime structure throughout.
 """
 
 def format_company_response(
@@ -440,6 +434,8 @@ async def company_query_node(
                 **chunk,
                 "content": cleaned_text
             })
+        if len(deduped_company_chunks) >= 8:
+            break
 
     company_docs_text = "\n\n---\n\n".join(
         f"Document: {chunk.get('document_title', 'SMS Document')} [Type: {chunk.get('doc_type', 'Procedure')}]\n{chunk.get('content', '')}"
@@ -685,21 +681,39 @@ COW Entry and Cleaning Checklist
             state["company_answer"] = answer
             logger.info("✅ Company HSQE answer synthesized successfully")
 
-            # Update node_response so it is seamlessly sent to the UI
-            if "node_response" in state and isinstance(state["node_response"], dict):
-                state["node_response"]["content"] = answer
-                state["node_response"]["sections"] = [
-                    {
-                        "topic_code": "COMPANY_SMS",
-                        "topic_name": f"{company_name} SMS & Maritime Standard",
-                        "content": answer,
-                    }
-                ]
-                if "videos" not in state["node_response"] or not state["node_response"]["videos"]:
-                    state["node_response"]["videos"] = state.get("video_suggestions", [])
-                if "metadata" not in state["node_response"]:
-                    state["node_response"]["metadata"] = {}
-                state["node_response"]["metadata"]["source_layer"] = "Company SMS / QMS + Core Maritime"
+            # Update or construct node_response so it is seamlessly sent to the UI
+            if "node_response" not in state or not isinstance(state["node_response"], dict):
+                state["node_response"] = {}
+
+            default_suggestions = [
+                f"What are the specific checklists for this {company_name} procedure?",
+                "What safety equipment and precautions are required?",
+                "What are the relevant ISM / SOLAS regulatory standards?"
+            ]
+
+            existing_suggestions = (
+                state["node_response"].get("question_suggestions")
+                or state.get("question_suggestions")
+                or default_suggestions
+            )
+
+            state["node_response"]["type"] = state["node_response"].get("type") or "query"
+            state["node_response"]["content"] = answer
+            state["node_response"]["sections"] = [
+                {
+                    "topic_code": "COMPANY_SMS",
+                    "topic_name": f"{company_name} SMS & Maritime Standard",
+                    "content": answer,
+                }
+            ]
+            state["node_response"]["chunks_used"] = state["node_response"].get("chunks_used") or company_chunks or []
+            state["node_response"]["question_suggestions"] = existing_suggestions
+            state["node_response"]["videos"] = state["node_response"].get("videos") or state.get("video_suggestions", [])
+            state["node_response"]["images"] = state["node_response"].get("images") or state.get("images", [])
+            state["node_response"]["pdfs"] = state["node_response"].get("pdfs") or state.get("pdfs", [])
+            if "metadata" not in state["node_response"] or not isinstance(state["node_response"]["metadata"], dict):
+                state["node_response"]["metadata"] = {}
+            state["node_response"]["metadata"]["source_layer"] = "Company SMS / QMS + Core Maritime"
 
     except Exception as e:
         logger.exception(f"Company query synthesis failed: {e}")

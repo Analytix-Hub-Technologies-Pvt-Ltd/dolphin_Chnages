@@ -79,17 +79,20 @@ class ImageManager:
 
     @classmethod
     async def process_and_cache_images(cls, images: List[Dict[str, Any]], max_images: int = 6) -> List[Dict[str, Any]]:
-        """Process a list of image items, ensuring deduplication, local caching, and valid data/URL without blocking."""
-        processed = []
-        seen_ids = set()
-        seen_titles = set()
+        """Process a list of image items, ensuring deduplication, local caching, and valid data/URL."""
+        if not images:
+            return []
 
         base_url = settings.image_base_url.rstrip("/") if getattr(settings, "image_base_url", None) else "http://localhost:8000"
+
+        candidates = []
+        seen_ids = set()
+        seen_titles = set()
 
         for img in images:
             if not isinstance(img, dict):
                 continue
-            
+
             raw_url = str(img.get("url") or img.get("Url") or img.get("imageurl") or "").strip()
             if "pdf_images" in raw_url:
                 continue
@@ -112,13 +115,32 @@ class ImageManager:
             if clean_title and len(clean_title) > 3:
                 seen_titles.add(clean_title)
 
-            # Check if local image exists
-            local_exists = False
+            about = str(img.get("about") or img.get("About") or "").strip()
+            candidates.append({
+                "img_id": img_id,
+                "title": title,
+                "about": about,
+                "raw_url": raw_url,
+            })
+
+            if len(candidates) >= max_images:
+                break
+
+        if not candidates:
+            return []
+
+        # Check existing local images or fetch missing ones in parallel
+        async def resolve_image(cand: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            img_id = cand["img_id"]
+            title = cand["title"]
+            about = cand["about"]
+
             b64_uri = ""
+            local_ext = "jpeg"
             for ext in ["jpeg", "jpg", "png", "webp"]:
                 local_path = os.path.join(STORAGE_IMAGES_DIR, f"{img_id}.{ext}")
-                if os.path.exists(local_path):
-                    local_exists = True
+                if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+                    local_ext = ext
                     try:
                         with open(local_path, "rb") as f:
                             data = f.read()
@@ -127,26 +149,52 @@ class ImageManager:
                         pass
                     break
 
-            # If not on local disk and valid UUID, trigger background download asynchronously
-            if not local_exists and UUID_PATTERN.match(img_id):
-                asyncio.create_task(cls.fetch_and_cache_image(img_id))
+            # If not on local disk and valid UUID, attempt fetch
+            if not b64_uri and UUID_PATTERN.match(img_id):
+                try:
+                    fetched_b64 = await cls.fetch_and_cache_image(img_id)
+                    if fetched_b64:
+                        b64_uri = fetched_b64
+                except Exception as e:
+                    logger.debug(f"Async fetch failed for {img_id}: {e}")
 
-            display_url = raw_url if (raw_url.startswith("http://") or raw_url.startswith("https://")) else f"{base_url}/storage/images/{img_id}.jpeg"
-            about = str(img.get("about") or img.get("About") or "").strip()
+            # If image neither exists locally nor could be fetched, discard to prevent broken UI cards
+            if not b64_uri:
+                # Check once more if a file was written
+                for ext in ["jpeg", "jpg", "png", "webp"]:
+                    local_path = os.path.join(STORAGE_IMAGES_DIR, f"{img_id}.{ext}")
+                    if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+                        local_ext = ext
+                        try:
+                            with open(local_path, "rb") as f:
+                                data = f.read()
+                                b64_uri = f"data:image/{ext};base64,{base64.b64encode(data).decode('utf-8')}"
+                        except Exception:
+                            pass
+                        break
 
-            processed.append({
+            if not b64_uri:
+                return None
+
+            local_url = f"{base_url}/storage/images/{img_id}.{local_ext}"
+            return {
                 "id": img_id,
                 "Id": img_id,
                 "title": title or "Reference Image",
                 "Title": title or "Reference Image",
                 "about": about,
                 "About": about,
-                "url": display_url,
-                "Url": display_url,
+                "url": local_url,
+                "Url": local_url,
                 "base64": b64_uri,
-            })
+            }
 
-            if len(processed) >= max_images:
-                break
+        tasks = [resolve_image(c) for c in candidates]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        processed = []
+        for res in results:
+            if isinstance(res, dict) and res:
+                processed.append(res)
 
         return processed

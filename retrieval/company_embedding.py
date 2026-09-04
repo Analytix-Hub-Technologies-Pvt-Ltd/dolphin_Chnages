@@ -10,24 +10,6 @@ from services.embedding_config import (
 )
 
 
-def classify_document_type(title: str = "", content: str = "") -> str:
-    """Classify company SMS/QMS documents into structured categories."""
-    combined = f"{title} {content[:500]}".lower()
-    if any(k in combined for k in ["checklist", "check list", "check-list", "pre-arrival", "pre arrival"]):
-        return "Checklist"
-    if any(k in combined for k in ["procedure", "sop", "standard operating procedure", "protocol"]):
-        return "Procedure"
-    if any(k in combined for k in ["policy", "company policy", "safety policy", "environmental policy"]):
-        return "Policy"
-    if any(k in combined for k in ["risk register", "risk assessment", "hazard identification", "jha", "ra"]):
-        return "Risk Register"
-    if any(k in combined for k in ["form", "record", "permit to work", "ptw", "log", "report"]):
-        return "Record/Form"
-    if any(k in combined for k in ["process", "workflow", "management of change", "moc"]):
-        return "Process"
-    return "Guidance"
-
-
 class CompanyDocumentStore:
     
     def __init__(self, store: FAISSStore) -> None:
@@ -44,7 +26,7 @@ class CompanyDocumentStore:
         all_metadata = []
 
         for doc in documents:
-            doc_type = classify_document_type(doc.document_title or "", doc.document_content or "")
+
             chunks = self.splitter.split_text(doc.document_content)
 
             for idx, chunk in enumerate(chunks):
@@ -57,7 +39,6 @@ class CompanyDocumentStore:
                         "company_id": company_id,
                         "document_id": doc.document_id,
                         "document_title": doc.document_title,
-                        "doc_type": doc_type,
                         "chunk_index": idx,
                         "content": chunk,
                     }

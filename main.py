@@ -189,12 +189,18 @@ if settings.debug_mode:
     app.add_middleware(RequestLoggingMiddleware)
 
 app.add_middleware(ProcessTimeMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+# Rate limiter configuration
+if settings.enable_rate_limiting:
+    logger.info("Rate limiting")
+    app.state.limiter = limiter
+    app.add_middleware(RateLimitMiddleware)
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 if settings.all_cors_origins:
     app.add_middleware(
         CORSMiddleware,
-        #allow_origins=settings.all_cors_origins,
         allow_origins=[
         "https://dolphin.aduacademy.in",
         "http://localhost:3000",
@@ -231,14 +237,6 @@ if settings.all_cors_origins:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-app.add_middleware(GZipMiddleware, minimum_size=1000)
-
-# Rate limiter configuration
-if settings.enable_rate_limiting:
-    logger.info("Rate limiting")
-    app.state.limiter = limiter
-    app.add_middleware(RateLimitMiddleware)
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ============================================================
 # 3. UI Static Files

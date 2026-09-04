@@ -34,11 +34,13 @@ class OpenAIService:
         temperature: float | None = None,
         max_tokens: int | None = None,
         *,
+        model: str | None = None,
         category: str = "UNKNOWN",
     ) -> str:
         """
         Execute a chat completion using OpenAI model.
         """
+        active_model = model or self.model
         active_temperature = self.temperature if temperature is None else temperature
         active_max_tokens = self.max_tokens if max_tokens is None else max_tokens
 
@@ -82,7 +84,7 @@ class OpenAIService:
 
         logger.info(
             "Calling OpenAI chat completion",
-            model=self.model,
+            model=active_model,
             temperature=active_temperature,
             message_count=len(messages),
         )
@@ -114,7 +116,7 @@ class OpenAIService:
 
         try:
             response = await self.client.chat.completions.create(
-                model=self.model,
+                model=active_model,
                 temperature=active_temperature,
                 max_tokens=active_max_tokens,
                 messages=cleaned_messages,

@@ -555,7 +555,7 @@ const ChatMessage = ({
           )}
 
           {validImages?.length > 0 && !isOutOfScope && (
-            <Box sx={{ mt: 2 }}>
+            <Box className="ref-images-section" sx={{ mt: 2 }}>
               <Box
                 sx={{
                   display: "flex",
@@ -573,6 +573,7 @@ const ChatMessage = ({
               </Box>
 
               <Box
+                className="ref-images-container"
                 sx={{
                   display: "flex",
                   gap: 2,
@@ -617,7 +618,19 @@ const ChatMessage = ({
                           e.target.src = img.b64;
                         } else {
                           const card = e.currentTarget.closest(".ref-image-item") || e.currentTarget.parentElement;
-                          if (card) card.style.display = "none";
+                          if (card) {
+                            card.style.display = "none";
+                            const container = card.parentElement;
+                            if (container) {
+                              const remaining = Array.from(container.querySelectorAll(".ref-image-item")).filter(
+                                (el) => el.style.display !== "none"
+                              );
+                              if (remaining.length === 0) {
+                                const section = container.closest(".ref-images-section") || container.parentElement;
+                                if (section) section.style.display = "none";
+                              }
+                            }
+                          }
                         }
                       }}
                       sx={{

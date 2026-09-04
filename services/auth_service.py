@@ -157,7 +157,7 @@ class AuthService:
                 str(payload.ship_type) if payload.ship_type is not None else None,
                 str(payload.id_type) if payload.id_type is not None else None,
                 str(payload.id_country) if payload.id_country is not None else None,
-                int(payload.company_id) if payload.company_id is not None and str(payload.company_id).isdigit() else None
+                str(payload.company_id) if payload.company_id is not None else None
             )
 
             record = await conn.fetchrow(
@@ -258,5 +258,5 @@ class AuthService:
                 str(ship_type) if ship_type is not None else None,
                 str(id_type) if id_type is not None else None,
                 str(id_country) if id_country is not None else None,
-                int(company_id) if company_id is not None and str(company_id).isdigit() else None,
+                str(company_id) if company_id is not None else None,
             )

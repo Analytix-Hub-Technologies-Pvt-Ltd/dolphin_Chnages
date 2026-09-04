@@ -212,39 +212,36 @@ class ChatService:
             store: FAISSStore,
             session_service: SessionService = None,
             redis_client=None,
+            company_store: FAISSStore = None,
+            transcribe_store: FAISSStore = None,
     ) -> None:
 
-        transcribe_store = FAISSStore(
-            index_path="retrieval/transcribe_index.bin",
-            meta_path="retrieval/transcribe_index.meta.json",
-        )
-
-        transcribe_store.load()
-
-        logger.info(
-            f"Transcript FAISS loaded: {transcribe_store.is_loaded}"
-        )
-
-        logger.info(
-            f"Transcript metadata count: {len(transcribe_store.meta_path)}"
-        )
+        if transcribe_store is None:
+            try:
+                from api.dependencies import get_transcribe_store
+                transcribe_store = get_transcribe_store()
+            except Exception:
+                transcribe_store = FAISSStore(
+                    index_path="retrieval/transcribe_index.bin",
+                    meta_path="retrieval/transcribe_index.meta.json",
+                )
+                transcribe_store.load()
 
         self.transcribe_vector_store = VectorStoreAdapter(
             embedder,
             transcribe_store,
         )
-        company_store = FAISSStore(
-            index_path="retrieval/company_index.bin",
-            meta_path="retrieval/company_index.meta.json",
-        )
 
-        company_store.load()
-        logger.info(
-            f"Company FAISS loaded: {company_store.is_loaded}"
-        )
-        logger.info(
-            f"Company metadata count: {len(company_store.meta_path)}"
-        )
+        if company_store is None:
+            try:
+                from api.dependencies import get_company_store
+                company_store = get_company_store()
+            except Exception:
+                company_store = FAISSStore(
+                    index_path="retrieval/company_index.bin",
+                    meta_path="retrieval/company_index.meta.json",
+                )
+                company_store.load()
 
         self.company_vector_store = VectorStoreAdapter(
             embedder,
@@ -790,6 +787,26 @@ class ChatService:
         try:
             raw_chunks = await self.vector_store.search_with_embeddings(query, k=k)
 
+            # Direct database keyword search fallback if FAISS index returns 0 results
+            if not raw_chunks and query:
+                try:
+                    pool = await get_pool()
+                    async with pool.acquire() as conn:
+                        keywords = [w for w in re.split(r'[^a-zA-Z0-9]+', query.strip()) if len(w) > 2 and w.lower() not in {"what", "is", "the", "and", "explain", "how", "process", "for", "with", "about", "tell"}]
+                        if keywords:
+                            clauses = []
+                            params = []
+                            for idx, kw in enumerate(keywords[:4], 1):
+                                clauses.append(f"(topic_name ILIKE ${idx} OR topic_content ILIKE ${idx})")
+                                params.append(f"%{kw}%")
+                            if clauses:
+                                sql = f"SELECT content_id, topic_name, topic_code, topic_content, topic_video, topic_image, topic_pdf FROM course_content WHERE {' OR '.join(clauses)} LIMIT {k}"
+                                db_matches = await conn.fetch(sql, *params)
+                                if db_matches:
+                                    raw_chunks = [dict(r) for r in db_matches]
+                except Exception as ex:
+                    logger.debug(f"Direct DB fallback search failed in _retrieve_chunks: {ex}")
+
             content_ids: List[int] = []
             for chunk in raw_chunks:
                 cid = chunk.get("content_id") or chunk.get("id")
@@ -1050,7 +1067,9 @@ class ChatService:
             response = await self.openai_service.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.0,
-                max_tokens=30,
+                max_tokens=40,
+                model="gpt-4o-mini",
+                category="QUERY_REWRITE",
             )
 
             rewritten = response.strip()
@@ -1079,6 +1098,18 @@ class ChatService:
         Check if the query is in-scope of the available Marine/Maritime course material.
         Returns: "IN-SCOPE", "OUT-OF-SCOPE", or "MIXED".
         """
+        # ⚡ Fast-path: Common maritime queries, acronyms, or company procedures are immediately IN-SCOPE
+        q_lower = query.lower().strip()
+        maritime_fast_terms = {
+            "sms", "sop", "sops", "company", "ship", "vessel", "cargo", "tank", "boiler", "engine",
+            "pump", "bunker", "bunkering", "ballast", "anchor", "watch", "watchkeeping", "fire",
+            "safety", "solas", "marpol", "stcw", "ism", "isps", "colreg", "cow", "crude oil",
+            "enclosed space", "permit", "ptw", "deck", "bridge", "navigation", "oow", "chief",
+            "master", "captain", "purge", "inert", "igs", "lifeboat", "liferaft", "sopep"
+        }
+        if any(term in q_lower for term in maritime_fast_terms) or is_company_query(query, ""):
+            return "IN-SCOPE"
+
         context_parts = []
         for i, chunk in enumerate(chunks[:3], 1):
             name = chunk.get("topic_name", "")
@@ -1128,6 +1159,8 @@ Output ONLY the classification word: "IN-SCOPE", "OUT-OF-SCOPE", or "MIXED". Do 
             response = await self.openai_service.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.0,
+                max_tokens=10,
+                model="gpt-4o-mini",
                 category="SCOPE_CHECK"
             )
             classification = response.strip().upper()
@@ -1472,17 +1505,21 @@ Rewritten Question:
                     None
                 )
 
-                state = await query_node(
-                    state,
-                    self.openai_service,
-                    self.suggestion_service,
-                    self.vector_store,
-                )
-
+                # ⚡ OPTIMIZATION: Single-pass direct execution
+                # If company chunks exist, company_query_node generates Section 1 (Company SMS) +
+                # Section 2 (Dolphin Knowledge) + Section 3 (AI Advisory) directly in 1 pass.
+                # Running query_node first was redundant and added 10-15s of wasted latency.
                 if has_company and state.get("company_chunks"):
                     state = await company_query_node(
                         state,
                         self.openai_service,
+                    )
+                else:
+                    state = await query_node(
+                        state,
+                        self.openai_service,
+                        self.suggestion_service,
+                        self.vector_store,
                     )
 
             else:
