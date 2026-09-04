@@ -1,121 +1,28 @@
-#from _future_ import annotations
+from __future__ import annotations
 import httpx
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 from config import settings
 from asyncpg import Pool
 from loguru import logger
-# vignesh - from passlib.hash import bcrypt
-# parth 
 import bcrypt
 
 from models.user_models import User, LoginRequest, LoginResponse, UserCreate
 
 
+def _parse_company_id(val: Any) -> int | None:
+    if val is None or val == "":
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return None
+
+
 class AuthService:
     def __init__(self, pool: Pool) -> None:
         self.pool = pool
-    # async def create_user(self, payload: UserCreate) -> User:
-    #     user_id = str(uuid.uuid4())
-
-    #     password_hash = None
-
-    #     # Only hash password if provided
-    #     if payload.password:
-    #         password_bytes = payload.password.encode("utf-8")[:72]
-    #         password_hash = bcrypt.hashpw(
-    #             password_bytes,
-    #             bcrypt.gensalt()
-    #         ).decode("utf-8")
-
-    #     async with self.pool.acquire() as conn:
-    #         await conn.execute(
-    #             """
-    #             INSERT INTO users (id, name, email, phone_number, birth_date, password_hash)
-    #             VALUES ($1, $2, $3, $4, $5, $6)
-    #             """,
-    #             user_id,
-    #             payload.name,
-    #             payload.email,
-    #             payload.phone_number,
-    #             payload.birth_date,
-    #             password_hash,
-    #             # payload.user_name,
-    #         )
-
-    #         # fetch fresh row
-    #         record = await conn.fetchrow(
-    #             "SELECT * FROM users WHERE id = $1",
-    #             user_id
-    #         )
-
-    #     return User(**dict(record))
-
-    # async def create_user(self, payload: UserCreate) -> User:
-    #     user_id = str(uuid.uuid4())
-
-    #     password_hash = None
-
-    #     if payload.password:
-    #         password_bytes = payload.password.encode("utf-8")[:72]
-    #         password_hash = bcrypt.hashpw(
-    #             password_bytes,
-    #             bcrypt.gensalt()
-    #         ).decode("utf-8")
-    #     else:
-    #         password_hash = bcrypt.hashpw(
-    #             b"default_password",
-    #             bcrypt.gensalt()
-    #         ).decode("utf-8")
-
-    #     async with self.pool.acquire() as conn:
-    #         await conn.execute(
-    #             """
-    #             INSERT INTO users (
-    #                 id,
-    #                 name,
-    #                 email,
-    #                 phone_number,
-    #                 birth_date,
-    #                 password_hash,
-    #                 user_name,
-    #                 company_name,
-    #                 role,
-    #                 user_type,
-    #                 ship_name,
-    #                 ship_type,
-    #                 id_type,
-    #                 id_country
-    #             )
-    #             VALUES (
-    #                 $1, $2, $3, $4, $5, $6,
-    #                 $7, $8, $9, $10, $11, $12, $13, $14
-    #             )
-    #             """,
-    #             user_id,
-    #             payload.name,
-    #             payload.email,
-    #             payload.phone_number,
-    #             payload.birth_date,
-    #             password_hash,
-    #             payload.user_name,
-    #             payload.company_name,
-    #             payload.role,
-    #             payload.user_type,
-    #             payload.ship_name,
-    #             payload.ship_type,
-    #             payload.id_type,
-    #             payload.id_country,
-    #         )
-
-    #         record = await conn.fetchrow(
-    #             "SELECT * FROM users WHERE id = $1",
-    #             user_id
-    #         )
-
-    #     return User(**dict(record))
-
     async def create_user(self, payload: UserCreate) -> User:
         user_id = str(uuid.uuid4())
 
@@ -157,7 +64,7 @@ class AuthService:
                 str(payload.ship_type) if payload.ship_type is not None else None,
                 str(payload.id_type) if payload.id_type is not None else None,
                 str(payload.id_country) if payload.id_country is not None else None,
-                str(payload.company_id) if payload.company_id is not None else None
+                _parse_company_id(payload.company_id),
             )
 
             record = await conn.fetchrow(
@@ -258,5 +165,5 @@ class AuthService:
                 str(ship_type) if ship_type is not None else None,
                 str(id_type) if id_type is not None else None,
                 str(id_country) if id_country is not None else None,
-                str(company_id) if company_id is not None else None,
+                _parse_company_id(company_id),
             )
