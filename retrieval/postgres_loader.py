@@ -62,6 +62,7 @@ class PostgresLoader:
                 """
                 SELECT
                     content_id,
+                    course_code,
                     topic_name,
                     topic_code,
                     topic_content,

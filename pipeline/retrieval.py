@@ -159,7 +159,16 @@ QUERY_STOP_WORDS = {
     "please", "with", "entry", "work", "procedure", "procedures", "do", "we",
     "have", "show", "list", "steps", "guidelines", "document", "manual", "i",
     "need", "want", "know", "related", "any", "which", "when", "why", "where",
-    "according", "regulations", "regulation"
+    "according", "regulations", "regulation",
+    "difference", "differences", "different", "differ", "differs",
+    "between", "among", "compare", "comparison", "comparisons", "comparative",
+    "contrasting", "contrast", "versus", "vs",
+    "distinguish", "distinction", "distinctions", "similarity", "similarities", "similar",
+    "meaning", "definition", "definitions", "significance", "purpose", "purposes",
+    "objective", "objectives", "importance",
+    "advantage", "advantages", "disadvantage", "disadvantages", "benefit", "benefits",
+    "limitation", "limitations", "pros", "cons",
+    "concept", "concepts", "aspect", "aspects", "feature", "features"
 }
 
 ACRONYM_MAP = {

@@ -208,34 +208,62 @@ class OpenAIService:
         messages: List[dict],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        model: str | None = None,
+        category: str = "UNKNOWN",
     ) -> AsyncGenerator[str, None]:
+        """
+        Execute a streaming chat completion using OpenAI model, yielding token chunks as they arrive.
+        """
+        active_model = model or self.model
+        active_temperature = self.temperature if temperature is None else temperature
+        active_max_tokens = self.max_tokens if max_tokens is None else max_tokens
 
-        active_temperature = (
-            self.temperature if temperature is None else temperature
-        )
-        active_max_tokens = (
-            self.max_tokens if max_tokens is None else max_tokens
+        normalized_category = category.strip().upper() if isinstance(category, str) else "UNKNOWN"
+        if not normalized_category:
+            normalized_category = "UNKNOWN"
+
+        prompt_string = "\n\n".join(
+            [m.get("content", "") if isinstance(m, dict) else str(m) for m in messages]
         )
 
+        cleaned_messages = []
+        for m in messages:
+            if isinstance(m, dict):
+                c = m.get("content", "")
+                if isinstance(c, str):
+                    c = re.sub(r'\.{4,}', '...', c)
+                    c = re.sub(r'_{4,}', '___', c)
+                cleaned_messages.append({**m, "content": c})
+            else:
+                cleaned_messages.append(m)
+
+        accumulated_chunks = []
         try:
             stream = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
+                model=active_model,
+                messages=cleaned_messages,
                 temperature=active_temperature,
                 max_tokens=active_max_tokens,
-                stream=True,   # IMPORTANT
+                stream=True,
             )
 
             async for chunk in stream:
-
-                delta = chunk.choices[0].delta
-
+                delta = chunk.choices[0].delta if chunk.choices else None
                 if delta and delta.content:
+                    accumulated_chunks.append(delta.content)
                     yield delta.content
 
+            response_content = "".join(accumulated_chunks)
+            asyncio.create_task(self._log_llm_call(prompt_string, response_content, normalized_category))
+
         except Exception as e:
-            logger.exception(f"❌ Streaming error: {e}")
-            yield "Error generating response."    
+            logger.exception(f"❌ OpenAI streaming error: {e}")
+            try:
+                asyncio.create_task(self._log_llm_call(prompt_string, f"ERROR: {e}", normalized_category))
+            except Exception:
+                pass
+            yield "I apologize, but I encountered an error processing your request."    
 
     async def embed_batch(self, texts: List[str]) -> List[List[float]]:
         """

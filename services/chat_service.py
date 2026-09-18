@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 
@@ -22,6 +23,7 @@ from services.suggestion_service import SuggestionService
 from models.node_response import NodeResponse
 from models.database import get_pool
 from services.gpt_intent_service import GPTIntentService
+from services.scope_messages import get_random_out_of_scope_message
 from config import settings
 
 from services.image_manager import ImageManager
@@ -54,6 +56,7 @@ from retrieval.faiss_store import FAISSStore
 from config import settings
 from services.image_service import ImageService
 from pipeline.company_query import company_query_node, is_company_query
+from services.status_service import get_status_event
 
 def normalize_video_url(url: str) -> str:
     """
@@ -146,6 +149,21 @@ class VectorStoreAdapter:
         self.embedder = embedder
         self.store = store
     
+    @property
+    def id_to_metadata(self) -> List[Dict[str, Any]]:
+        return getattr(self.store, "id_to_metadata", [])
+
+    @property
+    def bm25_index(self):
+        return getattr(self.store, "bm25_index", None)
+
+    def search_bm25(self, query: str, k: int = 50, filter_fn=None) -> List[Dict[str, Any]]:
+        if hasattr(self.store, "search_bm25"):
+            return self.store.search_bm25(query, k=k, filter_fn=filter_fn)
+        if hasattr(self.store, "bm25_index") and self.store.bm25_index is not None:
+            return self.store.bm25_index.search(query=query, top_k=k, filter_fn=filter_fn)
+        return []
+
     def get_all_topic_names(self) -> List[str]:
         """
         GENERIC: Get all topic names from the underlying FAISS store.
@@ -1005,37 +1023,50 @@ class ChatService:
         current_query: str,
         previous_questions: list[str],
         last_answer: str | None = None,
+        conversation_topic: str | None = None,
     ) -> str:
         """
         Convert follow-up query into standalone query
         Supports:
+        - deterministic fast-path resolution via followup_resolver
         - normal follow-up
         - reference like "point 2", "this", "that"
         """
-
         try:
-            if not previous_questions:
-                return current_query
-
-            q_clean = current_query.strip().lower()
-            words = q_clean.split()
-            # ⚡ Fast-path: If the question is long (>= 4 words) and contains standard question words
-            # and no ambiguous pronouns/anaphora, it is already standalone.
-            ambiguous_terms = {
-                "it", "this", "that", "these", "those", "above", "he", "she", "they", "them",
-                "point", "option", "step", "first", "second", "third", "last", "previous",
-                "why so", "explain more", "tell more", "what about it", "why", "how so"
-            }
-            has_ambiguity = any(term in words or term in q_clean for term in ambiguous_terms)
-            is_clear_question = len(words) >= 4 and any(
-                q_clean.startswith(w) for w in ("what", "how", "why", "when", "where", "explain", "describe", "tell me", "can you", "could you", "define")
+            from services.followup_resolver import (
+                is_followup_query,
+                resolve_followup_retrieval_query,
+                extract_topic_from_query,
+                find_substantive_topic_from_history,
             )
 
-            if is_clear_question and not has_ambiguity:
+            if not previous_questions and not conversation_topic:
+                return current_query
+
+            effective_topic = conversation_topic or find_substantive_topic_from_history(previous_questions)
+
+            # 1. Check if the question is a standalone question (not a follow-up)
+            if not is_followup_query(current_query, previous_questions or [], effective_topic):
                 logger.info(f"⚡ Fast-path: '{current_query}' is already a standalone question (skipped LLM rewrite)")
                 return current_query
 
-            last_question = previous_questions[-1]
+            # 2. Deterministic follow-up resolution when topic is available
+            if effective_topic:
+                resolved, _ = resolve_followup_retrieval_query(
+                    current_query=current_query,
+                    topic=effective_topic,
+                    last_answer=last_answer,
+                )
+                if resolved and resolved != current_query:
+                    logger.info(f"⚡ Deterministic follow-up resolution: '{current_query}' -> '{resolved}'")
+                    return resolved
+
+            # If last_answer was a generic out-of-scope rejection, find last substantive question
+            last_question = previous_questions[-1] if previous_questions else ""
+            for q in reversed(previous_questions):
+                if q and len(q.strip()) >= 3 and not is_followup_query(q, [], ""):
+                    last_question = q
+                    break
 
             prompt = f"""
     You are a query rewriting assistant.
@@ -1083,6 +1114,7 @@ class ChatService:
         except Exception as e:
             logger.exception(f"❌ Query rewrite failed: {e}")
             return current_query
+
         
     async def generate_understanding(
         self,
@@ -1105,7 +1137,10 @@ class ChatService:
             "pump", "bunker", "bunkering", "ballast", "anchor", "watch", "watchkeeping", "fire",
             "safety", "solas", "marpol", "stcw", "ism", "isps", "colreg", "cow", "crude oil",
             "enclosed space", "permit", "ptw", "deck", "bridge", "navigation", "oow", "chief",
-            "master", "captain", "purge", "inert", "igs", "lifeboat", "liferaft", "sopep"
+            "master", "captain", "purge", "inert", "igs", "lifeboat", "liferaft", "sopep",
+            "mooring", "unmooring", "berth", "berthing", "snap", "snap back", "snap-back", "snapback",
+            "winch", "windlass", "bollard", "fairlead", "chock", "bitts", "warping", "rope", "hawsers",
+            "towing", "towage", "gangway", "pilot ladder", "rigging", "seamanship"
         }
         if any(term in q_lower for term in maritime_fast_terms) or is_company_query(query, ""):
             return "IN-SCOPE"
@@ -1203,6 +1238,73 @@ Rewritten Question:
             logger.error(f"Rewrite mixed query failed: {e}")
             return query
 
+    async def _run_company_retrieval(
+        self,
+        standalone_query: str,
+        current_query: str,
+        user_profile: dict,
+    ) -> List[Dict[str, Any]]:
+        if not self.company_vector_store or not user_profile:
+            return []
+        has_company = bool(
+            user_profile.get("company_id")
+            or user_profile.get("company_name")
+            or user_profile.get("CompanyName")
+            or user_profile.get("company")
+        )
+        if not has_company:
+            return []
+        try:
+            t_comp_start = time.perf_counter()
+            temp_state = {
+                "user_profile": user_profile,
+                "standalone_query": standalone_query,
+                "current_query": current_query,
+            }
+            res_state = await company_retrieval_node(temp_state, self.company_vector_store)
+            c_chunks = res_state.get("company_chunks", []) or []
+            logger.info(
+                f"⚡ [Company Retrieval Parallel] Retrieved {len(c_chunks)} chunks in {time.perf_counter() - t_comp_start:.3f}s"
+            )
+            return c_chunks
+        except Exception as e:
+            logger.warning(f"Parallel company retrieval error: {e}")
+            return []
+
+    async def _retrieve_approved_feedback_memory(
+        self,
+        query: str,
+        user_profile: dict,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Query approved feedback memory for semantically matching preferred responses dynamically.
+        Strict company isolation: Company A feedback NEVER influences Company B.
+        """
+        if not query:
+            return None
+        user_profile = user_profile or {}
+        company_id = (
+            user_profile.get("company_id")
+            or user_profile.get("company_name")
+            or user_profile.get("CompanyName")
+            or user_profile.get("company")
+            or user_profile.get("cid")
+        )
+        ship_type = user_profile.get("ship_type") or user_profile.get("shiptype")
+        try:
+            from services.feedback_memory_service import FeedbackMemoryService
+            pool = await get_pool()
+            memory_service = FeedbackMemoryService(pool, self.embedder)
+            return await memory_service.find_relevant_feedback_preference(
+                query=query,
+                company_id=str(company_id).strip() if company_id else None,
+                ship_type=str(ship_type).strip() if ship_type else None,
+                threshold=0.65,
+            )
+        except Exception as e:
+            logger.debug(f"Approved feedback memory retrieval bypassed: {e}")
+            return None
+
     async def run_chat(
         self,
         user_id: str,
@@ -1213,9 +1315,11 @@ Rewritten Question:
         user_details: dict | None = None,
         standalone_query: str | None = None,
         understanding_summary: str | None = None,
+        on_token: Optional[Any] = None,
     ) -> Tuple[NodeResponse, List[Dict[str, Any]], str, str, Dict[str, Any]]:
 
-        logger.info("Running chat pipeline")
+        t_chat_total_start = time.perf_counter()
+        logger.info("Running chat pipeline (optimized parallel execution)")
 
         # -----------------------------
         #  GREETING DETECTION (NEW)
@@ -1240,7 +1344,7 @@ Rewritten Question:
         ]
 
         # -----------------------------
-        #  QUERY REWRITE (REUSE IF PASSED)
+        #  QUERY REWRITE & PARALLEL UPSTREAM
         # -----------------------------
         last_answer = None
         for msg in reversed(cleaned_messages):
@@ -1248,26 +1352,122 @@ Rewritten Question:
                 last_answer = msg.get("content")
                 break
 
+        user_profile = user_details or {}
+        logger.info(f"✅ USER PROFILE USED: {user_profile}")
+
+        t_upstream_start = time.perf_counter()
+
+        is_user_social = is_user_greeting or bool(re.match(r"^(bye|goodbye|cya|thanks|thank you|thx|well done|good night|have a nice day)\b", current_query.lower().strip()))
+
         if not standalone_query:
-            rewrite_task = asyncio.create_task(
-                self.rewrite_query(
-                    current_query=current_query,
-                    previous_questions=previous_questions,
-                    last_answer=last_answer,
+            t_rew_start = time.perf_counter()
+            if is_user_social:
+                standalone_query = current_query
+                router_decision = {"node_type": "greeting" if is_user_greeting else ("goodbye" if "bye" in current_query.lower() else "thank"), "category": "GREETING" if is_user_greeting else "SOCIAL"}
+            else:
+                rewrite_task = asyncio.create_task(
+                    self.rewrite_query(
+                        current_query=current_query,
+                        previous_questions=previous_questions,
+                        last_answer=last_answer,
+                    )
                 )
-            )
-            router_task = asyncio.create_task(
-                self.analyzer.classify_for_router(
+                router_task = asyncio.create_task(
+                    self.analyzer.classify_for_router(
+                        current_query,
+                        previous_questions
+                    )
+                )
+                standalone_query, router_decision = await asyncio.gather(rewrite_task, router_task)
+            logger.info(f"⚡ Rewritten standalone query in {time.perf_counter() - t_rew_start:.3f}s: '{standalone_query}'")
+
+            node_type_pre = router_decision.get("node_type", "").lower()
+            if node_type_pre in {"greeting", "goodbye", "thank", "well_wish"}:
+                retrieval_chunks, video_suggestions = [], []
+                company_chunks = []
+                approved_feedback_memory = None
+                checkpoint_state = self._load_checkpoint_state(session_id)
+                messages_with_user = await self.append_message(
+                    session_id,
+                    "user",
                     current_query,
-                    previous_questions
+                    "GREETING" if node_type_pre == "greeting" else "QUERY",
+                    user_id=user_id,
+                    existing_messages=cleaned_messages,
                 )
-            )
-            standalone_query, router_decision = await asyncio.gather(rewrite_task, router_task)
+            else:
+                if on_token:
+                    await on_token(get_status_event("searching"))
+
+                # Launch Course & Company Retrieval, Feedback Memory, Checkpoint loading, and message appending concurrently
+                course_task = asyncio.create_task(self._retrieve_chunks(standalone_query))
+                company_task = asyncio.create_task(self._run_company_retrieval(standalone_query, current_query, user_profile))
+                feedback_task = asyncio.create_task(self._retrieve_approved_feedback_memory(standalone_query, user_profile))
+                checkpoint_task = asyncio.to_thread(self._load_checkpoint_state, session_id)
+                user_msg_task = asyncio.create_task(
+                    self.append_message(
+                        session_id,
+                        "user",
+                        current_query,
+                        "QUERY",
+                        user_id=user_id,
+                        existing_messages=cleaned_messages,
+                    )
+                )
+                (retrieval_chunks, video_suggestions), company_chunks, approved_feedback_memory, checkpoint_state, messages_with_user = await asyncio.gather(
+                    course_task, company_task, feedback_task, checkpoint_task, user_msg_task
+                )
         else:
-            router_decision = await self.analyzer.classify_for_router(
-                current_query,
-                previous_questions
-            )
+            if is_user_social:
+                router_decision = {"node_type": "greeting" if is_user_greeting else ("goodbye" if "bye" in current_query.lower() else "thank"), "category": "GREETING" if is_user_greeting else "SOCIAL"}
+                retrieval_chunks, video_suggestions = [], []
+                company_chunks = []
+                approved_feedback_memory = None
+                checkpoint_state = self._load_checkpoint_state(session_id)
+                messages_with_user = await self.append_message(
+                    session_id,
+                    "user",
+                    current_query,
+                    "GREETING" if is_user_greeting else "QUERY",
+                    user_id=user_id,
+                    existing_messages=cleaned_messages,
+                )
+            else:
+                if on_token:
+                    await on_token(get_status_event("searching"))
+
+                # Standalone query is already resolved upstream; run router, course retrieval, company retrieval, feedback memory, checkpoint, and message append in parallel!
+                router_task = asyncio.create_task(
+                    self.analyzer.classify_for_router(
+                        current_query,
+                        previous_questions
+                    )
+                )
+                course_task = asyncio.create_task(self._retrieve_chunks(standalone_query))
+                company_task = asyncio.create_task(self._run_company_retrieval(standalone_query, current_query, user_profile))
+                feedback_task = asyncio.create_task(self._retrieve_approved_feedback_memory(standalone_query, user_profile))
+                checkpoint_task = asyncio.to_thread(self._load_checkpoint_state, session_id)
+                user_msg_task = asyncio.create_task(
+                    self.append_message(
+                        session_id,
+                        "user",
+                        current_query,
+                        "QUERY",
+                        user_id=user_id,
+                        existing_messages=cleaned_messages,
+                    )
+                )
+                router_decision, (retrieval_chunks, video_suggestions), company_chunks, approved_feedback_memory, checkpoint_state, messages_with_user = await asyncio.gather(
+                    router_task, course_task, company_task, feedback_task, checkpoint_task, user_msg_task
+                )
+
+        if on_token:
+            await on_token(get_status_event("analyzing"))
+
+        logger.info(
+            f"⚡ [PARALLEL UPSTREAM FINISHED] Completed in {time.perf_counter() - t_upstream_start:.3f}s "
+            f"(Course chunks={len(retrieval_chunks)}, Company chunks={len(company_chunks)}, Router node={router_decision.get('node_type')})"
+        )
 
         node_type = router_decision.get("node_type", "").lower()
 
@@ -1305,8 +1505,8 @@ Rewritten Question:
             history_for_llm = []
             meaningful_history = []
             retrieval_chunks = []
+            company_chunks = []
             video_suggestions = []
-            messages_with_user = cleaned_messages
             checkpoint_state = {}
 
         elif is_gap_analysis:
@@ -1317,8 +1517,8 @@ Rewritten Question:
             history_for_llm = []
             meaningful_history = []
             retrieval_chunks = []
+            company_chunks = []
             video_suggestions = []
-            messages_with_user = cleaned_messages
             checkpoint_state = {}
 
         # -----------------------------
@@ -1340,56 +1540,35 @@ Rewritten Question:
                 "QUERY",
             )
 
-            messages_with_user = await self.append_message(
-                session_id,
-                "user",
-                current_query,
-                user_category,
-                user_id=user_id,
-                existing_messages=cleaned_messages,
-            )
-
             full_history = self._clean_messages(messages_with_user)
             history_for_llm = self._convert_messages_for_llm(full_history)
 
-            checkpoint_state = self._load_checkpoint_state(session_id)
             meaningful_history = checkpoint_state.get("meaningful_history", []) or []
-
             logger.info(f"[MEMORY] Loaded meaningful_history: {len(meaningful_history)}")
-
-        # -----------------------------
-        # 🔥 USER PROFILE
-        # -----------------------------
-        user_profile = user_details or {}
-        logger.info(f"✅ USER PROFILE USED: {user_profile}")
 
         # -----------------------------
         # 🕵️ SCOPE CONTROL CHECK
         # -----------------------------
         is_out_of_scope = False
-        if not is_social:
-            # First, retrieve chunks using standalone_query to get context for checking
-            retrieval_chunks, video_suggestions = await self._retrieve_chunks(
-                standalone_query
-            )
-            
-            # Check scope using LLM
+        if not is_social and not is_gap_analysis:
+            t_scope_start = time.perf_counter()
             scope_decision = await self.check_query_scope(standalone_query, retrieval_chunks)
+            logger.info(f"Scope decision: {scope_decision} (checked in {time.perf_counter() - t_scope_start:.3f}s)")
             if scope_decision == "OUT-OF-SCOPE":
                 if not is_company_query(standalone_query, user_profile.get("company_name", "")):
                     is_out_of_scope = True
                     retrieval_chunks = []
+                    company_chunks = []
                     video_suggestions = []
             elif scope_decision == "MIXED":
-                # Rewrite mixed query to keep only the in-scope marine portion
                 cleaned_query = await self.rewrite_mixed_query(standalone_query)
                 standalone_query = cleaned_query
-                # Re-retrieve chunks for the cleaned query
-                retrieval_chunks, video_suggestions = await self._retrieve_chunks(
-                    standalone_query
-                )
+                course_task = asyncio.create_task(self._retrieve_chunks(standalone_query))
+                comp_task = asyncio.create_task(self._run_company_retrieval(standalone_query, current_query, user_profile))
+                (retrieval_chunks, video_suggestions), company_chunks = await asyncio.gather(course_task, comp_task)
         else:
             retrieval_chunks = []
+            company_chunks = []
             video_suggestions = []
             
         video_suggestions = self._normalize_video_suggestions(
@@ -1405,6 +1584,7 @@ Rewritten Question:
             "understanding_summary": understanding_summary,
             "previous_questions": previous_questions,
             "retrieval_chunks": retrieval_chunks,
+            "company_chunks": company_chunks,
             "video_suggestions": video_suggestions,
             "meaningful_messages": meaningful_history,
             "meaningful_history": meaningful_history,
@@ -1413,6 +1593,7 @@ Rewritten Question:
             "user_id": user_id,
             "user_profile": user_profile,
             "company_vector_store": self.company_vector_store, 
+            "approved_feedback_preference": approved_feedback_memory,
             "is_user_greeting": is_user_greeting,
             "node_response": {},
             "router_decision": router_decision,
@@ -1430,6 +1611,8 @@ Rewritten Question:
             elif not isinstance(state[key], list):
                 state[key] = [state[key]]
 
+        if on_token:
+            await on_token(get_status_event("preparing"))
 
         try:
 
@@ -1463,14 +1646,17 @@ Rewritten Question:
                         "requires_upload": True,
                     }
                 }
+                if on_token:
+                    await on_token({"type": "content", "token": gap_prompt_content})
 
             elif is_out_of_scope:
 
                 logger.info("🚫 OUT OF SCOPE QUESTION REJECTED")
+                out_msg = get_random_out_of_scope_message()
 
                 state["node_response"] = {
                     "type": "query",
-                    "content": "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content.",
+                    "content": out_msg,
                     "sections": [],
                     "chunks_used": [],
                     "videos": [],
@@ -1485,6 +1671,48 @@ Rewritten Question:
                         "routing_reason": "out_of_scope"
                     }
                 }
+                if on_token:
+                    await on_token({"type": "content", "token": out_msg})
+
+            elif node_type == "greeting":
+                state = await greeting_node(state)
+                if on_token and state.get("node_response", {}).get("content"):
+                    await on_token({"type": "content", "token": state["node_response"]["content"]})
+
+            elif node_type == "goodbye":
+                state = await goodbye_node(state)
+                if on_token and state.get("node_response", {}).get("content"):
+                    await on_token({"type": "content", "token": state["node_response"]["content"]})
+
+            elif node_type == "thank":
+                state = await thank_node(state)
+                if on_token and state.get("node_response", {}).get("content"):
+                    await on_token({"type": "content", "token": state["node_response"]["content"]})
+
+            elif node_type == "well_wish":
+                state = await well_wish_node(state)
+                if on_token and state.get("node_response", {}).get("content"):
+                    await on_token({"type": "content", "token": state["node_response"]["content"]})
+
+            elif node_type == "summary":
+                state = await summary_node(state, self.openai_service, self.suggestion_service)
+                if on_token and state.get("node_response", {}).get("content"):
+                    await on_token({"type": "content", "token": state["node_response"]["content"]})
+
+            elif node_type == "quiz":
+                state = await quiz_node(state, self.openai_service, self.suggestion_service)
+                if on_token and state.get("node_response", {}).get("content"):
+                    await on_token({"type": "content", "token": state["node_response"]["content"]})
+
+            elif node_type == "threadning":
+                state = await threadning_node(state)
+                if on_token and state.get("node_response", {}).get("content"):
+                    await on_token({"type": "content", "token": state["node_response"]["content"]})
+
+            elif node_type == "negative":
+                state = await negative_node(state, self.suggestion_service)
+                if on_token and state.get("node_response", {}).get("content"):
+                    await on_token({"type": "content", "token": state["node_response"]["content"]})
 
             elif node_type == "query":
                 has_company = bool(
@@ -1493,34 +1721,32 @@ Rewritten Question:
                     or user_profile.get("CompanyName")
                     or user_profile.get("company")
                 )
-                if has_company and self.company_vector_store:
-                    state = await company_retrieval_node(
-                        state,
-                        self.company_vector_store,
-                    )
-
-                state = await retrieval_node(
-                    state,
-                    self.vector_store,
-                    None
-                )
-
-                # ⚡ OPTIMIZATION: Single-pass direct execution
-                # If company chunks exist, company_query_node generates Section 1 (Company SMS) +
-                # Section 2 (Dolphin Knowledge) + Section 3 (AI Advisory) directly in 1 pass.
-                # Running query_node first was redundant and added 10-15s of wasted latency.
+                t_node_start = time.perf_counter()
                 if has_company and state.get("company_chunks"):
                     state = await company_query_node(
                         state,
                         self.openai_service,
+                        self.suggestion_service,
+                        on_token=on_token,
                     )
+                    # If company_query_node returned without populating node_response or company_answer is None, fallback to query_node
+                    if not state.get("node_response") or not state["node_response"].get("content") or state.get("company_answer") is None:
+                        state = await query_node(
+                            state,
+                            self.openai_service,
+                            self.suggestion_service,
+                            self.vector_store,
+                            on_token=on_token,
+                        )
                 else:
                     state = await query_node(
                         state,
                         self.openai_service,
                         self.suggestion_service,
                         self.vector_store,
+                        on_token=on_token,
                     )
+                logger.info(f"⚡ [LLM Generation] Node '{node_type}' completed in {time.perf_counter() - t_node_start:.3f}s")
 
             else:
                 state = await fallback_node(
@@ -1528,6 +1754,8 @@ Rewritten Question:
                     self.suggestion_service,
                     self.openai_service,
                 )
+                if on_token and state.get("node_response", {}).get("content"):
+                    await on_token({"type": "content", "token": state["node_response"]["content"]})
 
             raw_result = state
 
@@ -1536,6 +1764,43 @@ Rewritten Question:
             raise
 
         node_response = raw_result.get("node_response")
+        if not node_response or not isinstance(node_response, dict) or not node_response.get("content"):
+            raw_comp = state.get("company_answer")
+            if raw_comp and "NO_COMPANY_DATA" not in raw_comp:
+                content_val = raw_comp
+            else:
+                content_val = "I am here to assist with your maritime and company SMS procedures. How can I help you?"
+
+            node_response = {
+                "type": "query",
+                "content": content_val,
+                "sections": [
+                    {
+                        "topic_code": "MARITIME_QUERY",
+                        "topic_name": "Marine Maritime Response",
+                        "content": content_val,
+                    }
+                ],
+                "chunks_used": state.get("company_chunks", []) or state.get("retrieval_chunks", []) or [],
+                "question_suggestions": self.suggestion_service.generate_from_response(
+                    query=current_query,
+                    response_text=content_val,
+                    chunks=state.get("company_chunks", []) or state.get("retrieval_chunks", []) or [],
+                ),
+                "videos": state.get("video_suggestions", []) or [],
+                "images": state.get("images", []) or [],
+                "pdfs": state.get("pdfs", []) or [],
+                "metadata": {"category": "QUERY"}
+            }
+
+        # Sanitize any accidental internal token leak (e.g. NO_COMPANY_DATA)
+        if node_response and isinstance(node_response, dict):
+            if "NO_COMPANY_DATA" in str(node_response.get("content", "")):
+                node_response["content"] = re.sub(r'NO_COMPANY_DATA\s*', '', str(node_response["content"])).strip()
+            if isinstance(node_response.get("sections"), list):
+                for sec in node_response["sections"]:
+                    if isinstance(sec, dict) and "content" in sec and "NO_COMPANY_DATA" in str(sec["content"]):
+                        sec["content"] = re.sub(r'NO_COMPANY_DATA\s*', '', str(sec["content"])).strip()
 
         validated = NodeResponse.model_validate(node_response)
 
@@ -1580,6 +1845,7 @@ Rewritten Question:
         all_topic_codes = []
 
         if is_media_allowed:
+            t_media_start = time.perf_counter()
             # Collect active and company chunks
             active_chunks = state.get("retrieval_chunks", []) or retrieval_chunks or []
             company_chunks = state.get("company_chunks", []) or []
@@ -1593,34 +1859,44 @@ Rewritten Question:
             effective_q = standalone_query or current_query
             all_videos = extract_videos(all_chunks, combined_video_sources, query=effective_q)
 
-            # Fallback database search for matching videos if none found and in-scope
-            if not all_videos and effective_q:
-                try:
-                    db_vids = await search_matching_videos_in_db(effective_q, limit=5)
-                    if db_vids:
-                        all_videos = db_vids
-                except Exception as e:
-                    logger.debug(f"Video search fallback failed: {e}")
-
             node_images = getattr(validated, "images", None) or []
             combined_images = node_images + (state.get("images") or [])
             all_images = extract_images(all_chunks, combined_images, query=effective_q, max_images=6)
 
-            # Search matching images in database if none or few found and in-scope
+            # Parallel fallback database search for matching videos and images if needed
+            db_vid_task = None
+            db_img_task = None
+
+            if not all_videos and effective_q:
+                db_vid_task = asyncio.create_task(search_matching_videos_in_db(effective_q, limit=5))
+
             if len(all_images) < 3 and effective_q:
-                try:
-                    db_imgs = await search_matching_images_in_db(effective_q, limit=6)
-                    seen_img_keys = {
-                        (img.get("id") or img.get("title") or img.get("url") or "").strip().lower()
-                        for img in all_images
-                    }
-                    for img in db_imgs:
-                        k = (img.get("id") or img.get("title") or img.get("url") or "").strip().lower()
-                        if k and k not in seen_img_keys:
-                            seen_img_keys.add(k)
-                            all_images.append(img)
-                except Exception as e:
-                    logger.debug(f"Image search fallback failed: {e}")
+                db_img_task = asyncio.create_task(search_matching_images_in_db(effective_q, limit=6))
+
+            if db_vid_task and db_img_task:
+                db_vids, db_imgs = await asyncio.gather(db_vid_task, db_img_task)
+            elif db_vid_task:
+                db_vids = await db_vid_task
+                db_imgs = []
+            elif db_img_task:
+                db_imgs = await db_img_task
+                db_vids = []
+            else:
+                db_vids, db_imgs = [], []
+
+            if db_vids:
+                all_videos = db_vids
+
+            if db_imgs:
+                seen_img_keys = {
+                    (img.get("id") or img.get("title") or img.get("url") or "").strip().lower()
+                    for img in all_images
+                }
+                for img in db_imgs:
+                    k = (img.get("id") or img.get("title") or img.get("url") or "").strip().lower()
+                    if k and k not in seen_img_keys:
+                        seen_img_keys.add(k)
+                        all_images.append(img)
 
             # Process and cache images, deduplicate, and attach embedded base64 data
             if all_images:
@@ -1650,8 +1926,15 @@ Rewritten Question:
                 if topic_code and topic_code not in all_topic_codes:
                     all_topic_codes.append(topic_code)
 
+            logger.info(f"⚡ [Media Enrichment] Completed in {time.perf_counter() - t_media_start:.3f}s")
+
         state["messages"] = updated_messages
         self._last_state = state
+
+        logger.info(
+            f"✅ [CHAT PIPELINE TOTAL] Total run_chat duration: {time.perf_counter() - t_chat_total_start:.3f}s"
+        )
+
         return (
             validated,
             final_cleaned_history,

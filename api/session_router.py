@@ -74,9 +74,16 @@ def _clean_messages(msgs: Any) -> List[Dict[str, Any]]:
             }
             if role == "assistant":
                 normalized["video_suggestions"] = list(msg.get("video_suggestions") or [])
+                normalized["videos"] = list(msg.get("videos") or [])
+                normalized["images"] = list(msg.get("images") or [])
+                normalized["pdfs"] = list(msg.get("pdfs") or [])
                 normalized["question_suggestions"] = list(msg.get("question_suggestions") or [])
                 normalized["like"] = msg.get("like")
                 normalized["command"] = msg.get("command")
+                normalized["checkLicCoursesData"] = list(msg.get("checkLicCoursesData") or msg.get("courses") or [])
+                normalized["courses"] = list(msg.get("courses") or msg.get("checkLicCoursesData") or [])
+                normalized["sections"] = list(msg.get("sections") or [])
+                normalized["topic_codes"] = list(msg.get("topic_codes") or [])
             cleaned.append(normalized)
             continue
         
@@ -104,7 +111,14 @@ def _clean_messages(msgs: Any) -> List[Dict[str, Any]]:
                         "timestamp": timestamp,
                         "category": category,
                         "video_suggestions": list(msg.get("video_suggestions") or []),
+                        "videos": list(msg.get("videos") or []),
+                        "images": list(msg.get("images") or []),
+                        "pdfs": list(msg.get("pdfs") or []),
                         "question_suggestions": list(msg.get("question_suggestions") or []),
+                        "checkLicCoursesData": list(msg.get("checkLicCoursesData") or msg.get("courses") or []),
+                        "courses": list(msg.get("courses") or msg.get("checkLicCoursesData") or []),
+                        "sections": list(msg.get("sections") or []),
+                        "topic_codes": list(msg.get("topic_codes") or []),
                     }
                 )
     return cleaned
@@ -112,8 +126,8 @@ def _clean_messages(msgs: Any) -> List[Dict[str, Any]]:
 def _build_summary(session: Dict[str, Any]) -> Dict[str, Any]:
     messages = session.get("messages") if isinstance(session, dict) else None
     last_message = session.get("last_message") if isinstance(session, dict) else None
-    message_count = session.get("message_count") if isinstance(session, dict) else 0
-    is_saved = session.get("is_saved", False) if isinstance(session, dict) else False
+    message_count = int(session.get("message_count", 0) or 0) if isinstance(session, dict) else 0
+    is_saved = bool(session.get("is_saved", False)) if isinstance(session, dict) else False
 
     if isinstance(last_message, str):
         try:
@@ -127,7 +141,7 @@ def _build_summary(session: Dict[str, Any]) -> Dict[str, Any]:
         except json.JSONDecodeError:
             messages = []
 
-    if isinstance(messages, list):
+    if isinstance(messages, list) and len(messages) > 0:
         normalized_messages: List[Dict[str, Any]] = []
 
         for message in messages:
@@ -141,26 +155,32 @@ def _build_summary(session: Dict[str, Any]) -> Dict[str, Any]:
                 normalized_messages.append(message)
 
         messages = _clean_messages(normalized_messages)
-
-    if isinstance(messages, list):
         message_count = len(messages)
         last_message = messages[-1] if messages else None
 
     return {
-        "session_id": session.get("session_id"),
-        "title": session.get("title"),
-        "created_at": session.get("created_at"),
-        "updated_at": session.get("updated_at"),
-        "is_saved": is_saved,   # added response field
-        "message_count": message_count or 0,
-        "last_message": last_message,
+        "session_id": str(session.get("session_id") or ""),
+        "title": session.get("title") or "New Chat",
+        "created_at": session.get("created_at") or datetime.utcnow(),
+        "updated_at": session.get("updated_at") or datetime.utcnow(),
+        "is_saved": is_saved,
+        "message_count": message_count,
+        "last_message": last_message if isinstance(last_message, dict) else None,
         "messages": messages or [],
     }
 
 @router.get("", response_model=List[SessionSummary])
-async def list_sessions(user_id: str,search: Optional[str] = None,pool: Pool = Depends(get_db_pool)):
+@router.get("/list", response_model=List[SessionSummary])
+async def list_sessions(
+    user_id: Optional[str] = Query(default=None),
+    search: Optional[str] = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    pool: Pool = Depends(get_db_pool)
+):
+    if not user_id:
+        return []
     session_service = SessionService(pool)
-    sessions = await session_service.list_sessions(user_id, search)
+    sessions = await session_service.list_sessions(user_id, search, limit=limit)
     return [_build_summary(session) for session in sessions]
 
 @router.post("", response_model=SessionSummary)
@@ -386,6 +406,8 @@ class PaginatedSessionResponse(BaseModel):
     offset: int
     data: list[SessionListResponse]
 
+@router.get("/admin/filter", response_model=PaginatedSessionResponse)
+@router.get("/filter", response_model=PaginatedSessionResponse)
 @router.get("/", response_model=PaginatedSessionResponse)
 async def get_all_sessions_filter(
     session_date: Optional[date] = Query(

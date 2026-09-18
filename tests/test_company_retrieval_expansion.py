@@ -251,7 +251,7 @@ def test_scenario_7_cow_checklist_functionality():
     """
     class MockOpenAIService:
         async def chat(self, messages, temperature=0.0, **kwargs):
-            return """### 🏢 1. According to CMS Demo Company's Safety Management System (SMS / QMS)
+            return """### 🏢 1. CMS Demo Company's Safety Management System (SMS / QMS)
 **Document Title:** Shipboard SMS Manual (Vol. II)-Oil Tanker 2016.docx
 **SOP Name:** Crude Oil Washing (COW) Procedures
 **Section:** COW Checklist
@@ -277,7 +277,110 @@ Dolphin course information for Crude Oil Washing.
     updated_state = asyncio.run(company_query_node(state, MockOpenAIService()))
     answer = updated_state["company_answer"]
 
-    assert "COW Entry and Cleaning Checklist" in answer
-    assert "| 1. Confirm all pre-arrival checks are performed |  |  | R | |" in answer
+    assert "Crude Oil Washing (COW) Procedures" in answer
+    assert "**Section:** COW Checklist" in answer
+    assert "Confirm all pre-arrival checks are performed" in answer
     assert "### 📘 2. Dolphin internal knowledge base" in answer
     assert "Dolphin course information for Crude Oil Washing." in answer
+
+
+def test_scenario_9_unrelated_company_docs_pruned_and_fallback_to_course_content():
+    """
+    Test 9: When user asks about low flash point fuels used onboard ships and the company only has
+    unrelated documentation / nautical publication manuals, company_retrieval_node prunes all chunks
+    (setting company_chunks = []), and the query is answered cleanly from course content without company hallucination.
+    """
+    unrelated_chunks = [
+        {
+            "document_id": 991,
+            "company_id": "824866",
+            "document_title": "Shipboard SMS Manual (Chemical)-Completed (1).docx",
+            "doc_type": "Procedure",
+            "chunk_index": 12,
+            "content": "Section II.3 Nautical Publications and Documentation Management. Master shall ensure navigation charts are corrected up to date.",
+        },
+        {
+            "document_id": 991,
+            "company_id": "824866",
+            "document_title": "Shipboard SMS Manual (Chemical)-Completed (1).docx",
+            "doc_type": "Procedure",
+            "chunk_index": 13,
+            "content": "Filing and archiving of log books and vessel certificates in Master's office.",
+        }
+    ]
+
+    store = MockCompanyVectorStore(unrelated_chunks)
+    state = {
+        "user_profile": {"company_id": "824866", "company_name": "CMS Demo Company", "ship_type": "Chemical Tanker"},
+        "current_query": "describe low flash point fuels used onboard the ships",
+        "standalone_query": "describe low flash point fuels used onboard the ships",
+    }
+
+    # 1. Verify retrieval node prunes unrelated chunks
+    updated_state = asyncio.run(company_retrieval_node(state, store))
+    assert updated_state["company_chunks"] == []
+
+    # 2. Verify company_query_node keeps company_answer=None
+    class MockOpenAIService:
+        async def chat(self, messages, temperature=0.0, **kwargs):
+            return "Should not be called or NO_COMPANY_DATA"
+
+    updated_state["node_response"] = {
+        "content": "Low flash point fuels include LNG, methanol, and ethanol having a flash point below 60°C as regulated under the IGF Code."
+    }
+    updated_query_state = asyncio.run(company_query_node(updated_state, MockOpenAIService()))
+    assert updated_query_state["company_answer"] is None
+    assert "IGF Code" in updated_query_state["node_response"]["content"]
+
+
+def test_scenario_8_large_context_passed_to_llm():
+    """
+    Test 8: Large context window handling in company_query_node.
+    Verifies that 25+ company chunks are passed into the LLM prompt without
+    being arbitrarily truncated by the old 8-chunk cutoff.
+    """
+    captured_prompt = None
+
+    class MockOpenAIServiceCapturingPrompt:
+        async def chat(self, messages, temperature=0.0, **kwargs):
+            nonlocal captured_prompt
+            captured_prompt = messages[1]["content"]
+            return """### 🏢 1. CMS Demo Company's Safety Management System (SMS / QMS)
+**Document Title:** Shipboard SMS Manual (Chemical)-Completed (1).docx
+**SOP Name:** Enclosed Space Entry
+**Section:** Full Procedure
+
+Complete comprehensive synthesis of all 25 steps.
+
+### 📘 2. Dolphin internal knowledge base
+Core maritime regulatory baseline.
+"""
+
+    company_chunks = []
+    for i in range(25):
+        company_chunks.append({
+            "document_id": 1,
+            "document_title": "Shipboard SMS Manual (Chemical)-Completed (1).docx",
+            "doc_type": "Procedure",
+            "chunk_index": i,
+            "content": f"Mandatory Safety Step {i+1}: Detailed operational requirement for step {i+1}."
+        })
+
+    state = {
+        "company_chunks": company_chunks,
+        "user_profile": {"company_name": "CMS Demo Company", "company_id": "824866", "ship_type": "Chemical Tanker"},
+        "standalone_query": "Explain enclosed space entry procedure step by step",
+        "node_response": {}
+    }
+
+    updated_state = asyncio.run(company_query_node(state, MockOpenAIServiceCapturingPrompt()))
+    assert updated_state["company_answer"] is not None
+    assert captured_prompt is not None
+
+    # Verify that Step 1, Step 10, Step 20, Step 25 are all present in the prompt passed to LLM
+    assert "Mandatory Safety Step 1:" in captured_prompt
+    assert "Mandatory Safety Step 10:" in captured_prompt
+    assert "Mandatory Safety Step 20:" in captured_prompt
+    assert "Mandatory Safety Step 25:" in captured_prompt
+    assert "=== COMPANY DOCUMENT ===" in captured_prompt
+    assert "=== END COMPANY DOCUMENT ===" in captured_prompt

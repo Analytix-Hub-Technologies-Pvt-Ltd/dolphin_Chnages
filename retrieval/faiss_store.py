@@ -9,6 +9,7 @@ import numpy as np
 from loguru import logger
 
 from config import settings
+from retrieval.bm25 import BM25Index
 from services.embedding_config import EMBEDDING_DIM
 
 # Default: top K for search
@@ -25,10 +26,11 @@ TRANSCRIBE_INDEX_PATH = os.path.join(os.path.dirname(__file__),"transcribe_index
 TRANSCRIBE_META_PATH = os.path.join(os.path.dirname(__file__),"transcribe_index.meta.json")
 class FAISSStore:
     """
-    Thin wrapper around a FAISS index + sidecar metadata.
+    Thin wrapper around a FAISS index + sidecar metadata + in-memory BM25 index.
 
     - index: FAISS vector index
     - id_to_metadata: list[dict] with course_content info
+    - bm25_index: in-memory BM25Okapi inverted index for precision lexical retrieval
     """
 
     def __init__(
@@ -46,7 +48,30 @@ class FAISSStore:
         self.meta_path = meta_path
         self.index: Optional[faiss.Index] = None
         self.id_to_metadata: List[Dict[str, Any]] = []
+        self.bm25_index: Optional[BM25Index] = None
         self.is_loaded: bool = False
+
+    def _init_bm25(self) -> None:
+        """Initialize in-memory BM25 inverted index from metadata in background thread."""
+        if not getattr(settings, "bm25_enabled", True):
+            logger.debug("[BM25] Lexical search disabled in settings")
+            return
+        if not self.id_to_metadata:
+            return
+        
+        import threading
+        def _build():
+            try:
+                bm25 = BM25Index()
+                bm25.build(self.id_to_metadata)
+                self.bm25_index = bm25
+                logger.info("✅ [BM25] Background build complete")
+            except Exception as e:
+                logger.warning(f"Failed to build BM25 index on FAISSStore: {e}")
+                self.bm25_index = None
+
+        thread = threading.Thread(target=_build, daemon=True)
+        thread.start()
 
     # --------------------------------------------------------
     # Persistence
@@ -55,6 +80,8 @@ class FAISSStore:
         """Load FAISS index + metadata from disk if present."""
         if self.is_loaded:
             logger.debug("FAISSStore.load(): already loaded")
+            if self.bm25_index is None and self.id_to_metadata and getattr(settings, "bm25_enabled", True):
+                self._init_bm25()
             return
 
         if not os.path.exists(self.index_path):
@@ -62,6 +89,7 @@ class FAISSStore:
             self.index = faiss.IndexFlatL2(self.dimension)
             self.id_to_metadata = []
             self.is_loaded = True
+            self._init_bm25()
             return
 
         logger.info("📦 Loading FAISS index from {}", self.index_path)
@@ -75,6 +103,7 @@ class FAISSStore:
             self.id_to_metadata = []
 
         self.is_loaded = True
+        self._init_bm25()
         logger.success(
             "✅ FAISS index loaded — vectors={}, dim={}",
             self.index.ntotal if self.index is not None else 0,
@@ -281,3 +310,93 @@ class FAISSStore:
         self.id_to_metadata.extend( metadatas ) 
         
         logger.success( "Added {} vectors. Total vectors = {}", len(vectors), self.index.ntotal)
+
+    def search_bm25(self, query: str, k: int = 50, filter_fn=None) -> List[Dict[str, Any]]:
+        """Perform a lexical BM25 search over the stored metadata."""
+        if not self.is_loaded:
+            self.load()
+        if self.bm25_index is None:
+            return []
+        return self.bm25_index.search(query=query, k=k, filter_fn=filter_fn)
+
+    async def search_hybrid(
+        self,
+        original_query: str,
+        expanded_query: str = None,
+        k: int = 10,
+        filter_fn=None,
+        topic_filter=None,
+    ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]], Dict[str, Any]]:
+        """
+        Execute hybrid search combining FAISS vector search on expanded query
+        and BM25 lexical search on original query with precision scoring.
+        """
+        from retrieval.precision_scorer import (
+            compute_chunk_precision_score,
+            rank_and_filter_candidates,
+        )
+
+        if not self.is_loaded:
+            self.load()
+
+        eff_expanded = expanded_query or original_query
+        vector_cands = []
+        try:
+            all_vector = await self.search_with_embeddings(eff_expanded, k=max(k * 3, 50))
+            for c in all_vector:
+                if filter_fn is None or filter_fn(c):
+                    vector_cands.append(c)
+        except Exception as e:
+            logger.warning(f"FAISS vector search failed in search_hybrid: {e}")
+            vector_cands = []
+
+        bm25_cands = []
+        if self.bm25_index is not None and getattr(settings, "bm25_enabled", True):
+            try:
+                bm25_cands = self.bm25_index.search(query=original_query, k=max(k * 3, 50), filter_fn=filter_fn)
+            except Exception as e:
+                logger.warning(f"BM25 search failed in search_hybrid: {e}")
+                bm25_cands = []
+
+        merged_map: Dict[Any, Dict[str, Any]] = {}
+        max_bm25 = 1.0
+        for c in bm25_cands:
+            b_score = float(c.get("_bm25_score", 0.0) or 0.0)
+            if b_score > max_bm25:
+                max_bm25 = b_score
+
+        for c in vector_cands:
+            key = c.get("content_id") or c.get("id") or c.get("_faiss_index")
+            if key is not None:
+                merged_map[key] = dict(c)
+
+        for c in bm25_cands:
+            key = c.get("content_id") or c.get("id") or c.get("_faiss_index")
+            if key is not None:
+                if key in merged_map:
+                    merged_map[key]["_bm25_score"] = c.get("_bm25_score")
+                else:
+                    merged_map[key] = dict(c)
+
+        all_cands = list(merged_map.values())
+        if not all_cands:
+            return [], None, {"status": "empty"}
+
+        filtered_chunks, exact_topic, debug_info_list = rank_and_filter_candidates(
+            candidates=all_cands,
+            query=original_query,
+            standalone_query=expanded_query or original_query,
+            top_k=k,
+        )
+
+        debug_info = {
+            "total_candidates": len(all_cands),
+            "vector_candidates": len(vector_cands),
+            "bm25_candidates": len(bm25_cands),
+            "exact_topic_detected": bool(exact_topic),
+            "exact_topic": exact_topic,
+        }
+
+        return filtered_chunks[:k], exact_topic, debug_info
+
+

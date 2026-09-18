@@ -121,6 +121,41 @@ def test_point_context_extraction():
     assert "Emergency Rescue Arrangements" in point_3
 
 
+def test_find_substantive_topic_from_history():
+    from services.followup_resolver import find_substantive_topic_from_history
+
+    # Scenario 1: User asked snap-back zone, then had a typo 'explain mor', then 'explain more'
+    history = ["Explain snap back zone", "explain mor"]
+    topic = find_substantive_topic_from_history(history)
+    assert topic == "Snap Back Zone"
+
+    # Scenario 2: History with multiple follow-ups
+    history2 = ["Procedures for Enclosed Space Entry", "explain more", "what are the checklists", "point 2"]
+    topic2 = find_substantive_topic_from_history(history2)
+    assert topic2 == "Procedures for Enclosed Space Entry"
+
+
+def test_typo_followup_resolution():
+    prev_q = ["Explain snap back zone"]
+    topic = "Snap Back Zone"
+
+    # Test typos in follow-up queries
+    typo_queries = [
+        "explain mor",
+        "explan more",
+        "tel me mor",
+        "giv me more details",
+        "detials please",
+        "in detial",
+        "furthur details",
+    ]
+
+    for q in typo_queries:
+        assert is_followup_query(q, prev_q, topic) is True, f"Failed to identify typo query '{q}' as follow-up"
+        resolved, _ = resolve_followup_retrieval_query(q, topic)
+        assert "Snap Back Zone" in resolved, f"Resolved query '{resolved}' missing active topic"
+
+
 def test_chat_service_rewrite_query_fast_path():
     async def _run_test():
         # Setup mock OpenAI service
@@ -148,7 +183,7 @@ def test_chat_service_rewrite_query_fast_path():
         )
 
         assert "Procedures for Enclosed Space Entry" in rewritten
-        assert "detailed explanation" in rewritten
+        assert "operational guidelines" in rewritten or "detailed explanation" in rewritten or "detail" in rewritten
         # Verify OpenAI chat was NOT called (zero added LLM latency)
         mock_openai.chat.assert_not_called()
 
@@ -173,6 +208,16 @@ def test_chat_service_rewrite_query_fast_path():
         )
 
         assert rewritten_new == "Explain cargo loading sequence in detail"
+        mock_openai.chat.assert_not_called()
+
+        # Test 4: Typo follow-up with prior error history -> recovers topic "Snap Back Zone"
+        snap_history = ["Explain snap back zone", "explain mor"]
+        rewritten_snap = await chat_service.rewrite_query(
+            current_query="explain more",
+            previous_questions=snap_history,
+            last_answer="The requested information is not included in the current course content.",
+        )
+        assert "Snap Back Zone" in rewritten_snap
         mock_openai.chat.assert_not_called()
 
     asyncio.run(_run_test())

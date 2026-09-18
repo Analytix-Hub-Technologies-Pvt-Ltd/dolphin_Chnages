@@ -84,7 +84,8 @@ class BM25Index:
                 or meta.get("content")
                 or meta.get("text")
                 or ""
-            )
+            )[:20000]
+
 
             # Tokenize topic name and content with stemming
             # Extra weight to topic_name tokens by including them multiple times in document representation
@@ -133,13 +134,16 @@ class BM25Index:
         query: str,
         top_k: int = 30,
         filter_fn: Optional[Callable[[Dict[str, Any]], bool]] = None,
+        k: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search corpus using BM25 scoring.
-        Returns top_k matching metadata dictionaries with '_score', '_rank', and '_bm25_score'.
+        Returns top matching metadata dictionaries with '_score', '_rank', and '_bm25_score'.
         """
+        eff_top_k = k if k is not None else top_k
         if not self.is_built or not self.metadatas or not query:
             return []
+
 
         # Tokenize and stem query
         q_tokens = tokenize_for_retrieval(query, stem=True)
@@ -189,7 +193,8 @@ class BM25Index:
             results.append(res)
             rank += 1
 
-            if len(results) >= top_k:
+            if len(results) >= eff_top_k:
                 break
+
 
         return results

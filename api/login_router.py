@@ -4,7 +4,7 @@ import asyncpg
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Response, Request
 from asyncpg import Pool
-from openai import BaseModel
+from pydantic import BaseModel
 
 from api.dependencies import get_db_pool
 from models.user_models import LoginRequest, LoginResponse, UserCreate, User
@@ -23,6 +23,9 @@ import json
 
 SECRET_KEY = settings.secret_key
 ALGORITHM = settings.algorithm
+COMPANY_COURSES_API_URL = "https://cms.marinerskills.com/api/companycourses"
+COMPANY_COURSES_SECURITY_KEY = "FslKvipEQ3hT2PfdZla00hp"
+
 router = APIRouter(prefix="/login", tags=["auth"])
 
 @router.get("/debug-db")
@@ -88,6 +91,7 @@ async def login(
             id_type=user_data.id_type,
             id_country=user_data.id_country,
             company_id=user_data.company_id,
+            role_id=existing_user.role_id,
         )
 
         return await auth_service.get_user_by_useremail(email)
@@ -122,7 +126,8 @@ async def login(
         user = await create_or_update_user(
             UserCreate(
                 name=username,
-                email=email
+                email=email,
+                role_id=1,
             )
         )
 
@@ -167,6 +172,7 @@ async def login(
                 id_type=dolphin_result.get("IdType"),
                 id_country=dolphin_result.get("IdCountry"),
                 company_id=dolphin_result.get("CompanyId"),
+                role_id=1,
             )
         )
 
@@ -178,6 +184,27 @@ async def login(
             status_code=500,
             detail="Unable to create or fetch user"
         )
+
+    # -------------------------------------------------
+    # FETCH COMPANY COURSES
+    # -------------------------------------------------
+    company_courses = []
+    company_id_str = str(user.company_id) if user.company_id else None
+    if company_id_str:
+        try:
+            cc_response = requests.get(
+                COMPANY_COURSES_API_URL,
+                json={
+                    "CompanyId": company_id_str,
+                    "SecurityKey": COMPANY_COURSES_SECURITY_KEY
+                },
+                timeout=10.0
+            )
+            if cc_response.status_code == 200:
+                cc_data = cc_response.json()
+                company_courses = cc_data.get("courses", [])
+        except Exception as e:
+            pass
 
     # -------------------------------------------------
     # STORE USER IN REDIS
@@ -192,7 +219,8 @@ async def login(
         "user_type": user.user_type,
         "ship_name": user.ship_name,
         "ship_type": user.ship_type,
-        "user_courses": user.user_courses
+        "user_courses": user.user_courses,
+        "company_courses": company_courses
     }
 
     await redis_service.set_user_data(
@@ -200,9 +228,18 @@ async def login(
         data=user_data
     )
 
-    redis_user = await redis_service.get_user_data(
-        str(user.id)
-    )
+    # -------------------------------------------------
+    # FETCH ROLE NAME
+    # -------------------------------------------------
+    role_name = None
+    if user.role_id:
+        async with pool.acquire() as conn:
+            role_record = await conn.fetchrow(
+                "SELECT role_name FROM user_roles WHERE id = $1",
+                user.role_id
+            )
+            if role_record:
+                role_name = role_record["role_name"]
 
     logger.debug(f"User stored in Redis: {user.id}")
 
@@ -212,7 +249,8 @@ async def login(
     return LoginResponse(
         user_id=user.id,
         name=user.name,
-        email=user.email
+        email=user.email,
+        user_role=role_name
     )
 
 
@@ -307,7 +345,7 @@ async def get_user_courses(
             "user_id": user_id,
             "courses": json.loads(row["user_courses"])
         }
-    
+
 
 test_user_store = {}
 
@@ -362,6 +400,78 @@ TEST_USERS = {
         "user_id": "107"
     }
 }
+
+
+# -------------------------------------------------
+# GET USER PROFILE
+# -------------------------------------------------
+@router.get("/user/{user_id}", response_model=User)
+async def get_user_profile(
+    user_id: str,
+    pool: Pool = Depends(get_db_pool)
+):
+    # 1. Check Redis cache first
+    try:
+        cached_user = await redis_service.get_user_data(user_id)
+        if cached_user and isinstance(cached_user, dict):
+            return User(
+                id=str(cached_user.get("id") or user_id),
+                name=cached_user.get("name") or "",
+                email=cached_user.get("email"),
+                role=cached_user.get("role"),
+                company_name=cached_user.get("company_name"),
+                company_id=cached_user.get("company_id"),
+                user_type=cached_user.get("user_type"),
+                ship_name=cached_user.get("ship_name"),
+                ship_type=cached_user.get("ship_type"),
+                user_name=cached_user.get("user_name"),
+                user_courses=cached_user.get("user_courses")
+            )
+    except Exception as e:
+        logger.warning(f"Failed to fetch user from Redis: {e}")
+
+    # 2. Check test user store / fallback
+    if test_user_store.get("user") and str(test_user_store["user"].get("user_id")) == str(user_id):
+        u = test_user_store["user"]
+        return User(
+            id=str(user_id),
+            name=u.get("name", "Test User"),
+            role=u.get("role", ""),
+            ship_name=u.get("ship_name", ""),
+            ship_type=u.get("ship_type", ""),
+            company_name=u.get("company_name", ""),
+            user_name=u.get("name", "")
+        )
+
+    for uname, udata in TEST_USERS.items():
+        if str(udata.get("user_id")) == str(user_id):
+            return User(
+                id=str(user_id),
+                name=uname,
+                email=uname if "@" in uname else f"{uname}@test.com",
+                role="student",
+                company_name="Dolphin Maritime",
+                user_type="student",
+                user_name=uname
+            )
+
+    # 3. Query PostgreSQL DB
+    auth_service = AuthService(pool)
+    user = await auth_service.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # 4. Cache in Redis for fast future queries
+    try:
+        existing_cached = await redis_service.get_user_data(user_id)
+        user_dict = user.model_dump() if hasattr(user, "model_dump") else user.dict()
+        if existing_cached and existing_cached.get("company_courses"):
+            user_dict["company_courses"] = existing_cached["company_courses"]
+        await redis_service.set_user_data(user_id=str(user.id), data=user_dict)
+    except Exception as e:
+        logger.warning(f"Could not backfill Redis user cache: {e}")
+
+    return user
 
 
 # --------------------------------------------------

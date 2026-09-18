@@ -12,6 +12,7 @@ from retrieval.normalization import (
     extract_distinctive_terms,
     generate_ngrams,
     match_phrase_flexible,
+    is_term_or_compound_in_text,
     COMMON_GENERIC_WORDS,
     QUERY_STOP_WORDS,
 )
@@ -75,7 +76,7 @@ def compute_chunk_precision_score(
             topic_score = 7.5
         # Distinctive keyword overlap in topic name
         elif distinctive_q_words:
-            matched_dist = [w for w in distinctive_q_words if simple_stem(w) in t_stems or w in t_norm]
+            matched_dist = [w for w in distinctive_q_words if simple_stem(w) in t_stems or w in t_norm or is_term_or_compound_in_text(w, topic_name)]
             if len(matched_dist) == len(distinctive_q_words):
                 topic_match_type = "full_distinctive_in_topic"
                 topic_score = 5.5
@@ -84,7 +85,7 @@ def compute_chunk_precision_score(
                 topic_score = 3.0 * (len(matched_dist) / len(distinctive_q_words))
         # Generic query overlap in topic name
         elif q_stems:
-            matched_q = [w for w in q_stems if w in t_stems]
+            matched_q = [w for w in q_stems if w in t_stems or is_term_or_compound_in_text(w, topic_name)]
             if matched_q:
                 topic_match_type = "generic_in_topic"
                 topic_score = 1.0 * (len(matched_q) / len(q_stems))
@@ -95,7 +96,7 @@ def compute_chunk_precision_score(
 
     if effective_query and content:
         # Multi-word phrase matching
-        if len(q_stems) >= 2:
+        if len(q_stems) >= 2 or len(tokenize_for_retrieval(effective_query)) >= 2:
             if match_phrase_flexible(effective_query, content):
                 content_phrase_score = exact_phrase_boost
             else:
@@ -105,13 +106,25 @@ def compute_chunk_precision_score(
                     if match_phrase_flexible(ng, content):
                         content_phrase_score = max(content_phrase_score, exact_phrase_boost * 0.6)
 
-        # Distinctive keyword matching in content
+        # Distinctive or generic keyword matching in content
         if distinctive_q_words:
             c_norm = normalize_text_for_retrieval(content)
             c_tokens = set(tokenize_for_retrieval(content, stem=True))
-            matched_c_dist = [w for w in distinctive_q_words if simple_stem(w) in c_tokens or w in c_norm]
+            matched_c_dist = [
+                w for w in distinctive_q_words
+                if simple_stem(w) in c_tokens or w in c_norm or is_term_or_compound_in_text(w, content)
+            ]
             if matched_c_dist:
                 content_dist_score = 2.0 * (len(matched_c_dist) / len(distinctive_q_words))
+        elif q_stems:
+            c_norm = normalize_text_for_retrieval(content)
+            c_tokens = set(tokenize_for_retrieval(content, stem=True))
+            matched_c_q = [
+                w for w in q_stems
+                if simple_stem(w) in c_tokens or w in c_norm or simple_stem(w) in t_stems or is_term_or_compound_in_text(w, content)
+            ]
+            if matched_c_q:
+                content_dist_score = 1.0 * (len(matched_c_q) / len(q_stems))
 
     # --- 3. VECTOR SIMILARITY COMPONENT ---
     # Convert FAISS L2 distance to [0, 1] similarity
@@ -302,3 +315,23 @@ def rank_and_filter_candidates(
     ]
 
     return final_chunks, exact_topic_detected, debug_info
+
+
+def apply_exact_topic_focus_filter(
+    candidates: Optional[List[Dict[str, Any]]] = None,
+    ranked_candidates: Optional[List[Dict[str, Any]]] = None,
+    query: str = "",
+    standalone_query: str = "",
+    top_k: int = 10,
+    **kwargs,
+) -> Tuple[List[Dict[str, Any]], Optional[str], List[Dict[str, Any]]]:
+    """Compatibility wrapper around rank_and_filter_candidates."""
+    cands = candidates if candidates is not None else (ranked_candidates or [])
+    return rank_and_filter_candidates(
+        candidates=cands,
+        query=query,
+        standalone_query=standalone_query,
+        top_k=top_k,
+    )
+
+

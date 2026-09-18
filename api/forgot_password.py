@@ -9,13 +9,13 @@ from loguru import logger
 router = APIRouter()
 
 conf = ConnectionConfig(
-    MAIL_USERNAME="karthikeyans@compunet.work",
-    MAIL_PASSWORD="Karthi@123",
-    MAIL_FROM="karthikeyans@compunet.work",
-    MAIL_SERVER="smtp.stackmail.com",
-    MAIL_PORT=587,              
-    MAIL_SSL_TLS=False,      
-    MAIL_STARTTLS=True,        
+    MAIL_USERNAME=settings.mail_username,
+    MAIL_PASSWORD=settings.mail_password,
+    MAIL_FROM=settings.mail_from,
+    MAIL_SERVER=settings.mail_server,
+    MAIL_PORT=settings.mail_port,
+    MAIL_SSL_TLS=settings.mail_ssl_tls,
+    MAIL_STARTTLS=settings.mail_starttls,
     USE_CREDENTIALS=True,
     VALIDATE_CERTS=True
 )
@@ -31,16 +31,15 @@ async def forgot_password(request: ForgotPasswordRequest):
         response = await client.post(settings.forgot_password_api_url, json=dolphin_forget_password_payload)
         response.raise_for_status()
         data = response.json()
-        print(data)
 
-    logger.info(f"Forgot password API response for {request.email}: {data}")
+    logger.info(f"Forgot password API response received for {request.email}")
 
     # Check if user information was found in the response
     if not data or not data.get("LoginId") or not data.get("Password"):
         logger.warning(f"No user information found for email: {request.email}")
         raise HTTPException(
             status_code=404,
-            message="No account information found for the provided email address."
+            detail="No account information found for the provided email address."
         )
     
     subject = "Your Password Reset Request"

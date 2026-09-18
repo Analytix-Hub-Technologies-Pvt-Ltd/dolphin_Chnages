@@ -17,17 +17,20 @@ class RedisService:
         try:
             logger.info(f"Connecting to Redis at {self.redis_url}")
 
-            self.redis = redis.from_url(
+            client = redis.from_url(
                 self.redis_url,
                 decode_responses=True,
-                protocol=2
+                protocol=2,
+                socket_timeout=1.0,
+                socket_connect_timeout=1.0,
             )
 
-            result = self.redis.ping()
+            result = client.ping()
 
             if inspect.isawaitable(result):
                 await result
 
+            self.redis = client
             logger.info("Redis connected successfully")
 
         except Exception as e:
@@ -77,7 +80,7 @@ class RedisService:
         self,
         session_id: str,
         messages: List[Dict],
-        ttl: int = 3600
+        ttl: int = 86400
     ):
         if not self.redis:
             return

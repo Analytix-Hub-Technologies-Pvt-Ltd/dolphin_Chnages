@@ -7,6 +7,9 @@ from pipeline.history_utils import extract_clean_history
 from services.fuzzy_search_service import FuzzySearchService
 from services.acronym_disambiguation_service import AcronymDisambiguationService
 from services.conversation_context_service import ConversationContextService
+from services.scope_messages import get_random_out_of_scope_message, normalize_markdown_tables
+from pipeline.stream_utils import JsonStreamContentExtractor
+from services.status_service import get_status_event
 
 
 def format_structured_markdown(text: str) -> str:
@@ -86,7 +89,7 @@ def format_structured_markdown(text: str) -> str:
 
     res = "\n".join(formatted)
     res = re.sub(r"\n{3,}", "\n\n", res)
-    return res.strip()
+    return normalize_markdown_tables(res.strip())
 
 
 QUERY_PROMPT = """
@@ -107,8 +110,27 @@ COURSE CONTEXT:
 
 CRITICAL FORMATTING & SYNTHESIS INSTRUCTIONS:
 
+RELEVANCE VALIDATION — MANDATORY:
+Before generating the answer, analyze the user's question and compare it with the retrieved document content.
+1. Identify the exact topic and intent of the question.
+2. Determine whether the retrieved content directly answers that topic.
+3. Do not consider a document relevant merely because it contains matching keywords such as fuel, tank, cargo, temperature, or flash point.
+4. If the retrieved content is unrelated, do not reproduce its table, procedures, responsibilities, or elaboration.
+5. Retrieve or select content that directly addresses the user's question.
+6. If relevant content is unavailable, clearly state that the answer cannot be verified from the available course material (e.g., "This topic is not covered in the available course material. Please ask a question related to the Marine/Maritime course content.").
+
+Examples:
+- Question: Describe low flash point fuels used onboard ships.
+  Retrieved: Ship/Shore Information Exchange — Loading.
+  Result: IRRELEVANT. Do not generate a cargo loading answer.
+- Question: Describe low flash point fuels used onboard ships.
+  Retrieved: A course section explaining marine low flash point fuels and their types.
+  Result: RELEVANT. Generate the answer from that content.
+
 STRICT RULES:
-- Answer ONLY from COURSE CONTEXT. No hallucination. Zero external knowledge fabrication.
+- Answer from the provided COURSE CONTEXT and any provided ADMIN-APPROVED FEEDBACK PREFERENCE.
+- When an ADMIN-APPROVED FEEDBACK PREFERENCE is included, it represents the authoritative verified standard: you MUST seamlessly incorporate all its specific operational steps, parameters, checklist items, and technical points into the generated answer.
+- Zero external hallucination.
 - Structure the response with clear headings, structured tables, sequential steps, and formatted bullet points.
 
 1. STRUCTURED & VISUALLY STUNNING MARITIME PRESENTATION:
@@ -160,8 +182,10 @@ STRICT RULES:
 - Answer accurately based strictly on the provided COURSE CONTEXT.
 - Relate to ship type ({ship_type}) when relevant.
 - Keep personalization natural without repeating full introductory sentences in every response.
-- If the provided COURSE CONTEXT does not contain the information required to answer the user's question, do NOT use general knowledge or guess. Instead, respond with exactly:
-  "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
+- If the provided COURSE CONTEXT does not contain the information required to answer the user's question, do NOT use general knowledge or guess. Instead, respond with one of the following exact messages:
+  "This topic is not covered in the available course material. Please ask a question related to the Marine/Maritime course content."
+  "This question falls outside the available course material. Please ask something related to the Marine/Maritime course topics."
+  "The requested information is not included in the current course content. Please ask a question relevant to the Marine/Maritime curriculum."
 - Do not add any other explanation or general knowledge when refusing.
 
 5. AVOID REPETITIVE CONCLUSIONS:
@@ -210,7 +234,7 @@ def safe_get(state: Any, key: str, default=None):
 # =============================
 # MAIN FUNCTION
 # =============================
-async def query_node(state, openai_service, suggestion_service, vector_store=None):
+async def query_node(state, openai_service, suggestion_service, vector_store=None, on_token=None):
 
     # Init services
     fuzzy_search = FuzzySearchService(vector_store=vector_store)
@@ -264,17 +288,17 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
 
         response = {
             "type": "query",
-            "content": "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content.",
+            "content": get_random_out_of_scope_message(),
             "sections": [],
             "chunks_used": [],
             "videos": [],
             "images": [],
             "pdfs": [],
-            "question_suggestions": [
-                "What is anchor watch?",
-                "Explain COLREG Rule 15",
-                "What is boiler design?"
-            ],
+            "question_suggestions": suggestion_service.generate_from_response(
+                query=standalone_query,
+                response_text="",
+                chunks=[],
+            ),
             "metadata": {
                 "short_topic": "marine",
                 "routing_reason": "off_topic"
@@ -337,64 +361,90 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
         company_id=user_profile.get("company_id", "")
     )
 
-    # Check if query is about COW entry and cleaning work checklist
-    query_clean = standalone_query.lower().strip()
-    is_cow_checklist_query = (
-        ("cow" in query_clean or "crude oil washing" in query_clean) and
-        ("entry" in query_clean or "cleaning" in query_clean) and
-        ("checklist" in query_clean or "list" in query_clean)
-    )
+    feedback_pref = state.get("approved_feedback_preference")
+    if feedback_pref and isinstance(feedback_pref, dict) and feedback_pref.get("preferred_response"):
+        pref_response = feedback_pref.get("preferred_response", "").strip()
+        eff_sim = float(feedback_pref.get("effective_similarity", 0.0) or 0.0)
+        sim = float(feedback_pref.get("similarity", 0.0) or 0.0)
 
-    if is_cow_checklist_query:
-        logger.info("🎯 Intercepted COW Entry and Cleaning Work Checklist query. Returning Checklist 2.")
-        llm_response = """
-{
-  "sections": [
-    {
-      "topic_code": "a59e3a51-33a3-ef11-bf7c-0050568291a6",
-      "topic_name": "DBMS-608-Engineroom Pipes and Pumping Systems",
-      "content": "### COW Entry and Cleaning Work Checklist\\n\\nThe **Crude Oil Washing (COW)** process is critical for maintaining the integrity of the ship's tanks and ensuring compliance with environmental regulations. This checklist is designed to guide you through the necessary steps for COW entry and cleaning work in accordance with the Safety Management System (SMS).\\n\\n#### General Information\\n- **Ship’s Name:**\\n- **Berth:**\\n- **Port:**\\n- **Date & Time of Arrival:**\\n\\n#### Pre-Entry Checks\\n1. **Obtain Permission**\\n   - Ensure that all necessary permissions are obtained from the relevant authorities.\\n   - Confirm that the COW operation is approved by the Master.\\n\\n2. **Safety Equipment**\\n   - Check that all personal protective equipment (PPE) is available and in good condition:\\n     - Safety helmets\\n     - Gloves\\n     - Goggles\\n     - Respirators (if required)\\n\\n3. **Communication**\\n   - Establish communication protocols with the bridge and engine room.\\n   - Ensure all crew members involved are briefed on the operation.\\n\\n4. **Emergency Procedures**\\n   - Review emergency procedures related to COW operations.\\n   - Ensure that emergency equipment (e.g., fire extinguishers, first aid kits) is accessible.\\n\\n#### COW Operation Steps\\n| Check | Description | Code | Remarks |\\n| :--- | :--- | :--- | :--- |\\n| 1 | Inspect tanks for residues and ensure they are ready for COW. | R | Check for any previous cleaning records. |\\n| 2 | Verify that the COW system is operational and free of leaks. | R | Inspect pumps and valves. |\\n| 3 | Ensure that the oil-water separator is functioning correctly. | R | Test the OWS before starting COW. |\\n| 4 | Confirm that the bilge system is operational and free of obstructions. | R | Check bilge alarms and pumps. |\\n| 5 | Conduct a final safety briefing with all personnel involved. | A | Ensure everyone understands their roles. |\\n\\n#### Post-COW Cleaning\\n1. **Tank Cleaning**\\n   - After COW, ensure that tanks are cleaned according to the SMS procedures.\\n   - Use appropriate cleaning agents and methods as per the manufacturer's guidelines.\\n\\n2. **Inspection**\\n   - Conduct a thorough inspection of the tanks post-cleaning.\\n   - Document any findings and actions taken.\\n\\n3. **Record Keeping**\\n   - Maintain accurate records of the COW operation and cleaning activities in the Oil Record Book.\\n   - Ensure all entries are signed by the responsible officer.\\n\\n4. **Debriefing**\\n   - Hold a debriefing session with the crew to discuss the operation and any issues encountered.\\n   - Identify areas for improvement in future COW operations.\\n\\n### Conclusion\\nFollowing this checklist will help ensure that the COW entry and cleaning work is conducted safely and in compliance with maritime regulations. Always prioritize safety and environmental protection during these operations."
-    }
-  ],
-  "suggestions": [
-    "What specific equipment should I check before starting the COW process?",
-    "Can you provide more details on the safety equipment required for COW operations?",
-    "What are the common issues encountered during COW operations and how can they be resolved?"
-  ]
-}
-"""
+        # If high-confidence match (direct match to approved ticket), deliver the approved response directly!
+        if (eff_sim >= 0.75 or sim >= 0.72) and pref_response:
+            logger.success(
+                f"🎯 [Direct Approved Response Delivery] Returning verified approved feedback response for '{feedback_pref.get('feedback_id')}' "
+                f"(Similarity: {sim}, Effective: {eff_sim})"
+            )
+            if on_token:
+                await on_token(get_status_event("generating"))
+                tokens = re.findall(r'\s+|\S+', pref_response)
+                for t in tokens:
+                    await on_token({"type": "content", "token": t})
+
+            suggestions = suggestion_service.generate_from_response(
+                query=standalone_query,
+                response_text=pref_response,
+                topic_name=source_topic_name,
+                chunks=chunks,
+            )
+
+            state["node_response"] = {
+                "type": "query",
+                "content": pref_response,
+                "sections": [
+                    {
+                        "topic_code": source_topic_code or "APPROVED_STANDARD",
+                        "topic_name": source_topic_name or "Approved Standard Response",
+                        "content": pref_response,
+                    }
+                ],
+                "chunks_used": chunks or [],
+                "question_suggestions": suggestions,
+                "videos": [],
+                "images": [],
+                "pdfs": [],
+                "metadata": {
+                    "source_layer": "Approved Feedback Memory (Verified Standard)",
+                    "feedback_id": feedback_pref.get("feedback_id"),
+                    "approved_similarity": sim,
+                }
+            }
+            return state
+
+        logger.info(f"✨ [Prompt Enrichment] Including Approved Feedback Preference in general query for '{feedback_pref.get('feedback_id')}'")
+        pref_block = (
+            f"\n\n===================================================\n"
+            f"ADMIN-APPROVED FEEDBACK PREFERENCE (MANDATORY STANDARD CORRECTION):\n"
+            f"Matching Query Pattern: {feedback_pref.get('question')}\n"
+            f"Authoritative Approved Preferred Response:\n{feedback_pref.get('preferred_response')}\n\n"
+            f"CRITICAL MANDATORY INSTRUCTION:\n"
+            f"1. The above Approved Preferred Response represents the authoritative verified standard approved by HSQE administrators.\n"
+            f"2. You MUST seamlessly integrate and feature all specific operational actions, valve line-ups, priming steps, and technical parameters (e.g. pressure thresholds, gas limits) from this approved response directly inside the primary operational workflow section (such as 'Starting Procedure' or 'Operational Steps') as distinct, numbered steps and bold bullet points.\n"
+            f"3. Replace any generic or vague steps with the exact technical actions specified in the approved response above.\n"
+            f"===================================================\n"
+        )
+        prompt += pref_block
+
+    if on_token:
+        await on_token(get_status_event("generating"))
+        extractor = JsonStreamContentExtractor()
+        accumulated_chunks = []
+        async for chunk in openai_service.stream_chat(
+            [{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=7000,
+            category="QUERY",
+        ):
+            accumulated_chunks.append(chunk)
+            deltas = extractor.process_chunk(chunk)
+            for delta in deltas:
+                await on_token({"type": "content", "token": delta})
+        llm_response = "".join(accumulated_chunks)
     else:
         llm_response = await openai_service.chat(
             [{"role": "user", "content": prompt}],
             temperature=0.0,
+            max_tokens=7000,
             category="QUERY"
         )
-
-    # EXTRACT ANSWER + SUGGESTIONS
-
-    def extract(text):
-        answer = text
-        suggestions = []
-
-        if "[SUGGESTIONS SECTION]" in text:
-            parts = text.split("[SUGGESTIONS SECTION]")
-            answer = parts[0].replace("[ANSWER SECTION]", "").strip()
-
-            for line in parts[1].split("\n"):
-                line = re.sub(r"^\d+[\.\)]\s*", "", line.strip())
-                if line.endswith("?"):
-                    suggestions.append(line)
-
-        if not suggestions:
-            suggestions = [
-                "What are the key concepts?",
-                "How is this applied?",
-                "What safety considerations exist?"
-            ]
-
-        return answer, suggestions[:5]
-
-    # answer, suggestions = extract(llm_response)
 
     import json
 
@@ -439,11 +489,12 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
                 "topic_name": source_topic_name,
                 "content": raw_response
             }]
-            suggestions = [
-                "What are the key safety precautions?",
-                "Can you explain the step-by-step procedure?",
-                "What are the emergency response protocols?"
-            ]
+            suggestions = suggestion_service.generate_from_response(
+                query=standalone_query,
+                response_text=raw_response,
+                topic_name=source_topic_name,
+                chunks=chunks,
+            )
 
     # Inject understanding section
     # if understanding_summary and understanding_summary != "EMPTY":
@@ -514,6 +565,14 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
         section.get("content", "")
         for section in sections
     )
+
+    if not suggestions:
+        suggestions = suggestion_service.generate_from_response(
+            query=standalone_query,
+            response_text=full_content,
+            topic_name=source_topic_name,
+            chunks=chunks,
+        )
 
     response = {
         "type": "query",

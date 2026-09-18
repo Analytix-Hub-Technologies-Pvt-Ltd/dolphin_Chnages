@@ -279,6 +279,42 @@ CREATE TABLE IF NOT EXISTS public.transcribe (
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS public.company_charts (
+    chart_id BIGSERIAL PRIMARY KEY,
+    company_id TEXT NOT NULL,
+    img_title TEXT,
+    image_base64 TEXT NOT NULL,
+    chart_json JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+--
+-- Name: user_roles; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE IF NOT EXISTS public.user_roles (
+    id SERIAL PRIMARY KEY,
+    role_name VARCHAR(50) UNIQUE NOT NULL
+);
+
+INSERT INTO public.user_roles (role_name) VALUES 
+('USER'), 
+('ADMIN'), 
+('SUPER_ADMIN')
+ON CONFLICT (role_name) DO NOTHING;
+
+--
+-- Modify users table to include role_id
+--
+
+ALTER TABLE public.users
+ADD COLUMN IF NOT EXISTS role_id INTEGER;
+
+ALTER TABLE public.users
+ADD CONSTRAINT fk_user_role FOREIGN KEY (role_id) REFERENCES public.user_roles(id) ON DELETE SET NULL,
+ALTER COLUMN role_id SET DEFAULT 1; 
+
 --
 -- PostgreSQL database dump complete
 --

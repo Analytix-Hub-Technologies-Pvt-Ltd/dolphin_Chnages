@@ -28,14 +28,14 @@ class VideoSuggestion(BaseModel):
 
 class NodeResponse(BaseModel):
 
-    type: str
-    content: str
+    type: str = "query"
+    content: str = ""
     sections: List[dict] = Field(default_factory=list)
-    chunks_used: List[dict]
+    chunks_used: List[dict] = Field(default_factory=list)
     video_suggestions: List[Any] = Field(default_factory=list)
     videos: List[dict] = Field(default_factory=list)
     images: List[dict] = Field(default_factory=list)
     pdfs: List[dict] = Field(default_factory=list)
-    question_suggestions: List[str]
+    question_suggestions: List[str] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     metadata: dict[str, Any] = Field(default_factory=dict)

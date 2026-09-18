@@ -115,7 +115,7 @@ class SessionService:
 
         return dict(record) if record else None
 
-    async def list_sessions(self, user_id: str, search: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def list_sessions(self, user_id: str, search: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
         search_clause = ""
         params: List[Any] = [user_id]
 
@@ -124,27 +124,29 @@ class SessionService:
             AND (
                 title ILIKE $2
                 OR EXISTS (
-                    SELECT 1 FROM jsonb_array_elements(messages) elem
+                    SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(messages) = 'array' THEN messages ELSE '[]'::jsonb END) elem
                     WHERE (elem->>'content') ILIKE $2
                 )
             )
             """
             params.append(f"%{search}%")
 
+        param_idx = len(params) + 1
+        params.append(limit)
+
         query = f"""
             SELECT
                 session_id,
                 user_id,
                 title,
-                is_saved,
+                COALESCE(is_saved, FALSE) AS is_saved,
                 created_at,
-                updated_at,
-                COALESCE(jsonb_array_length(messages), 0) AS message_count,
-                messages -> -1 AS last_message
+                updated_at
             FROM chat_sessions
             WHERE user_id=$1
             {search_clause}
             ORDER BY updated_at DESC
+            LIMIT ${param_idx}
         """
 
         pool = await self._get_pool()

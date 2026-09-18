@@ -92,7 +92,7 @@ class QueryAnalyzer:
         elif any(kw in query_lower for kw in self.PRIORITIZED_KEYWORDS):
             logger.info(f"Prioritized keyword detected in query: {standalone}. Forcing category QUERY.")
             category = "QUERY"
-        elif self._is_obvious_query(standalone) or self._looks_like_technical_term(standalone):
+        elif self._is_obvious_query(standalone) or self._is_obvious_query(current_query) or self._looks_like_technical_term(standalone):
             logger.info(f"[ANALYZER] ⚡ Fast-path: '{standalone}' identified as obvious query/technical term (skipped GPT)")
             category = await self._classify_query(standalone)
         else:
@@ -136,9 +136,12 @@ class QueryAnalyzer:
             "ballast", "anchor", "pump", "valve", "bridge", "deck", "navigation", "rudder",
             "propeller", "generator", "turbine", "steering", "voyage", "bunker", "mooring",
             "lifeboat", "liferaft", "fire", "extinguisher", "bilge", "sludge", "oily", "draft",
-            "trim", "stability", "hatch", "holds", "crane", "winch", "radar", "ecdis", "ais"
+            "trim", "stability", "hatch", "holds", "crane", "winch", "radar", "ecdis", "ais",
+            "snap", "snapback", "snap-back", "recoil", "rope", "wire", "hawsers", "towing",
+            "bollard", "fairlead", "chock", "bitts", "warping", "gangway", "pilot", "ptw",
+            "permit", "enclosed", "purifier", "purification", "centrifugal", "sms", "sop", "sops"
         }
-        words = set(re.findall(r'\b[a-z0-9]+\b', q))
+        words = set(re.findall(r'\b[a-z0-9]+\b', q.replace('-', ' ')))
         if words.intersection(domain_terms):
             return True
         return False

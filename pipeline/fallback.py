@@ -26,10 +26,13 @@ def safe_get(state: Any, key: str, default=None):
     return getattr(state, key, default)
 
 
+from services.scope_messages import get_random_out_of_scope_message
+
+
 # 🔹 Dynamic fallback generator (same as before)
 async def generate_dynamic_fallback(query: str, openai_service=None, is_social: bool = False) -> str:
     if not is_social:
-        return "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
+        return get_random_out_of_scope_message()
 
     if not openai_service:
         import random

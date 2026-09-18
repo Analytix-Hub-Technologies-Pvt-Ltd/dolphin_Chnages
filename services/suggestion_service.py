@@ -9,23 +9,11 @@ class SuggestionService:
     """Generate context-aware follow-up suggestions for the chat UI."""
 
     _STOPWORDS = {
-        "the",
-        "and",
-        "or",
-        "a",
-        "an",
-        "of",
-        "for",
-        "to",
-        "in",
-        "on",
-        "about",
-        "is",
-        "are",
-        "with",
-        "at",
-        "by",
-        "from",
+        "the", "and", "or", "a", "an", "of", "for", "to", "in", "on", "about",
+        "is", "are", "with", "at", "by", "from", "describe", "explain", "what",
+        "how", "tell", "details", "used", "onboard", "ships", "ship", "give",
+        "show", "list", "can", "you", "please", "me", "i", "we", "my", "our",
+        "procedure", "procedures", "process", "define", "definition", "discuss"
     }
 
     def _extract_keywords(self, query: str) -> List[str]:
@@ -41,6 +29,148 @@ class SuggestionService:
             unique_keywords.append(word)
         return unique_keywords
 
+    def generate_from_response(
+        self,
+        query: str,
+        response_text: str = "",
+        topic_name: str = "",
+        company_name: str = "",
+        chunks: List[Dict] = None,
+    ) -> List[str]:
+        """
+        Dynamically generates 2-3 precise, context-aware follow-up questions
+        directly relevant to the response content, procedure, roles, and maritime topics.
+        """
+        response_text = response_text or ""
+        query = query or ""
+        chunks = chunks or []
+
+        # 1. Extract Metadata from Section 1 (if company SMS response)
+        doc_title_m = re.search(r'(?:\*\*|\*|#)*\s*Document\s*Title\s*:\s*(?:\*\*)?\s*([^\n*]+)', response_text, re.IGNORECASE)
+        sop_name_m = re.search(r'(?:\*\*|\*|#)*\s*SOP\s*Name\s*:\s*(?:\*\*)?\s*([^\n*]+)', response_text, re.IGNORECASE)
+        section_m = re.search(r'(?:\*\*|\*|#)*\s*Section\s*:\s*(?:\*\*)?\s*([^\n*]+)', response_text, re.IGNORECASE)
+
+        doc_title = doc_title_m.group(1).strip() if doc_title_m else ""
+        sop_name = sop_name_m.group(1).strip() if sop_name_m else ""
+        section_val = section_m.group(1).strip() if section_m else ""
+
+        clean_doc = re.sub(r'\.(?:docx?|pdf|txt|xlsx?)$', '', doc_title, flags=re.IGNORECASE).strip()
+        clean_sop = re.sub(r'^(?:SOP\s*[-:]?\s*|Procedure\s*for\s*)', '', sop_name, flags=re.IGNORECASE).strip()
+
+        # 2. Extract Subheadings from markdown (e.g. #### Despatch of SMS Documents:, #### Technical Requirements)
+        raw_headings = re.findall(r'(?:^|\n)#{2,5}\s*(?:\*\*)?([^\n*#]+)(?:\*\*)?', response_text)
+        subheadings = []
+        for h in raw_headings:
+            h_clean = re.sub(r'^(?:\d+[\.\)]\s*|[-*•]\s*|🏢|📘|🔍|💡|\d+\s*)', '', h).strip().rstrip(':')
+            h_clean = re.sub(r'\s+', ' ', h_clean)
+            if (
+                len(h_clean) >= 4
+                and len(h_clean) <= 65
+                and not any(ignore in h_clean.lower() for ignore in [
+                    "safety management system", "sms / qms", "dolphin internal knowledge",
+                    "comparison & ai", "ai advisory", "governance notice", "conclusion",
+                    "document title", "sop name", "section"
+                ])
+            ):
+                subheadings.append(h_clean)
+
+        # 3. Extract Tables / Checklist topics / Form numbers mentioned in text
+        form_matches = re.findall(r'\b(?:Form\s+[A-Z0-9_-]{2,10}|[A-Z]{2,4}\s*\d{3,4}|(?:[A-Z][a-z]+\s+)+Log(?:book)?|Transmittal\s+Note|Permit\s+to\s+Work|Checklist)\b', response_text)
+        clean_forms = [f.strip() for f in form_matches if len(f.strip()) > 3 and not f.strip().lower().startswith("form:")]
+
+        # 4. Extract Roles mentioned in text (Master, Chief Officer, Second Officer, DO, ISM Cell, etc.)
+        role_matches = re.findall(r'\b(Master|Chief\s+Officer|Second\s+Officer|Third\s+Officer|Chief\s+Engineer|Second\s+Engineer|Duty\s+Engineer|Duty\s+Officer|Division\s+Officer|DO|Group\s+I/C|ISM\s+Cell|Safety\s+Officer|Standby\s+Person|Pumpman|Bosun|OOW)\b', response_text, re.IGNORECASE)
+        found_roles = list(dict.fromkeys([r.title() for r in role_matches]))
+
+        # 5. Extract Maritime Regulations / Codes mentioned in text (IGC, IGF, SOLAS, MARPOL, STCW, ISM, COLREGs)
+        reg_matches = re.findall(r'\b(IGC\s+Code|IGF\s+Code|SOLAS(?:\s+Chapter\s+[IVX0-9]+)?|MARPOL(?:\s+Annex\s+[IVX0-9]+)?|STCW|ISM\s+Code|ISGOTT|TMSA)\b', response_text, re.IGNORECASE)
+        found_regs = list(dict.fromkeys([r.upper() for r in reg_matches]))
+
+        # 6. Extract key technical terms from query, topic_name, and chunks
+        query_kw = self._extract_keywords(query)
+        primary_topic = topic_name or (clean_sop if clean_sop else " ".join(query_kw[:3]))
+        if not primary_topic and chunks:
+            primary_topic = str(chunks[0].get("topic_name") or chunks[0].get("title") or "")
+        primary_topic = re.sub(r'^(?:DBMS-\d+-|Course:\s*|Topic:\s*)', '', primary_topic).strip()
+        if primary_topic:
+            primary_topic = " ".join([w for w in primary_topic.split() if w.lower() not in self._STOPWORDS])
+
+        # Build candidate questions
+        candidates: List[str] = []
+
+        # Category A: Specific Subheading & Procedural Questions
+        for sub in subheadings[:3]:
+            sub_lower = sub.lower()
+            if "responsibilit" in sub_lower or "dut" in sub_lower:
+                candidates.append(f"What are the specific personnel responsibilities for {sub}?")
+            elif "checklist" in sub_lower or "check" in sub_lower:
+                candidates.append(f"What are the mandatory checks listed under {sub}?")
+            elif "precaution" in sub_lower or "safety" in sub_lower:
+                candidates.append(f"What safety precautions apply to {sub}?")
+            elif "maintenance" in sub_lower:
+                candidates.append(f"What is the procedure for {sub}?")
+            elif "emergency" in sub_lower:
+                candidates.append(f"What are the emergency protocols for {sub}?")
+            elif "permit" in sub_lower or "form" in sub_lower or "document" in sub_lower:
+                candidates.append(f"What entries and documentation are required for {sub}?")
+            elif "limit" in sub_lower or "parameter" in sub_lower or "threshold" in sub_lower or "testing" in sub_lower:
+                candidates.append(f"What are the permissible limits and thresholds for {sub}?")
+            else:
+                candidates.append(f"What are the specific requirements for {sub}?")
+
+        # Category B: Forms, Logs & Checklist Questions
+        if clean_forms:
+            form_name = clean_forms[0]
+            candidates.append(f"What entries and verifications are required for {form_name}?")
+            if len(clean_forms) > 1:
+                candidates.append(f"How is {clean_forms[1]} maintained during operations?")
+
+        # Category C: Role-specific Questions
+        if found_roles:
+            role = found_roles[0]
+            target_topic = clean_sop or primary_topic or "this procedure"
+            candidates.append(f"What are the {role}'s responsibilities for {target_topic}?")
+
+        # Category D: Regulations & Statutory Requirements
+        if found_regs:
+            reg = found_regs[0]
+            candidates.append(f"What are the {reg} regulatory requirements for {primary_topic or 'this operation'}?")
+
+        # Category E: SOP & Topic Specific Questions
+        if clean_sop and clean_sop.lower() not in (primary_topic.lower() if primary_topic else ""):
+            candidates.append(f"What are the key steps in the {clean_sop} procedure?")
+            candidates.append(f"What safety equipment and precautions are required for {clean_sop}?")
+
+        # Category F: Query / Chunk Derived Questions
+        if primary_topic:
+            candidates.append(f"What precautions must be observed during {primary_topic}?")
+            candidates.append(f"What are the operational parameters and limits for {primary_topic}?")
+            candidates.append(f"How is {primary_topic} managed under safety regulations?")
+
+        # Category G: Generic Maritime Fallback (Ground in query keywords)
+        kw_phrase = " ".join(query_kw[:2]).strip()
+        if kw_phrase:
+            candidates.append(f"What are the safety requirements for {kw_phrase}?")
+            candidates.append(f"What are the operational guidelines for {kw_phrase}?")
+            candidates.append(f"How are risk controls implemented for {kw_phrase}?")
+
+        # Deduplicate and Clean
+        seen = set()
+        final_suggestions: List[str] = []
+        for q in candidates:
+            cleaned = re.sub(r'\s+', ' ', q or '').strip()
+            if not cleaned.endswith('?'):
+                cleaned = f"{cleaned}?"
+            norm = cleaned.lower()
+            if norm in seen or len(cleaned.split()) < 4 or len(cleaned.split()) > 15:
+                continue
+            seen.add(norm)
+            final_suggestions.append(cleaned)
+            if len(final_suggestions) >= 3:
+                break
+
+        return final_suggestions[:3]
+
     def generate(
         self,
         query: str,
@@ -55,174 +185,9 @@ class SuggestionService:
         chunks = chunks or []
         history = history or []
 
-        def dedupe(items: List[str]) -> List[str]:
-            seen = set()
-            unique: List[str] = []
-            for item in items:
-                cleaned = re.sub(r"\s+", " ", item or "").strip()
-                if not cleaned or cleaned.lower() in seen:
-                    continue
-                seen.add(cleaned.lower())
-                if not cleaned.endswith("?"):
-                    cleaned = f"{cleaned}?"
-                unique.append(cleaned)
-            return unique
-
-        def word_count_within(question: str, low: int, high: int) -> bool:
-            count = len(question.split())
-            return low <= count <= high
-
-        def collect_chunk_keywords(chunk_list: List[Dict]) -> List[str]:
-            keywords: List[str] = []
-            for chunk in chunk_list:
-                raw_keywords = chunk.get("keywords")
-                if isinstance(raw_keywords, str):
-                    keywords.extend(self._extract_keywords(raw_keywords))
-                elif isinstance(raw_keywords, list):
-                    keywords.extend(self._extract_keywords(" ".join(map(str, raw_keywords))))
-                else:
-                    keywords.extend(
-                        self._extract_keywords(
-                            " ".join(
-                                str(chunk.get(field, ""))
-                                for field in ("title", "section", "topic")
-                            )
-                        )
-                    )
-            # Remove duplicates while preserving order
-            seen_kw = set()
-            ordered_keywords: List[str] = []
-            for kw in keywords:
-                if kw in seen_kw:
-                    continue
-                seen_kw.add(kw)
-                ordered_keywords.append(kw)
-            return ordered_keywords
-
-        def previous_user_messages(msg_history: List[Dict]) -> List[str]:
-            contents: List[str] = []
-            for message in msg_history:
-                if not isinstance(message, dict):
-                    continue
-                if (message.get("role") or message.get("author")) == "user" or message.get("node_type") in {"query", "summary"}:
-                    content = str(message.get("content", "")).strip()
-                    if content:
-                        contents.append(content)
-            return contents
-
-        def build_llm_like_suggestions() -> List[str]:
-            templates = [
-                "How does {topic} aid navigation?",
-                "What keeps {topic} safe at sea?",
-                "Why is {topic} vital onboard?",
-                "Where is {topic} used afloat?",
-                "How to handle {topic} underway?",
-            ]
-
-            sources: List[List[str]] = []
-            query_keywords = self._extract_keywords(query)
-            if query_keywords:
-                sources.append(query_keywords)
-
-            topic_keywords = self._extract_keywords(short_topic)
-            if topic_keywords:
-                sources.append(topic_keywords)
-
-            chunk_keywords = collect_chunk_keywords(chunks)
-            if chunk_keywords:
-                sources.append(chunk_keywords)
-
-            for msg in reversed(previous_user_messages(history)):
-                msg_keywords = self._extract_keywords(msg)
-                if msg_keywords:
-                    sources.append(msg_keywords)
-
-            suggestions: List[str] = []
-            for idx, keyword_group in enumerate(sources):
-                if len(suggestions) >= 3:
-                    break
-                topic_phrase = " ".join(keyword_group[:2]).strip()
-                if not topic_phrase:
-                    continue
-                template = templates[idx % len(templates)]
-                question = template.format(topic=topic_phrase)
-                if word_count_within(question, 5, 8):
-                    suggestions.append(question)
-
-            safe_pool = [
-                "How does anchor scope aid navigation?",
-                "Why is mooring line vital onboard?",
-                "What keeps hull integrity safe at sea?",
-            ]
-
-            suggestions = dedupe(suggestions)
-
-            for filler in safe_pool:
-                if len(suggestions) >= 2:
-                    break
-                if filler not in suggestions:
-                    suggestions.append(filler)
-
-            return dedupe(suggestions)[:3]
-
-        def build_chunk_based_suggestions() -> List[str]:
-            chunk_pool: List[str] = []
-            for chunk in chunks:
-                title_or_topic = " ".join(
-                    filter(
-                        None,
-                        [
-                            str(chunk.get("title") or "").strip(),
-                            str(chunk.get("section") or "").strip(),
-                            str(chunk.get("topic") or "").strip(),
-                        ],
-                    )
-                ).strip()
-                keywords = collect_chunk_keywords([chunk]) or self._extract_keywords(title_or_topic)
-                if not keywords and title_or_topic:
-                    keywords = self._extract_keywords(title_or_topic)
-                if keywords:
-                    phrase = " ".join(keywords[:2])
-                    chunk_pool.append(f"Learn about {phrase}?")
-                elif title_or_topic:
-                    chunk_pool.append(f"Explore {title_or_topic.split()[0]} basics?")
-
-            random.shuffle(chunk_pool)
-
-            fallback_short = [
-                "Review anchor watch steps?",
-                "Check marina docking tips?",
-                "Study COLREGs crossing rules?",
-                "Practice safe bilge checks?",
-            ]
-
-            if len(chunks) < 2:
-                random.shuffle(fallback_short)
-                chunk_pool.extend(fallback_short)
-
-            chunk_pool = [q for q in chunk_pool if word_count_within(q, 3, 6)]
-            chunk_pool = dedupe(chunk_pool)
-
-            if len(chunk_pool) < 2:
-                for filler in fallback_short:
-                    if filler not in chunk_pool:
-                        chunk_pool.append(filler)
-                    if len(chunk_pool) >= 2:
-                        break
-
-            return chunk_pool[:3]
-
-        if category_normalized == "quiz":
-            return build_llm_like_suggestions()
-
-        if category_normalized in {"greeting", "fallback"}:
-            return build_chunk_based_suggestions()
-
-        if category_normalized in {"query", "summary"}:
-            return build_llm_like_suggestions()
-
-        # Default to safe marine suggestions if category is unknown
-        return dedupe([
-            "How does anchor scope aid navigation?",
-            "What keeps hull integrity safe at sea?",
-        ])[:3]
+        return self.generate_from_response(
+            query=query,
+            response_text="",
+            topic_name=short_topic,
+            chunks=chunks,
+        )

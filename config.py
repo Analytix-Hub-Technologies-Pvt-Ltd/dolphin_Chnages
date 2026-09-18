@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     openai_model: str = Field("gpt-4o", alias="OPENAI_MODEL")
     openai_temperature: float = Field(0.0, alias="OPENAI_TEMPERATURE")
-    openai_max_tokens: int = Field(4000, alias="OPENAI_MAX_TOKENS")
+    openai_max_tokens: int = Field(6000, alias="OPENAI_MAX_TOKENS")
     chunk_size: int = Field(500, alias="CHUNK_SIZE")
     faiss_knn: int = Field(10, alias="FAISS_KNN")  # Balanced: increased from 3 to 10 for better video suggestions while maintaining reasonable latency
     faiss_index_path: str = Field("./storage/faiss_index", alias="FAISS_INDEX_PATH")
@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     image_base_url: str = Field("http://localhost:8000", alias="IMAGE_BASE_URL")
     forgot_password_api_url: str = Field("", alias="FORGOT_PASSWORD_API_URL")
     #parth
+
+    # Mail Settings
+    mail_username: str = Field("karthikeyans@compunet.work", alias="MAIL_USERNAME")
+    mail_password: str = Field("Karthi@123", alias="MAIL_PASSWORD")
+    mail_from: str = Field("karthikeyans@compunet.work", alias="MAIL_FROM")
+    mail_server: str = Field("smtp.stackmail.com", alias="MAIL_SERVER")
+    mail_port: int = Field(587, alias="MAIL_PORT")
+    mail_ssl_tls: bool = Field(False, alias="MAIL_SSL_TLS")
+    mail_starttls: bool = Field(True, alias="MAIL_STARTTLS")
 
     # CORS settings
     FRONTEND_HOST:str = "http://localhost:3000"

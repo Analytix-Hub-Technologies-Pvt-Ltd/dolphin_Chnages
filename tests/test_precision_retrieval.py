@@ -455,3 +455,81 @@ def test_company_retrieval_centrifugal_pumps_pruning():
     assert any("centrifugal pumps" in c["content"] for c in chunks)
 
 
+def test_company_retrieval_snap_back_zone_chemical_ship():
+    """
+    Verify that for query 'Explain snap back zone' with ship_type='Chemical',
+    retrieval only returns chunks from 'Shipboard SMS Manual (Chemical)-Completed (1).docx'
+    and rejects 'Navigation and Mooring Manual (NMM).docx'.
+    """
+    from pipeline.company_retrieval import company_retrieval_node
+
+    class MockCompanyStore:
+        def __init__(self):
+            self.id_to_metadata = [
+                {
+                    "document_id": "doc_nmm",
+                    "document_title": "Navigation and Mooring Manual (NMM).docx",
+                    "company_id": "824866",
+                    "company_name": "CMS Demo Company",
+                    "chunk_index": 158,
+                    "content": "Notifications of Breaching or Trading within Exclusion Zones",
+                },
+                {
+                    "document_id": "doc_chem",
+                    "document_title": "Shipboard SMS Manual (Chemical)-Completed (1).docx",
+                    "company_id": "824866",
+                    "company_name": "CMS Demo Company",
+                    "chunk_index": 995,
+                    "content": "Mooring Operations III.5.1.4.1 Guidelines Since mooring operations are potentially dangerous",
+                },
+                {
+                    "document_id": "doc_chem",
+                    "document_title": "Shipboard SMS Manual (Chemical)-Completed (1).docx",
+                    "company_id": "824866",
+                    "company_name": "CMS Demo Company",
+                    "chunk_index": 999,
+                    "content": "All deck relevant areas shall be kept clean, painted and marked and especially those snap-back zones where broken ropes/wires can recoil",
+                }
+            ]
+
+        async def search_with_embeddings(self, query, k=250):
+            res = []
+            for idx, m in enumerate(self.id_to_metadata):
+                c = dict(m)
+                c["_faiss_index"] = idx
+                c["_score"] = 0.5
+                res.append(c)
+            return res
+
+        def search_bm25(self, query, k=50, filter_fn=None):
+            # NMM matched zone, Chemical matched snap-back
+            return [
+                dict(self.id_to_metadata[0], _faiss_index=0, _bm25_score=15.0),
+                dict(self.id_to_metadata[2], _faiss_index=2, _bm25_score=14.0),
+                dict(self.id_to_metadata[1], _faiss_index=1, _bm25_score=13.0),
+            ]
+
+    store = MockCompanyStore()
+    state = {
+        "user_profile": {
+            "company_id": "824866",
+            "company_name": "CMS Demo Company",
+            "ship_type": "Chemical",
+        },
+        "current_query": "Explain snap back zone",
+        "standalone_query": "Explain snap back zone",
+    }
+
+    updated_state = asyncio.run(company_retrieval_node(state, store))
+    chunks = updated_state.get("company_chunks", [])
+    assert len(chunks) > 0
+
+    # Ensure NO NMM chunks are returned for a Chemical ship user
+    for c in chunks:
+        assert c["document_title"] == "Shipboard SMS Manual (Chemical)-Completed (1).docx"
+        assert "Navigation and Mooring Manual" not in c["document_title"]
+
+    # Ensure snap-back content is present
+    assert any("snap-back" in c["content"] for c in chunks)
+
+

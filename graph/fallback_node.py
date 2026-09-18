@@ -7,6 +7,9 @@ from services.openai_service import OpenAIService
 from loguru import logger
 
 
+from services.scope_messages import get_random_out_of_scope_message
+
+
 def safe_get(state: Any, key: str, default=None):
     if isinstance(state, dict):
         return state.get(key, default)
@@ -74,12 +77,11 @@ class FallbackNode(BaseNode):
         previous_questions: List[str] = safe_get(state, "previous_questions", [])
         messages = safe_get(state, "messages", [])
         combined_query = " ".join(q for q in [query] + previous_questions if q)
-        
-        # Generate a varied out-of-scope response using LLM if available, otherwise fallback to static message
+        # Generate a varied out-of-scope response using LLM if available, otherwise fallback to randomized message
         if self.openai_service:
             content = await self._generate_dynamic_fallback(query)
         else:
-            content = "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
+            content = get_random_out_of_scope_message()
         
         response = self._build_response(
             content=content,

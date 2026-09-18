@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+import time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -26,6 +27,9 @@ from retrieval.faiss_store import FAISSStore
 from core.redis_client import redis_service
 from models.database import get_pool
 from pipeline.retrieval import compute_video_relevance_score
+from services.scope_messages import is_out_of_scope_text
+from services.status_service import get_status_event
+from api.course_router import check_topic_course, CheckTopicCourseRequest
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 MAX_MESSAGE_LENGTH = 4000
@@ -128,8 +132,8 @@ async def chat_legacy(
                     }
                     await redis_service.set_user_data(user_id, user_details)
         except Exception as ex:
-            print(f"Failed to fetch user from DB: {ex}")
-    print(f"User details: {user_details}")
+            logger.warning(f"Failed to fetch user from DB: {ex}")
+    logger.debug(f"User details loaded for user_id={user_id}")
 
     session_summary = await redis_service.get_session_summary(session_id)
     print(f"Session summary from Redis: {session_summary}")
@@ -146,6 +150,69 @@ async def chat_legacy(
     )
 
     print(f"Updated messages count: {len(updated_messages)}")
+
+    if updated_messages and isinstance(updated_messages[-1], dict) and updated_messages[-1].get("role") == "assistant":
+        node_meta = getattr(node_response, "metadata", None) or {}
+        is_non_query = (
+            node_meta.get("category") in {"GREETING", "GOODBYE", "THANK", "WELL_WISH", "FALLBACK", "GAP_ANALYSIS_REQUEST", "OUT_OF_SCOPE"}
+            or node_meta.get("routing_reason") == "out_of_scope"
+            or bool(node_meta.get("requires_upload"))
+            or is_out_of_scope_text(node_response.content)
+        )
+        if is_non_query:
+            updated_messages[-1]["videos"] = []
+            updated_messages[-1]["images"] = []
+            updated_messages[-1]["pdfs"] = []
+            updated_messages[-1]["checkLicCoursesData"] = []
+            updated_messages[-1]["courses"] = []
+        elif isinstance(extras, dict):
+            updated_messages[-1]["videos"] = list(extras.get("videos", [])[:5])
+            updated_messages[-1]["images"] = list(extras.get("images", [])[:6])
+            updated_messages[-1]["pdfs"] = list(extras.get("pdfs", [])[:2])
+            if getattr(node_response, "question_suggestions", None):
+                updated_messages[-1]["question_suggestions"] = list(node_response.question_suggestions)
+
+            sections = getattr(node_response, "sections", None) or []
+            raw_codes = []
+            if sections:
+                for s in sections:
+                    if isinstance(s, dict) and s.get("topic_code"):
+                        raw_codes.append((str(s["topic_code"]).strip(), str(s.get("topic_name") or "").strip()))
+            if extras and isinstance(extras.get("topic_codes"), list):
+                for tc in extras["topic_codes"]:
+                    if tc:
+                        raw_codes.append((str(tc).strip(), ""))
+
+            seen_codes = set()
+            valid_topic_codes = []
+            for c, t_name in raw_codes:
+                c_clean = c.strip()
+                c_upper = c_clean.upper()
+                if c_clean and c_upper not in {"COMPANY_SMS", "GAP_ANALYSIS", "NONE"} and c_clean not in seen_codes:
+                    seen_codes.add(c_clean)
+                    valid_topic_codes.append((c_clean, t_name))
+
+            courses_data = []
+            for code, t_name in valid_topic_codes:
+                try:
+                    res = await check_topic_course(
+                        CheckTopicCourseRequest(
+                            topic_code=code,
+                            user_id=user_id
+                        ),
+                        pool=pool
+                    )
+                    if res and isinstance(res, dict) and res.get("data") and res["data"].get("course"):
+                        if t_name and not res["data"].get("topic_name"):
+                            res["data"]["topic_name"] = t_name
+                        courses_data.append(res)
+                except Exception as err:
+                    logger.warning(f"Error checking topic course for {code}: {err}")
+
+            updated_messages[-1]["checkLicCoursesData"] = courses_data
+            updated_messages[-1]["courses"] = courses_data
+            updated_messages[-1]["sections"] = sections
+            updated_messages[-1]["topic_codes"] = [c for c, _ in valid_topic_codes]
 
     await redis_service.set_session_messages(session_id, updated_messages)
     print("Redis updated successfully")
@@ -254,7 +321,7 @@ async def chat(
     print(f"💬 User message: {user_content}")
 
     user_details = await redis_service.get_user_details(user_id) or {}
-    print(f"User details from Redis: {user_details}")
+    logger.debug(f"User details loaded from Redis for user_id={user_id}")
 
     # Fallback: if Redis is disconnected or missing user details, fetch from PostgreSQL users table
     if not user_details.get("company_id") and user_id and user_id != "anonymous":
@@ -277,10 +344,13 @@ async def chat(
                         "ship_type": user_row.get("ship_type") or "",
                         "user_courses": user_row.get("user_courses")
                     }
-                    print(f"Fallback: Loaded user details from PostgreSQL: {user_details}")
+                    existing_cached = await redis_service.get_user_data(user_id)
+                    if existing_cached and existing_cached.get("company_courses"):
+                        user_details["company_courses"] = existing_cached["company_courses"]
+                    logger.debug(f"Fallback: Loaded user details from PostgreSQL for user_id={user_id}")
                     await redis_service.set_user_data(user_id, user_details)
         except Exception as e:
-            print(f"❌ Failed to fetch user details fallback from PostgreSQL: {e}")
+            logger.warning(f"❌ Failed to fetch user details fallback from PostgreSQL: {e}")
 
     # Dynamic resolution: if user has company_name but missing company_id, resolve from DB
     if not user_details.get("company_id") and user_details.get("company_name"):
@@ -305,9 +375,12 @@ async def chat(
 
     async def stream_response():
 
+        t_stream_start = time.perf_counter()
         try:
 
             print("✅ STREAM STARTED")
+            yield f"data: {json.dumps({'type': 'init', 'session_id': session_id})}\n\n"
+            yield f"data: {json.dumps(get_status_event('understanding'))}\n\n"
 
             # -----------------------------
             # 🧠 STEP 1: CLEAN + REWRITE
@@ -322,26 +395,50 @@ async def chat(
                 if m.get("role") == "user"
             ]
 
-            last_answer = next(
-                (
-                    m.get("content")
-                    for m in reversed(cleaned_messages)
-                    if m.get("role") == "assistant"
-                ),
-                None
-            )
+            # Find the most relevant substantive assistant answer (skip generic out-of-scope rejections)
+            last_answer = None
+            out_of_scope_patterns = [
+                "not included in the current course content",
+                "out of scope",
+                "please ask a question relevant to the marine",
+            ]
+            for m in reversed(cleaned_messages):
+                if m.get("role") == "assistant" and m.get("content"):
+                    c_text = str(m.get("content", "")).lower()
+                    if not any(pat in c_text for pat in out_of_scope_patterns):
+                        last_answer = m.get("content")
+                        break
+            if not last_answer:
+                last_answer = next(
+                    (
+                        m.get("content")
+                        for m in reversed(cleaned_messages)
+                        if m.get("role") == "assistant"
+                    ),
+                    None
+                )
 
+            t_rew_start = time.perf_counter()
             standalone_query = await chat_service.rewrite_query(
                 current_query=user_content,
                 previous_questions=previous_questions,
                 last_answer=last_answer
             )
+            t_rew_duration = time.perf_counter() - t_rew_start
+            logger.info(f"⚡ [Chat Router] Query rewrite finished in {t_rew_duration:.3f}s: '{standalone_query}'")
 
-            # Start Understanding, Chat Pipeline, and Transcript search concurrently
-            understanding_task = asyncio.create_task(
-                chat_service.generate_understanding(standalone_query)
-            )
+            # Token queue for streaming real-time LLM content
+            token_queue: asyncio.Queue = asyncio.Queue()
+            t_first_token = [None]
+            t_first_ui_token = [None]
 
+            async def on_token_callback(event: dict):
+                if t_first_token[0] is None and event.get("type") == "content":
+                    t_first_token[0] = time.perf_counter() - t_stream_start
+                    logger.info(f"⚡ [FIRST TOKEN] LLM generated first token at {t_first_token[0]:.3f}s from request start")
+                await token_queue.put(event)
+
+            # Start Chat Pipeline (with streaming callback) and Transcript search concurrently
             chat_task = asyncio.create_task(
                 chat_service.run_chat(
                     user_id=user_id,
@@ -351,6 +448,7 @@ async def chat(
                     category=payload.category,
                     user_details=user_details,
                     standalone_query=standalone_query,
+                    on_token=on_token_callback,
                 )
             )
 
@@ -372,41 +470,42 @@ async def chat(
                 transcript_search()
             )
 
-            rewrite_text = standalone_query or ""
-
-            for token in re.findall(r'\s+|\S+', rewrite_text):
-                payload_data = {
-                    "type": "rewrite_token",
-                    "token": token
-                }
-                yield f"data: {json.dumps(payload_data)}\n\n"
-
-            # ✅ rewrite done
-            yield f"data: {json.dumps({'type': 'rewrite_done'})}\n\n"
-
             # -----------------------------
-            # 🧠 STEP 2: UNDERSTANDING
+            # 🤖 LIVE STREAMING FROM CHAT PIPELINE (ZERO-LATENCY REAL-TIME STREAM)
             # -----------------------------
-            understanding_summary = await understanding_task
-            understanding_text = (understanding_summary or "").strip()
+            streamed_any_content = False
+            while not chat_task.done() or not token_queue.empty():
+                try:
+                    event = await asyncio.wait_for(token_queue.get(), timeout=0.01)
+                    if event:
+                        if event.get("type") == "content":
+                            streamed_any_content = True
+                            if t_first_ui_token[0] is None:
+                                t_first_ui_token[0] = time.perf_counter() - t_stream_start
+                            token_parts = [event.get("token", "")]
+                            # Drain any currently queued content tokens immediately
+                            while not token_queue.empty():
+                                try:
+                                    next_event = token_queue.get_nowait()
+                                    if next_event.get("type") == "content":
+                                        token_parts.append(next_event.get("token", ""))
+                                    else:
+                                        # Non-content event: flush current text and emit next_event
+                                        combined_text = "".join(token_parts)
+                                        if combined_text:
+                                            yield f"data: {json.dumps({'type': 'content', 'token': combined_text})}\n\n"
+                                        token_parts = []
+                                        yield f"data: {json.dumps(next_event)}\n\n"
+                                except asyncio.QueueEmpty:
+                                    break
+                            combined_text = "".join(token_parts)
+                            if combined_text:
+                                yield f"data: {json.dumps({'type': 'content', 'token': combined_text})}\n\n"
+                            continue
+                        yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    continue
 
-            # ✅ Skip EMPTY / blank responses
-            if (
-                understanding_text
-                and understanding_text.upper() != "EMPTY"
-            ):
-                for token in re.findall(r'\s+|\S+', understanding_text):
-                    payload_data = {
-                        "type": "understanding_token",
-                        "token": token
-                    }
-                    yield f"data: {json.dumps(payload_data)}\n\n"
-
-                yield f"data: {json.dumps({'type': 'understanding_done'})}\n\n"
-
-            # -----------------------------
-            # 🤖 STEP 3: CHAT PIPELINE
-            # -----------------------------
             (
                 node_response,
                 updated_messages,
@@ -415,34 +514,59 @@ async def chat(
                 media
             ) = await chat_task
 
-            sections = node_response.sections or []
+            # Drain any remaining tokens/status events from queue
+            remaining_content_parts = []
+            while not token_queue.empty():
+                try:
+                    event = token_queue.get_nowait()
+                    if event.get("type") == "content":
+                        streamed_any_content = True
+                        remaining_content_parts.append(event.get("token", ""))
+                    else:
+                        if remaining_content_parts:
+                            combined_text = "".join(remaining_content_parts)
+                            yield f"data: {json.dumps({'type': 'content', 'token': combined_text})}\n\n"
+                            remaining_content_parts = []
+                        yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.QueueEmpty:
+                    break
+            if remaining_content_parts:
+                combined_text = "".join(remaining_content_parts)
+                yield f"data: {json.dumps({'type': 'content', 'token': combined_text})}\n\n"
 
-            if sections:
-                for section in sections:
-                    source_data = {
-                        "type": "source_topic",
-                        "topic_code": section.get("topic_code"),
-                        "topic_name": section.get("topic_name")
-                    }
-                    yield f"data: {json.dumps(source_data)}\n\n"
+            sections = getattr(node_response, "sections", None) or []
 
-                    for token in re.findall(r'\s+|\S+', section.get("content", "") or ""):
-                        content_data = {
-                            "type": "content",
-                            "token": token
+            # If no content tokens were emitted during live streaming (e.g. non-streaming fallback)
+            if not streamed_any_content:
+                if sections:
+                    for section in sections:
+                        source_data = {
+                            "type": "source_topic",
+                            "topic_code": section.get("topic_code"),
+                            "source_code": section.get("source_code") or section.get("course_code") or "",
+                            "topic_name": section.get("topic_name")
                         }
-                        yield f"data: {json.dumps(content_data)}\n\n"
-                        await asyncio.sleep(0.0005)
+                        yield f"data: {json.dumps(source_data)}\n\n"
 
+                        content_str = section.get("content", "") or ""
+                        if content_str:
+                            yield f"data: {json.dumps({'type': 'content', 'token': content_str})}\n\n"
+                else:
+                    content_str = node_response.content or ""
+                    if content_str:
+                        yield f"data: {json.dumps({'type': 'content', 'token': content_str})}\n\n"
             else:
-                for token in re.findall(r'\s+|\S+', node_response.content or ""):
-                    content_data = {
-                        "type": "content",
-                        "token": token
-                    }
-                    yield f"data: {json.dumps(content_data)}\n\n"
-                    await asyncio.sleep(0.0005)
-
+                # If content was streamed live, emit source_topic headers for any sections so badges can attach
+                if sections:
+                    for section in sections:
+                        if section.get("topic_code"):
+                            source_data = {
+                                "type": "source_topic",
+                                "topic_code": section.get("topic_code"),
+                                "source_code": section.get("source_code") or section.get("course_code") or "",
+                                "topic_name": section.get("topic_name")
+                            }
+                            yield f"data: {json.dumps(source_data)}\n\n"
 
             # ✅ suggestions
             suggestions_payload = {
@@ -465,7 +589,7 @@ async def chat(
                 node_meta.get("category") in {"GREETING", "GOODBYE", "THANK", "WELL_WISH", "FALLBACK", "GAP_ANALYSIS_REQUEST", "OUT_OF_SCOPE"}
                 or node_meta.get("routing_reason") == "out_of_scope"
                 or bool(node_meta.get("requires_upload"))
-                or (bool(node_response.content) and "This is not part of the available course material" in node_response.content)
+                or is_out_of_scope_text(node_response.content)
             )
 
             media_payload = {
@@ -563,9 +687,59 @@ async def chat(
                 + "\n\n"
             )
 
+            # -----------------------------
+            # RELATED COURSES
+            # -----------------------------
+            raw_codes = []
+            if sections:
+                for s in sections:
+                    if isinstance(s, dict) and s.get("topic_code"):
+                        raw_codes.append((str(s["topic_code"]).strip(), str(s.get("topic_name") or "").strip()))
+            if media and isinstance(media.get("topic_codes"), list):
+                for tc in media["topic_codes"]:
+                    if tc:
+                        raw_codes.append((str(tc).strip(), ""))
 
-          
-                        
+            seen_codes = set()
+            valid_topic_codes = []
+            for c, t_name in raw_codes:
+                c_clean = c.strip()
+                c_upper = c_clean.upper()
+                if c_clean and c_upper not in {"COMPANY_SMS", "GAP_ANALYSIS", "NONE"} and c_clean not in seen_codes:
+                    seen_codes.add(c_clean)
+                    valid_topic_codes.append((c_clean, t_name))
+
+            courses_data = []
+            if not is_non_query_response and valid_topic_codes:
+                for code, t_name in valid_topic_codes:
+                    try:
+                        res = await check_topic_course(
+                            CheckTopicCourseRequest(
+                                topic_code=code,
+                                user_id=user_id
+                            ),
+                            pool=pool
+                        )
+                        if res and isinstance(res, dict) and res.get("data") and res["data"].get("course"):
+                            if t_name and not res["data"].get("topic_name"):
+                                res["data"]["topic_name"] = t_name
+                            courses_data.append(res)
+                    except Exception as err:
+                        logger.warning(f"Error checking topic course for {code}: {err}")
+
+            if courses_data:
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {
+                            "type": "courses",
+                            "courses": courses_data,
+                        }
+                    )
+                    + "\n\n"
+                )
+
+
             # -----------------------------
             # 💾 SAVE
             # -----------------------------
@@ -574,15 +748,31 @@ async def chat(
                     updated_messages[-1]["videos"] = []
                     updated_messages[-1]["images"] = []
                     updated_messages[-1]["pdfs"] = []
-                elif unique_chunks:
-                    existing_vids = updated_messages[-1].get("videos") or []
-                    seen_urls = {v.get("url") or v.get("id") for v in existing_vids if isinstance(v, dict)}
-                    for uv in unique_chunks:
-                        k = uv.get("url") or uv.get("id")
-                        if k and k not in seen_urls:
-                            seen_urls.add(k)
-                            existing_vids.append(uv)
-                    updated_messages[-1]["videos"] = existing_vids
+                    updated_messages[-1]["checkLicCoursesData"] = []
+                    updated_messages[-1]["courses"] = []
+                else:
+                    updated_messages[-1]["images"] = list(media.get("images", [])[:6])
+                    updated_messages[-1]["pdfs"] = list(media.get("pdfs", [])[:2])
+
+                    merged_videos = list(media.get("videos", [])[:5])
+                    seen_vids = {
+                        str(v.get("id") or v.get("video_id") or v.get("url") or v.get("videourl") or "").strip().lower()
+                        for v in merged_videos if isinstance(v, dict)
+                    }
+                    for uv in (unique_chunks or []):
+                        k = str(uv.get("id") or uv.get("video_id") or uv.get("url") or uv.get("videourl") or "").strip().lower()
+                        if k and k not in seen_vids:
+                            seen_vids.add(k)
+                            merged_videos.append(uv)
+                    updated_messages[-1]["videos"] = merged_videos
+
+                    if getattr(node_response, "question_suggestions", None):
+                        updated_messages[-1]["question_suggestions"] = list(node_response.question_suggestions)
+
+                    updated_messages[-1]["checkLicCoursesData"] = courses_data
+                    updated_messages[-1]["courses"] = courses_data
+                    updated_messages[-1]["sections"] = sections
+                    updated_messages[-1]["topic_codes"] = [c for c, _ in valid_topic_codes]
 
             await redis_service.set_session_messages(
                 session_id,
@@ -600,20 +790,40 @@ async def chat(
 
             print("💾 PostgreSQL update scheduled")
 
-            print("✅ STREAM COMPLETE")
+            t_stream_complete = time.perf_counter() - t_stream_start
+            print(f"✅ STREAM COMPLETE (Duration: {t_stream_complete:.3f}s)")
+            logger.info(
+                f"\n==================== STREAM_LATENCY ====================\n"
+                f"rewrite_duration={t_rew_duration:.2f}s\n"
+                f"first_token_received={t_first_token[0] or 0.0:.2f}s\n"
+                f"first_ui_content={t_first_ui_token[0] or 0.0:.2f}s\n"
+                f"stream_complete={t_stream_complete:.2f}s\n"
+                f"total={t_stream_complete:.2f}s\n"
+                f"========================================================"
+            )
+
+            # Final completed & done events
+            yield f"data: {json.dumps(get_status_event('completed'))}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         except Exception as e:
 
-            print(f"❌ STREAM ERROR: {e}")
+            logger.exception(f"❌ STREAM ERROR: {e}")
 
             error_payload = {
                 "type": "error",
-                "message": str(e)
+                "message": "An error occurred while generating the response. Please try again."
             }
 
             yield (
                 f"data: {json.dumps(error_payload)}\n\n"
             )
+            yield f"data: {json.dumps(get_status_event('completed'))}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        finally:
+            if 'chat_task' in locals() and not chat_task.done():
+                chat_task.cancel()
 
     return StreamingResponse(
         stream_response(),

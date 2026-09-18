@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -27,4 +29,19 @@ class CompanyDocumentListResponse(BaseModel):
 class CompanyDocumentDeleteResponse(BaseModel):
     message: str
     document_id: int
+
+
+class CompanyChart(BaseModel):
+    chart_id: int
+    company_id: str
+    img_title: str | None = None
+    image_base64: str
+    chart_json: dict[str, Any] | list[Any]
+    created_at: datetime
+
+
+class CompanyChartUploadResponse(BaseModel):
+    company_id: str
+    charts: list[CompanyChart]
+
 

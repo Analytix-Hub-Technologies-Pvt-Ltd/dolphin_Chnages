@@ -20,20 +20,19 @@ async def greeting_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
     combined_query = " ".join(q for q in [query] + previous_questions if q)
 
-    user_name = decision.get("user_name")
+    user_profile = safe_get(state, "user_profile", {}) or {}
+    user_name = decision.get("user_name") or user_profile.get("user_name") or user_profile.get("name")
 
     # 🔹 Content
+    greeting_body = (
+        "Welcome to Dolphin AI. Answers to your questions will be based exclusively on our internal knowledge library. "
+        "In addition, as your company has uploaded its SMS documents, responses will be tailored to align with your company's Safety Management System."
+    )
+
     if user_name:
-        content = (
-            f"## 👋 Hello {user_name}!\n"
-            f"Welcome to Marine Tutor AI.\n"
-            f"I'm here to help you explore marine topics, summaries, quizzes"
-        )
+        content = f"Hello {user_name}!\n\n{greeting_body}"
     else:
-        content = (
-            "## 👋 Welcome to Marine Tutor AI\n"
-            "Hello! I'm here to help you explore marine science topics, summaries, quizzes"
-        )
+        content = greeting_body
 
     # 🔹 No suggestions (same logic)
     dynamic_suggestions = []

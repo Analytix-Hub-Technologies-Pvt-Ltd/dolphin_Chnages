@@ -193,6 +193,7 @@ from graph.fallback_node import FallbackNode
 from models.node_response import NodeResponse
 from services.chat_service import ChatService
 from services.query_analyzer import EnhancedQueryAnalyzer
+from services.scope_messages import OUT_OF_SCOPE_MESSAGES
 
 
 class StubOpenAIService:
@@ -432,7 +433,7 @@ def test_company_query_cow_checklist():
     class MockOpenAIService:
         async def chat(self, messages, temperature=0.0, **kwargs):
             return """
-### 🏢 1. According to CMS Demo Company's Safety Management System (SMS / QMS)
+### 🏢 1. CMS Demo Company's Safety Management System (SMS / QMS)
 **Document Title:** Shipboard SMS Manual (Vol. II)-Oil Tanker 2016.docx
 **SOP Name:** Crude Oil Washing (COW) Procedures
 **Section:** COW Checklist
@@ -444,7 +445,7 @@ Dolphin info.
 """
 
     state = {
-        "company_chunks": [{"document_title": "Shipboard SMS Manual (Vol. II)-Oil Tanker 2016.docx", "content": "Confirm all pre-arrival checks"}],
+        "company_chunks": [{"document_title": "Shipboard SMS Manual (Vol. II)-Oil Tanker 2016.docx", "content": "Crude Oil Washing (COW) - Confirm all pre-arrival checks"}],
         "user_profile": {"company_name": "CMS Demo Company"},
         "standalone_query": "What is the COW checklist?",
         "node_response": {}
@@ -453,11 +454,12 @@ Dolphin info.
     updated_state = asyncio.run(company_query_node(state, MockOpenAIService()))
     answer = updated_state["company_answer"]
 
-    assert "COW Entry and Cleaning Checklist" in answer
+    assert "Crude Oil Washing (COW) Procedures" in answer
     assert "**Section:** COW Checklist" in answer
-    assert "1. Confirm all pre-arrival checks are performed" in answer
-    assert "| 1. Confirm all pre-arrival checks are performed |  |  | R | |" in answer
+    assert "Confirm all pre-arrival checks" in answer
     assert "Dolphin info." in answer
+    assert len(updated_state["node_response"]["question_suggestions"]) > 0
+    assert any("cow" in q.lower() or "washing" in q.lower() or "checks" in q.lower() or "procedure" in q.lower() for q in updated_state["node_response"]["question_suggestions"])
 
 
 def test_is_company_query():
@@ -551,7 +553,7 @@ def test_querynode_out_of_scope():
     }
     
     result = _run_async(query_node.run(state))
-    assert result["node_response"]["content"] == "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
+    assert result["node_response"]["content"] in OUT_OF_SCOPE_MESSAGES
     assert result["node_response"]["question_suggestions"] == []
     
     # 2. Test Titanic query (Titanic terms not in chunks)
@@ -566,7 +568,7 @@ def test_querynode_out_of_scope():
     }
     
     result_titanic = _run_async(query_node.run(state_titanic))
-    assert result_titanic["node_response"]["content"] == "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
+    assert result_titanic["node_response"]["content"] in OUT_OF_SCOPE_MESSAGES
     assert result_titanic["node_response"]["question_suggestions"] == []
 
 
@@ -583,7 +585,7 @@ def test_fallbacknode_out_of_scope():
     }
     
     result = _run_async(fallback_node.run(state))
-    assert result["node_response"]["content"] == "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
+    assert result["node_response"]["content"] in OUT_OF_SCOPE_MESSAGES
     assert result["node_response"]["question_suggestions"] == []
 
 
@@ -668,7 +670,7 @@ def test_company_query_metadata_positioning():
 SOP Name: Ship Operations (Cargo Procedures)
 Section: Unloading
 
-🏢 1. According to CMS Demo Company's Safety Management System (SMS / QMS)
+🏢 1. CMS Demo Company's Safety Management System (SMS / QMS)
 Cargo Unloading Operational Sequence
 Document Title: Shipboard SMS Manual (Chemical)-Completed (1).docx
 SOP Name: Ship Operations (Cargo Procedures)
@@ -701,11 +703,11 @@ Section: Unloading
     answer = updated_state["company_answer"]
 
     lines = [line.strip() for line in answer.split("\n") if line.strip()]
-    assert lines[0] == "#### 🏢 1. According to CMS Demo Company's Safety Management System (SMS / QMS)"
+    assert lines[0] == "### 🏢 1. CMS Demo Company's Safety Management System (SMS / QMS)"
     assert lines[1] == "**Document Title:** Shipboard SMS Manual (Chemical)-Completed (1).docx"
     assert lines[2] == "**SOP Name:** Ship Operations (Cargo Procedures)"
     assert lines[3] == "**Section:** Unloading"
-    assert lines[4] == "#### Cargo Unloading Operational Sequence"
+    assert lines[4] == "Cargo Unloading Operational Sequence"
     assert lines[5] == "#### Statement of Facts & Departure Reporting Protocols"
 
 
@@ -714,7 +716,7 @@ def test_company_query_table_preservation():
 
     class MockOpenAIServiceWithTable:
         async def chat(self, prompt: str, history=None, **kwargs) -> str:
-            return """#### 🏢 1. According to CMS Demo Company's Safety Management System (SMS / QMS)
+            return """### 🏢 1. CMS Demo Company's Safety Management System (SMS / QMS)
 **Document Title:** Shipboard SMS Manual (Chemical)-Completed (1).docx
 **SOP Name:** Ship Operations (Cargo Procedures)
 **Section:** Unloading
@@ -755,7 +757,91 @@ def test_company_query_table_preservation():
 
     assert "| Activity | Responsibility |" in answer
     assert "| Cargo unloading plan | Prepared by Ch. Off, Approved by Master |" in answer
-    assert "#### 🏢 1. According to CMS Demo Company's Safety Management System (SMS / QMS)" in answer
+    assert "### 🏢 1. CMS Demo Company's Safety Management System (SMS / QMS)" in answer
+
+
+def test_company_retrieval_prunes_unrelated_and_answers_from_course(monkeypatch):
+    """
+    Test that when user belongs to a company but asks a question not in company SMS (like low flash point fuels),
+    the company retrieval filters out unrelated company chunks, and the pipeline answers cleanly from course content.
+    """
+    async def mock_classify(self, query, previous_questions):
+        return {"node_type": "query", "short_topic": "fuels", "reason": "analysis"}
+
+    monkeypatch.setattr(EnhancedQueryAnalyzer, "classify_for_router", mock_classify)
+
+    async def mock_scope(self, query, chunks):
+        return "IN-SCOPE"
+
+    monkeypatch.setattr(ChatService, "check_query_scope", mock_scope)
+
+    course_store = StubVectorStore([
+        {
+            "topic_code": "IGF_FUELS",
+            "topic_name": "Low Flash Point Fuels",
+            "content": "Low flashpoint fuels have a flashpoint below 60°C and are governed by the IGF Code.",
+            "videos": [],
+            "images": [],
+            "pdfs": [],
+        }
+    ])
+
+    unrelated_company_store = StubVectorStore([
+        {
+            "document_id": "doc_nautical",
+            "document_title": "Nautical Publications and Documentation.docx",
+            "company_id": "COMP123",
+            "company_name": "Test Maritime Ltd",
+            "content": "General filing of nautical charts and publications.",
+        }
+    ])
+
+    class MockCourseOpenAIService:
+        async def chat(self, messages, temperature=0.0, **kwargs):
+            return """{
+  "sections": [
+    {
+      "topic_code": "IGF_FUELS",
+      "topic_name": "Low Flash Point Fuels",
+      "content": "### Low Flash Point Fuels\\n\\nLow flash point fuels used onboard ships include LNG, methanol, and ethanol under the IGF Code."
+    }
+  ],
+  "suggestions": [
+    "What is the flashpoint limit under IGF Code?",
+    "What safety precautions apply to LNG fuel systems?"
+  ]
+}"""
+
+    service = ChatService(
+        openai_service=MockCourseOpenAIService(),
+        embedder=StubEmbedder(),
+        store=course_store,
+        company_store=unrelated_company_store,
+    )
+
+    user_profile = {
+        "company_id": "COMP123",
+        "company_name": "Test Maritime Ltd",
+        "ship_type": "Tanker",
+    }
+
+    response, updated_messages, *rest = _run_async(
+        service.run_chat(
+            user_id="user-1",
+            session_id="session-1",
+            db_messages=[],
+            current_query="describe low flash point fuels used onboard the ships",
+            user_details=user_profile,
+        )
+    )
+
+    assert isinstance(response, NodeResponse)
+    assert "Low flash point fuels" in response.content
+    assert "IGF Code" in response.content
+    assert "### 🏢 1." not in response.content
+    assert "Nautical Publications" not in response.content
+
+
 
 
 

@@ -6,12 +6,14 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from api.dependencies import get_company_store, get_db_pool, get_openai_service, get_faiss_store
 from models.company_model import (
+    CompanyChartUploadResponse,
     CompanyDocumentUploadResponse,
     CompanyDocumentListResponse,
     CompanyDocumentDeleteResponse
 )
 from retrieval.company_embedding import CompanyDocumentStore
 from retrieval.faiss_store import FAISSStore
+from services.company_chart_service import CompanyChartService
 from services.company_services import CompanyDocumentService
 from services.document_extractor import DocumentExtractionError, extract_document_text
 
@@ -89,6 +91,28 @@ async def delete_company_document(
         raise HTTPException(status_code=404, detail=f"Document with ID {document_id} not found")
     
     return CompanyDocumentDeleteResponse(message="Document deleted successfully", document_id=document_id)
+
+@router.post("/upload-charts", response_model=CompanyChartUploadResponse)
+async def upload_company_charts(
+    company_id: str = Form(...),
+    files: list[UploadFile] = File(...),
+    pool: Pool = Depends(get_db_pool),
+    store: FAISSStore = Depends(get_company_store),
+) -> CompanyChartUploadResponse:
+    """Extract visual charts from uploaded PDF files, convert to Base64 image and JSON tree, and store in database and vector store."""
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one file is required")
+
+    service = CompanyChartService(pool=pool, store=store)
+    try:
+        charts = await service.process_and_store_charts(company_id.strip(), files)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to process chart PDFs: {exc}") from exc
+    finally:
+        for file in files:
+            await file.close()
+
+    return CompanyChartUploadResponse(company_id=company_id.strip(), charts=charts)
 
 @router.post("/check-gaps")
 async def check_document_gaps(

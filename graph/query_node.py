@@ -11,6 +11,7 @@ from services.suggestion_service import SuggestionService
 from services.fuzzy_search_service import FuzzySearchService
 from services.acronym_disambiguation_service import AcronymDisambiguationService
 from services.conversation_context_service import ConversationContextService
+from services.scope_messages import get_random_out_of_scope_message
 
 
 def safe_get(state: Any, key: str, default=None):
@@ -88,6 +89,23 @@ COURSE CONTEXT:
 {chunks_content}
 
 CRITICAL GROUNDING RULES:
+0. **RELEVANCE VALIDATION — MANDATORY**:
+   - Before generating the answer, analyze the user's question and compare it with the retrieved document content.
+   - 1. Identify the exact topic and intent of the question.
+   - 2. Determine whether the retrieved content directly answers that topic.
+   - 3. Do not consider a document relevant merely because it contains matching keywords such as fuel, tank, cargo, temperature, or flash point.
+   - 4. If the retrieved content is unrelated, do not reproduce its table, procedures, responsibilities, or elaboration.
+   - 5. Retrieve or select content that directly addresses the user's question.
+   - 6. If relevant content is unavailable, clearly state that the answer cannot be verified from the available course material (e.g., "This topic is not covered in the available course material. Please ask a question related to the Marine/Maritime course content.").
+   
+   Examples:
+   - Question: Describe low flash point fuels used onboard ships.
+     Retrieved: Ship/Shore Information Exchange — Loading.
+     Result: IRRELEVANT. Do not generate a cargo loading answer.
+   - Question: Describe low flash point fuels used onboard ships.
+     Retrieved: A course section explaining marine low flash point fuels and their types.
+     Result: RELEVANT. Generate the answer from that content.
+
 1. **STRICT GROUNDING - ZERO HALLUCINATION**: Answer ONLY using information explicitly present in the "COURSE CONTEXT" above.
    - Every fact, detail, and explanation MUST come from the provided course content.
    - If information is not in the COURSE CONTEXT, it does not exist for you.
@@ -162,8 +180,11 @@ ABSOLUTE PROHIBITIONS:
 - DO NOT infer or extrapolate beyond what is explicitly stated in COURSE CONTEXT.
 - For workplace safety queries (harassment, bullying, intoxication), answer ONLY if relevant content exists in COURSE CONTEXT.
 - If the user's question contains both in-scope and unrelated/out-of-scope topics, you MUST answer ONLY the portion that is explicitly supported by the COURSE CONTEXT. Do NOT use general knowledge or make assumptions to answer the unrelated portion.
-- If the context is irrelevant to the question, or if the entire query is unrelated or not covered by the COURSE CONTEXT, you MUST refuse to answer and respond with: "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
-- If you cannot answer from the context, respond with: "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
+- If the context is irrelevant to the question, or if the entire query is unrelated or not covered by the COURSE CONTEXT, you MUST refuse to answer and respond with one of the following exact messages:
+  "This topic is not covered in the available course material. Please ask a question related to the Marine/Maritime course content."
+  "This question falls outside the available course material. Please ask something related to the Marine/Maritime course topics."
+  "The requested information is not included in the current course content. Please ask a question relevant to the Marine/Maritime curriculum."
+- If you cannot answer from the context, respond with one of the above 3 messages.
 
 Generate your response using ONLY the COURSE CONTEXT provided above:
 """
@@ -997,7 +1018,7 @@ class QueryNode(BaseNode):
         if not chunks or classification in ["UNRELATED", "TANGENTIALLY_RELATED"]:
             logger.warning(f"[QUERY NODE] No chunks or out-of-scope query ({classification}). Returning standard scope message.")
             
-            fallback_answer = "This is not part of the available course material. Please ask a question related to the Marine/Maritime course content."
+            fallback_answer = get_random_out_of_scope_message()
             fallback_suggestions = []
 
             # Construct partial response

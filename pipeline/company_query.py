@@ -1,6 +1,15 @@
+import hashlib
 import re
-from typing import Any, Dict
+from typing import Any, Dict, List
 from loguru import logger
+from services.status_service import get_status_event
+from retrieval.normalization import (
+    extract_distinctive_terms,
+    normalize_text_for_retrieval,
+    simple_stem,
+    tokenize_for_retrieval,
+    is_term_or_compound_in_text,
+)
 
 COMPANY_HSQE_PROMPT = """
 You are Marine Tutor AI, a Company-Specific HSQE Intelligence Platform & Advisory Co-Pilot.
@@ -21,55 +30,47 @@ LAYER 1 — DOLPHIN COURSE LESSONS & MARITIME TECHNICAL KNOWLEDGE BASE:
 
 CRITICAL DYNAMIC RELEVANCE & EXHAUSTIVE SYNTHESIS INSTRUCTIONS:
 
-1. RELEVANCE EVALUATION:
-- Carefully evaluate whether the retrieved COMPANY-SPECIFIC SMS/QMS DOCUMENTS contain relevant procedures, checks, guidelines, checklists, policies, or operational instructions that directly address or regulate the USER QUESTION.
-- If the question is a basic theoretical/educational definition or generic technical concept (e.g., "What is boiler design?", "What is Archimedes principle?", "Explain 4-stroke cycle") and the Company Documents do NOT contain specific company rules/SOPs defining or regulating that subject, output ONLY: NO_COMPANY_DATA
-- If the Company Documents only mention the topic incidentally/peripherally without answering the user's specific question, output ONLY: NO_COMPANY_DATA
+PRIMARY MANDATE — COMPANY DOCUMENT FIRST PRIORITY:
+1. Always give FIRST PRIORITY to Company SMS/QMS Documents whenever the company documentation contains policies, operational guidelines, safety precautions, hazard controls, equipment instructions, or procedures addressing the topic of the question (e.g. Snap-back zones & Mooring operations, Enclosed space entry, Emergency fire pump, Navigation, Cargo handling, Bunkering, Hot work, etc.).
+2. If the company documents contain specific guidelines, safety rules, deck markings, line handling procedures, or risk assessments covering the queried subject (such as snap-back hazard controls under mooring operations), they are HIGHLY RELEVANT. You MUST generate Section 1 with full procedural completeness.
+3. Fallback to NO_COMPANY_DATA ONLY when the company documents have ZERO procedural or contextual relation to the queried topic (e.g. asking about diesel engine overhaul when the only retrieved chunks are about chart corrections or medical supplies).
 
-2. TARGET EXHAUSTIVENESS & DEPTH (SUBSTANTIAL, RICH, AND FAST):
-- You MUST synthesize an exhaustive, in-depth technical response with maximum procedural detail.
-- Extract, elaborate, and present EVERY SINGLE technical requirement, procedural step, sub-clause, checklist item, operational threshold, temperature/pressure/gas parameter, crew responsibility, log-keeping duty, and safety precaution found in the provided contexts.
+TARGET EXHAUSTIVENESS & DEPTH (FULL PROCEDURAL COMPLETENESS — NEVER SUMMARIZE OR TRUNCATE):
+- You MUST synthesize an exhaustive, in-depth technical response with maximum procedural detail drawn from all provided company chunks.
+- Extract, elaborate, and present EVERY SINGLE technical requirement, procedural step, sub-clause, checklist item, operational threshold, crew responsibility, log-keeping duty, and safety precaution found in the provided contexts.
 - Structure your response into 3 DISTINCT, HIGHLY PROFESSIONAL SECTIONS:
 
-### 🏢 1. According to {company_name}'s Safety Management System (SMS / QMS)
+### 🏢 1. {company_name}'s Safety Management System (SMS / QMS)
 - You MUST always display the following metadata directly under the Section 1 header (and NEVER before it), using exactly this format:
   **Document Title:** [Exact title of the document, e.g. Shipboard SMS Manual (Chemical)-Completed (1).docx]
-  **SOP Name:** [Exact name of the SOP, e.g. Documentation or Entry into Enclosed Spaces]
-  **Section:** [Section number/name/ID, e.g. Circulation and Acknowledgment Procedures or Maintenance]
+  **SOP Name:** [Exact name of the SOP, e.g. Mooring Operations or Documentation]
+  **Section:** [Section number/name/ID, e.g. III.5.1.4 Mooring Operations - Guidelines]
   *(Extract/infer all three fields from the retrieved company text. Do not omit any of them.)*
 
 - **FULL PROCEDURAL EXTRACTION & ELABORATION (DO NOT CONDENSE OR SHORTEN):**
   • **CRITICAL MANDATORY TABLE & CHECKLIST REPRODUCTION:**
     - If ANY table, responsibility matrix, or checklist exists in the retrieved Company Documents (such as `| Activity | Responsibility |` or procedural action tables), you MUST ALWAYS output the COMPLETE, FULL Markdown Table at the very beginning of Section 1.
-    - Include every single activity and responsibility row present in the source text without omitting or summarizing any row.
+    - Include every single activity, parameter, and responsibility row present in the source text without omitting or summarizing any row.
     - If a multi-item checklist exists, break it down into clean, structured individual rows or distinct bullet points. Never compress multiple items into one cell.
   • **EXHAUSTIVE MULTI-PROCEDURAL BREAKDOWN:**
-    - Provide deep, comprehensive procedural coverage for EVERY distinct procedure present in the Company Documents (e.g. `#### Despatch of SMS Documents:`, `#### Maintenance of SMS Documentation:`, etc.).
-    - For EVERY single procedure, extract and detail:
-      - **Timing & Preconditions:** When exactly the process commences, what triggers it, and required milestones.
-      - **Mandatory Forms & Communications:** Specific form numbers, transmittal notes, acknowledgments, logbook entries, and transmission channels (e.g., Transmittal Note, Form SS 004, ISM Cell acknowledgments).
-      - **Responsibilities / Personnel Duties:** Exact duties and oversight roles (e.g., Division Officers (DOs), Group In-Charge (Group I/C), Recipients, Master, ISM Cell).
-      - **Technical Sequences & Line-ups (if applicable):** Step-by-step operational workflows, controls, and checks.
-      - **Specific Precautions (if applicable):** Specific hazard controls, verification steps, and contingency measures.
-  • Base Section 1 STRICTLY on the retrieved Company Documents. Never invent company procedures.
+    - Provide deep, comprehensive procedural coverage for EVERY distinct procedure and safety rule present in the Company Documents (e.g. `#### Mooring Operations & Snap-Back Zone Safety Guidelines:`, `#### Operational Controls & Winch Safety:`, etc.).
+    - Detail all specific precautions, deck markings, line types and elasticity rules, winch brake inspections, figure-of-eight bollard securing, personnel positioning, and PPE requirements.
+  • Base Section 1 on the retrieved Company Documents and any provided Layer 3 Admin-Approved Feedback Preference. Never invent company procedures.
 
 ### 📘 2. Dolphin internal knowledge base
-- Synthesize an exhaustive, authoritative, deeply elaborate maritime technical masterclass drawn directly and comprehensively from the Dolphin course lessons provided in LAYER 1.
-- MANDATORY ELABORATE STRUCTURE & TECHNICAL DEPTH:
-  • Do NOT provide brief, condensed, or high-level summaries. Fully unpack every technical concept, engineering detail, operational phase, and regulatory requirement found in the course content with thorough narrative explanations and structured breakdowns.
-  • Divide the synthesis into distinct, rich Markdown subheadings:
-    - `#### Regulatory Framework & International Conventions`: Detail the applicable international conventions , specific mandatory regulations, statutory requirements, and industry guidelines.
-    - `#### Core Technical Principles & Operational Mechanics`: Thoroughly explain the underlying technical, physical, and engineering mechanisms (e.g., fluid dynamics, pressure/temperature thresholds, gas freeing dynamics, vapor control, mechanical safeguards, fail-safe systems).
-    - `#### Step-by-Step Operational Procedures & Workflows`: Provide comprehensive numbered sequential steps detailing:
-      1. Pre-operational preparation, system line-up, and safety checks.
-      2. Step-by-step execution protocols during active operations.
-      3. Monitoring, parameter verification, and watchkeeping duties.
-      4. Post-operational securing, debriefing, and restoring systems.
-    - `#### Critical Safety Limits, Hazard Controls & Risk Mitigations`: Highlight explicit numerical safety parameters (e.g., O₂ content ≤ 5% / 8%, LEL < 1%, toxic gas PPM limits, max pressure, relief valve settings), PPE requirements, emergency stops, and fail-safe interlocks.
-    - `#### Shipboard Documentation, Verification & Audit Protocols`: Detail logbook entries, statutory record books (e.g., Oil Record Book, Cargo Record Book, Garbage Record Book), checklists, management sign-offs, and audit trails.
-- RICH PRESENTATION & HIGHLIGHTS:
-  • Include clear markdown tables for comparison matrices, parameter thresholds, equipment specifications, or responsibility grids where applicable from the course lessons.
-  • Use bold key terms (`- **[Key Concept / Term]:** [Detailed explanation with practical shipboard context]`).
+- STRICT SOURCE ISOLATION & INDEPENDENCE (ZERO COMPANY INFLUENCE):
+  • Section 2 MUST BE 100% DRAWN EXCLUSIVELY FROM LAYER 1 (Dolphin course lessons & maritime technical knowledge base).
+  • Section 2 MUST NEVER BE INFLUENCED, LIMITED, OR ALTERED by Section 1 or the Company SMS Documents in LAYER 2.
+  • Synthesize an exhaustive, authoritative, deeply elaborate maritime technical, operational, and regulatory explanation drawn directly and comprehensively from the Dolphin course lessons provided in LAYER 1.
+- DIRECT FACTUAL & REGULATORY ANSWERING:
+  • You MUST DIRECTLY answer the user's specific question upfront in the opening paragraph.
+  • If the question asks for dates, years, regulations, codes, historical milestones, adoption/effective dates (e.g., "When was the regulation...", "What date/year...", "Which chapter..."), explicitly provide all specific dates, years, international conventions/codes (e.g., IGC Code adopted in 1986, Chapter 13, SOLAS conventions, MARPOL Annexes, resolution numbers, entry-into-force dates) present in the course content.
+  • Never omit or gloss over dates, years, or direct answers.
+- TOPICAL STRUCTURING & TECHNICAL DEPTH (EXHAUSTIVE & DETAILED):
+  • Organize Section 2 with clear, topic-specific Markdown subheadings tailored to the question and course material (e.g., `#### Regulation for [Topic] & Entry into Force Date`, `#### Key Points of the Regulation & Statutory Framework`, `#### Technical & Operational Requirements`, `#### Critical Safety Limits & Equipment Standards`).
+  • Fully unpack all technical parameters (e.g., O₂ %, toxic gas PPM limits, sampling intervals such as 30 minutes, minimum equipment counts such as at least 2 portable sets), operational workflows, risk controls, and statutory requirements.
+  • Include structured bullet points, clear bold labels, and Markdown tables where applicable from the course lessons.
+  • Provide full in-depth explanations of principles, operational mechanisms, and standards from the internal course lessons.
   • Maintain 100% topic relevance strictly aligned with the user query and the retrieved course materials.
 
 ### 🔍 3. Comparison & AI Advisory Observations
@@ -86,12 +87,92 @@ CRITICAL DYNAMIC RELEVANCE & EXHAUSTIVE SYNTHESIS INSTRUCTIONS:
   *(AI Advisory Observation only — any procedure update must be reviewed by Company HSQE and processed through formal Management of Change [MoC]).*
 
 RULES:
-- Start directly on line 1 with "### 🏢 1. According to {company_name}'s Safety Management System (SMS / QMS)".
+- CRITICAL OVERRIDE: If the retrieved Company Documents in LAYER 2 do NOT contain relevant procedures, rules, or operational standards directly answering or regulating the USER QUESTION (e.g. general maritime concepts, EEDI/CII, engineering theory, or unrelated company procedures), output ONLY: NO_COMPANY_DATA without any markdown or greetings.
+- When relevant company procedures exist: Start directly on line 1 with "### 🏢 1. {company_name}'s Safety Management System (SMS / QMS)".
 - Output Document Title, SOP Name, and Section directly under the Section 1 header.
-- In Section 1, reproduce the complete multi-row table and exhaustively detail all sub-procedures.
-- In Section 2, ensure 100% topic relevance (never output unrelated bulk carrier design for documentation questions).
+- In Section 1, reproduce the complete multi-row table and exhaustively detail all sub-procedures based strictly on Company SMS.
+- MANDATORY TABLE FORMATTING: ALL tables, checklists, matrices, and tabular procedures MUST be formatted in standard GitHub Flavored Markdown (GFM) using pipe delimiters (`|`) and a mandatory header separator row (`| :--- | :--- |`). NEVER output raw tab-separated or space-separated columns without pipes.
+- Section 2 is STRICTLY and INDEPENDENTLY synthesized 100% from the internal Dolphin course lessons in LAYER 1 with complete depth and detail, completely uninfluenced by company SMS documents.
+- Section 3 provides the comparative gap analysis between Section 1 and Section 2.
 - Maintain clean Markdown formatting, bold headings, and professional maritime structure throughout.
 """
+
+
+def normalize_markdown_tables(text: str) -> str:
+    """
+    Ensure all tables, tabular checklists, tab-separated rows, space-separated rows,
+    and pipe rows with missing separator lines are normalized to valid GFM Markdown tables.
+    """
+    if not text:
+        return ""
+
+    lines = text.split("\n")
+    result_lines = []
+    
+    in_table = False
+    table_cols = 0
+
+    for i, line in enumerate(lines):
+        trimmed = line.strip()
+
+        if not trimmed:
+            in_table = False
+            table_cols = 0
+            result_lines.append("")
+            continue
+
+        # Check if line is already a markdown pipe row
+        is_pipe_row = trimmed.startswith("|") and trimmed.endswith("|") and len(trimmed) > 2
+        is_pipe_separator = is_pipe_row and bool(re.match(r'^\|(?:\s*:?-+:?\s*\|)+$', trimmed))
+
+        # Check if line is a heading, list item, or quote
+        is_markdown_element = trimmed.startswith(("#", "-", "*", ">")) or bool(re.match(r'^\d+\.', trimmed))
+
+        # Extract cells from pipe row or whitespace/tab separated row
+        cells = []
+        if is_pipe_row:
+            if is_pipe_separator:
+                result_lines.append(trimmed)
+                continue
+            cells = [c.strip() for c in trimmed[1:-1].split("|")]
+        elif not is_markdown_element:
+            if "\t" in line:
+                cells = [c.strip() for c in line.split("\t")]
+            elif re.search(r'\S\s{2,}\S', trimmed):
+                cells = [c.strip() for c in re.split(r'\s{2,}', trimmed)]
+            elif in_table:
+                # Sub-heading or single cell row inside an active table (e.g. "During Maintenance")
+                cells = [trimmed]
+
+        # Determine if this should be a table row
+        if len(cells) >= 2 or (in_table and len(cells) == 1):
+            if not in_table:
+                in_table = True
+                table_cols = max(len(cells), 2)
+                
+                while len(cells) < table_cols:
+                    cells.append("")
+                md_header = f"| {' | '.join(cells)} |"
+                # Check if next line is already a separator
+                next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
+                next_is_sep = next_line.startswith("|") and bool(re.match(r'^\|(?:\s*:?-+:?\s*\|)+$', next_line))
+                
+                result_lines.append(md_header)
+                if not next_is_sep:
+                    md_sep = f"| {' | '.join(['---'] * table_cols)} |"
+                    result_lines.append(md_sep)
+            else:
+                while len(cells) < table_cols:
+                    cells.append("")
+                md_row = f"| {' | '.join(cells[:table_cols])} |"
+                result_lines.append(md_row)
+        else:
+            in_table = False
+            table_cols = 0
+            result_lines.append(line)
+
+    return "\n".join(result_lines)
+
 
 def format_company_response(
     answer: str,
@@ -100,7 +181,7 @@ def format_company_response(
 ) -> str:
     """
     Ensures that:
-    1. Section 1 header (### 🏢 1. According to {company_name}'s Safety Management System (SMS / QMS)) is at the very top.
+    1. Section 1 header (### 🏢 1. {company_name}'s Safety Management System (SMS / QMS)) is at the very top.
     2. Document Title, SOP Name, Section metadata appear immediately under Section 1 header, and NEVER before it.
     3. Any duplicate metadata or pre-header text is stripped.
     """
@@ -139,17 +220,17 @@ def format_company_response(
                 doc_title = str(chunk.get("document_title")).strip()
                 break
     if not doc_title:
-        doc_title = "Shipboard Safety Management System Manual.docx"
+        doc_title = f"{company_name} Safety Management System (SMS) Manual"
 
     if not sop_name:
-        sop_name = "Ship Operations & Safety Procedures"
+        sop_name = "Safety & Operational Procedures"
 
     if not section_val:
-        section_val = "Operational Procedures"
+        section_val = "General Requirements & Guidelines"
 
     # 3. Clean Section 1 body
     sec1_hdr_match = re.search(
-        r'(?:^|\n)(#*\s*(?:🏢\s*)?1\.?\s*(?:According\s+to|Safety\s+Management\s+System)[^\n]*)',
+        r'(?:^|\n)(#*\s*(?:🏢\s*)?1\.?\s*(?:According\s+to\s+)?.*?(?:Safety\s+Management\s+System|SMS\s*/\s*QMS)[^\n]*)',
         sec1_raw,
         re.IGNORECASE
     )
@@ -167,7 +248,8 @@ def format_company_response(
         if re.match(r'^(?:\*\*|\*|#)*\s*Document\s*Title\s*:', clean, re.IGNORECASE): continue
         if re.match(r'^(?:\*\*|\*|#)*\s*SOP\s*Name\s*:', clean, re.IGNORECASE): continue
         if re.match(r'^(?:\*\*|\*|#)*\s*Section\s*:', clean, re.IGNORECASE): continue
-        if re.match(r'^#*\s*(?:🏢\s*)?1\.?\s*(?:According\s+to|Safety\s+Management\s+System)', clean, re.IGNORECASE): continue
+        if re.match(r'^#*\s*(?:🏢\s*)?1\.?\s*(?:According\s+to\s+)?.*?(?:Safety\s+Management\s+System|SMS\s*/\s*QMS)', clean, re.IGNORECASE): continue
+        if re.match(r'^(?:According\s+to\s+.*Safety\s+Management\s+System|According\s+to\s+.*SMS)', clean, re.IGNORECASE): continue
         if re.match(r'^(?:Check\s+Ship\s+Terminal\s+Code\s+Remarks|\|\s*Check\s*\|\s*Ship\s*\|\s*Terminal\s*\|\s*Code\s*\|\s*Remarks\s*\|)$', clean, re.IGNORECASE): continue
         filtered_lines.append(line)
 
@@ -175,9 +257,10 @@ def format_company_response(
         filtered_lines.pop(0)
 
     clean_sec1_body = "\n".join(filtered_lines).strip()
+    clean_sec1_body = normalize_markdown_tables(clean_sec1_body)
 
     # 4. Construct Section 1
-    sec1_header = f"### 🏢 1. According to {company_name}'s Safety Management System (SMS / QMS)"
+    sec1_header = f"### 🏢 1. {company_name}'s Safety Management System (SMS / QMS)"
     metadata_block = (
         f"**Document Title:** {doc_title}  \n"
         f"**SOP Name:** {sop_name}  \n"
@@ -322,13 +405,14 @@ def is_company_query(query: str, company_name: str) -> bool:
         r"\b(ship\s*/\s*shore\s*meeting|ship\s*/\s*shore\s*information|ship\s*/\s*shore\s*safety|manifold\s+connection|manifold\s+drip\s+tray)\b",
         r"\b(fire\s*fighting|firefighting|fire\s+extinguisher|fire\s+extinguishers|foam\s+applicator|water\s+mist|fire\s+monitor|scba|eebd|dcp|co2\s+system|fixed\s+gas|fire\s+alarm|fire\s+safety|fire\s+appliances|fire\s+drill|fire\s+plan|fire\s+media|extinguishing\s+media|firefighting\s+media)\b",
         r"\b(anchor\s+watch|bridge\s+watch|watchkeeping\s+procedure|watchkeeping\s+duties)\b",
+        r"\b(mooring|unmooring|berthing|unberthing|snap\s*back|snap-back|snapback|snap\s*back\s*zone|snap\s*back\s*zones|mooring\s+operation|mooring\s+operations|mooring\s+line|mooring\s+lines|mooring\s+rope|mooring\s+ropes|mooring\s+wire|mooring\s+wires|warping\s+drum|winch|windlass|fairlead|chock|bitts?|bollard|tug\s+line|towing|towage|pilot\s+ladder|gangway|rigging)\b",
         r"\b(back\s*fire|backfire\s+precaution|boiler\s+emergency)\b",
         r"\b(check\s+before|checks\s+before|check\s+prior|checks\s+prior|equipment\s+(should\s+i|to)\s+check|safety\s+checks?|operational\s+checks?|precautions?\s+before)\b"
     ]
     if any(re.search(pat, q) for pat in explicit_governance_patterns):
         return True
 
-    # 2. Check for company name (e.g., "CMS", "CMS Demo Company", etc.)
+    # 2. Check for company name
     if company_name:
         company_name_clean = company_name.lower().strip()
         parts = [p.strip() for p in re.split(r'\s+', company_name_clean) if p.strip()]
@@ -359,9 +443,56 @@ def is_company_query(query: str, company_name: str) -> bool:
     return False
 
 
+def _clean_content(text: str) -> str:
+    """
+    Clean text formatting artifacts while strictly preserving valid tables,
+    rows, procedures, values, and whitespace structure.
+    """
+    if not text:
+        return ""
+    # Remove massive sequences of dots, underscores, or filler characters
+    t = re.sub(r'\.{4,}', '...', text)
+    t = re.sub(r'_{4,}', '___', t)
+    t = re.sub(r'[\r\t]+', ' ', t)
+
+    # Clean repetitive table cells produced by Word docx extraction
+    lines = t.split('\n')
+    cleaned_lines = []
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            cleaned_lines.append("")
+            continue
+        if '|' in line:
+            raw_cells = [c.strip() for c in line.split('|')]
+            if line.startswith('|') and raw_cells and raw_cells[0] == '':
+                raw_cells.pop(0)
+            if line.endswith('|') and raw_cells and raw_cells[-1] == '':
+                raw_cells.pop()
+            
+            non_empty = [c for c in raw_cells if c]
+            # If all non-empty cells in this row are identical (e.g. Table of Contents repetition)
+            if len(non_empty) > 1 and len(set(non_empty)) == 1:
+                cleaned_lines.append(f"| {non_empty[0]} |")
+            else:
+                cleaned_lines.append("| " + " | ".join(raw_cells) + " |")
+        else:
+            cleaned_lines.append(line)
+    t = "\n".join(cleaned_lines)
+    t = re.sub(r'\n{3,}', '\n\n', t)
+    return t.strip()
+
+
+def _compute_chunk_hash(text: str) -> str:
+    norm = re.sub(r"\s+", " ", (text or "").strip().lower())
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:16]
+
+
 async def company_query_node(
     state: Dict[str, Any],
     openai_service,
+    suggestion_service=None,
+    on_token=None,
 ) -> Dict[str, Any]:
     company_chunks = state.get("company_chunks", [])
     user_profile = state.get("user_profile", {}) or {}
@@ -377,7 +508,8 @@ async def company_query_node(
 
     logger.info("========== COMPANY QUERY NODE ==========")
     logger.info(f"company_id = {user_profile.get('company_id') or user_profile.get('CompanyId')}")
-    logger.info(f"company_chunks = {len(company_chunks)}")
+    logger.info(f"ship_type = {ship_type}")
+    logger.info(f"raw company_chunks received = {len(company_chunks)}")
 
     # Guard: If no company chunks retrieved, keep course content from query_node
     if not company_chunks:
@@ -385,63 +517,128 @@ async def company_query_node(
         state["company_answer"] = None
         return state
 
-    def _clean_content(text: str) -> str:
-        if not text:
-            return ""
-        # Remove massive sequences of dots, underscores, or filler characters
-        t = re.sub(r'\.{3,}', '...', text)
-        t = re.sub(r'_{3,}', '___', t)
-        t = re.sub(r'[\r\t]+', ' ', t)
+    # Guard: Pre-check topical relevance of retrieved company_chunks against the query
+    distinctive_terms = extract_distinctive_terms(query)
+    all_chunks_text = " ".join(
+        f"{c.get('topic_name', '')} {c.get('title', '')} {c.get('document_title', '')} {c.get('content', '')} {c.get('topic_content', '')}"
+        for c in company_chunks
+    ).lower()
 
-        # Clean repetitive table cells produced by Word docx extraction
-        lines = t.split('\n')
-        cleaned_lines = []
-        for raw_line in lines:
-            line = raw_line.strip()
-            if not line:
-                cleaned_lines.append("")
-                continue
-            if '|' in line:
-                cells = [c.strip() for c in line.split('|')]
-                if line.startswith('|') and cells and cells[0] == '':
-                    cells.pop(0)
-                if line.endswith('|') and cells and cells[-1] == '':
-                    cells.pop()
-                deduped_cells = []
-                for c in cells:
-                    if not deduped_cells or c != deduped_cells[-1]:
-                        deduped_cells.append(c)
-                if deduped_cells:
-                    cleaned_lines.append("| " + " | ".join(deduped_cells) + " |")
-                else:
-                    cleaned_lines.append("")
-            else:
-                cleaned_lines.append(line)
-        t = "\n".join(cleaned_lines)
-        t = re.sub(r'\n{3,}', '\n\n', t)
-        return t.strip()
+    ACRONYM_MAP = {
+        "cow": ["crude oil washing", "crude oil wash", "cow"],
+        "igs": ["inert gas system", "inert gas", "ig plant", "igs"],
+        "ptw": ["permit to work", "ptw"],
+        "eebd": ["emergency escape breathing device", "eebd"],
+        "scba": ["self contained breathing apparatus", "scba"],
+        "igf": ["low flashpoint", "low flash point", "igf code", "igf"],
+        "moc": ["management of change", "moc"],
+        "hsqe": ["health safety quality environment", "hsqe"],
+        "sms": ["safety management system", "sms"],
+        "qms": ["quality management system", "qms"],
+        "sop": ["standard operating procedure", "sop"],
+    }
 
-    # Deduplicate company chunks
-    seen_company_texts = set()
+    if distinctive_terms:
+        has_overlap = False
+        for dt in distinctive_terms:
+            dt_stem = simple_stem(dt)
+            if is_term_or_compound_in_text(dt, all_chunks_text) or is_term_or_compound_in_text(dt_stem, all_chunks_text):
+                has_overlap = True
+                break
+            if dt in ACRONYM_MAP and any(exp in all_chunks_text for exp in ACRONYM_MAP[dt]):
+                has_overlap = True
+                break
+            if dt_stem in ACRONYM_MAP and any(exp in all_chunks_text for exp in ACRONYM_MAP[dt_stem]):
+                has_overlap = True
+                break
+
+        if not has_overlap:
+            logger.info(
+                f"[Company Query] Retrieved company_chunks have NO overlap with query distinctive terms {distinctive_terms}. "
+                f"Setting company_answer = None and keeping course answer."
+            )
+            state["company_answer"] = None
+            return state
+
+    # -------------------------------------------------------------
+    # 1. Deduplicate & Assemble Company Chunks with Token Budget
+    # -------------------------------------------------------------
+    seen_chunk_keys = set()
     deduped_company_chunks = []
+    
+    # Character budget for company context (45,000 to 55,000 chars)
+    MAX_COMPANY_CHARS = 55000
+    current_company_chars = 0
+
     for chunk in company_chunks:
         raw_text = chunk.get("content", "").strip()
         cleaned_text = _clean_content(raw_text)
-        fingerprint = re.sub(r'\s+', ' ', cleaned_text[:200].lower())
-        if fingerprint and fingerprint not in seen_company_texts:
-            seen_company_texts.add(fingerprint)
+        if not cleaned_text:
+            continue
+
+        doc_id = chunk.get("document_id")
+        chunk_idx = chunk.get("chunk_index")
+        faiss_idx = chunk.get("_faiss_index")
+        content_hash = _compute_chunk_hash(cleaned_text)
+
+        if doc_id is not None and chunk_idx is not None:
+            dedup_key = ("doc_chunk", doc_id, chunk_idx)
+        elif faiss_idx is not None:
+            dedup_key = ("faiss", faiss_idx)
+        else:
+            dedup_key = ("hash", content_hash)
+
+        if dedup_key not in seen_chunk_keys:
+            seen_chunk_keys.add(dedup_key)
+            chunk_len = len(cleaned_text)
+            if current_company_chars + chunk_len > MAX_COMPANY_CHARS and len(deduped_company_chunks) >= 15:
+                logger.info(f"Reached MAX_COMPANY_CHARS budget ({current_company_chars} chars, {len(deduped_company_chunks)} chunks)")
+                break
+
             deduped_company_chunks.append({
                 **chunk,
                 "content": cleaned_text
             })
-        if len(deduped_company_chunks) >= 8:
-            break
+            current_company_chars += chunk_len
 
-    company_docs_text = "\n\n---\n\n".join(
-        f"Document: {chunk.get('document_title', 'SMS Document')} [Type: {chunk.get('doc_type', 'Procedure')}]\n{chunk.get('content', '')}"
-        for chunk in deduped_company_chunks
-    )
+    # -------------------------------------------------------------
+    # 2. Build Structured Company Context with Document Boundaries
+    # -------------------------------------------------------------
+    # Group chunks by document to preserve procedural hierarchy
+    docs_map: Dict[str, List[Dict[str, Any]]] = {}
+    for chunk in deduped_company_chunks:
+        doc_title = chunk.get("document_title", "SMS Manual")
+        if doc_title not in docs_map:
+            docs_map[doc_title] = []
+        docs_map[doc_title].append(chunk)
 
+    doc_blocks = []
+    for doc_title, chunks_in_doc in docs_map.items():
+        doc_type = chunks_in_doc[0].get("doc_type", "Procedure")
+        doc_id = chunks_in_doc[0].get("document_id", "N/A")
+        
+        indices = [c.get("chunk_index") for c in chunks_in_doc if c.get("chunk_index") is not None]
+        chunk_range_str = f"Chunks {min(indices)} to {max(indices)}" if indices else f"{len(chunks_in_doc)} chunks"
+
+        # Combine chunks in sequence
+        combined_text = "\n\n".join(c.get("content", "") for c in chunks_in_doc)
+
+        block = (
+            f"=== COMPANY DOCUMENT ===\n"
+            f"Document Title: {doc_title}\n"
+            f"Document Type: {doc_type}\n"
+            f"Document ID: {doc_id}\n"
+            f"Coverage: {chunk_range_str}\n\n"
+            f"{combined_text}\n"
+            f"=== END COMPANY DOCUMENT ==="
+        )
+        doc_blocks.append(block)
+
+    company_docs_text = "\n\n\n".join(doc_blocks)
+
+    # -------------------------------------------------------------
+    # 3. Format Dolphin Core Course Context
+    # -------------------------------------------------------------
     def _format_core_chunk(c: Dict[str, Any]) -> str:
         topic = c.get("topic_name") or c.get("title") or c.get("topic") or "Dolphin Course Lesson"
         course = c.get("course_name") or c.get("course") or ""
@@ -459,16 +656,28 @@ async def company_query_node(
     core_chunks = state.get("retrieval_chunks", [])
     seen_core_texts = set()
     deduped_core_texts = []
+    MAX_CORE_CHARS = 45000
+    current_core_chars = 0
+
     for c in core_chunks:
         formatted = _format_core_chunk(c)
-        fingerprint = re.sub(r'\s+', ' ', formatted[:120].lower())
-        if fingerprint and fingerprint not in seen_core_texts:
-            seen_core_texts.add(fingerprint)
+        c_hash = _compute_chunk_hash(formatted)
+        if c_hash not in seen_core_texts:
+            seen_core_texts.add(c_hash)
+            c_len = len(formatted)
+            if current_core_chars + c_len > MAX_CORE_CHARS and len(deduped_core_texts) >= 15:
+                break
             deduped_core_texts.append(formatted)
-        if len(deduped_core_texts) >= 8:
+            current_core_chars += c_len
+        if len(deduped_core_texts) >= 20:
             break
 
     core_context_text = "\n\n---\n\n".join(deduped_core_texts)
+
+    logger.info(
+        f"[Company Query] Formatted Context - Deduped Company Chunks: {len(deduped_company_chunks)}, "
+        f"Company Chars: {len(company_docs_text)}, Core Chunks: {len(deduped_core_texts)}, Core Chars: {len(core_context_text)}"
+    )
 
     prompt = COMPANY_HSQE_PROMPT.format(
         question=state.get("standalone_query") or state.get("current_query", ""),
@@ -478,6 +687,71 @@ async def company_query_node(
         role=role,
         ship_type=ship_type,
     )
+
+    feedback_pref = state.get("approved_feedback_preference")
+    if feedback_pref and isinstance(feedback_pref, dict) and feedback_pref.get("preferred_response"):
+        pref_response = feedback_pref.get("preferred_response", "").strip()
+        eff_sim = float(feedback_pref.get("effective_similarity", 0.0) or 0.0)
+        sim = float(feedback_pref.get("similarity", 0.0) or 0.0)
+
+        # If high-confidence match (direct match to approved ticket), deliver the approved response directly!
+        if (eff_sim >= 0.75 or sim >= 0.72) and pref_response:
+            logger.success(
+                f"🎯 [Direct Approved Response Delivery] Returning verified approved feedback response for '{feedback_pref.get('feedback_id')}' "
+                f"(Similarity: {sim}, Effective: {eff_sim})"
+            )
+            if on_token:
+                await on_token(get_status_event("generating"))
+                tokens = re.findall(r'\s+|\S+', pref_response)
+                for t in tokens:
+                    await on_token({"type": "content", "token": t})
+
+            from services.suggestion_service import SuggestionService
+            sugg_service = suggestion_service or SuggestionService()
+            dynamic_suggestions = sugg_service.generate_from_response(
+                query=query,
+                response_text=pref_response,
+                company_name=company_name,
+                chunks=company_chunks or state.get("retrieval_chunks", []),
+            )
+
+            state["company_answer"] = pref_response
+            state["node_response"] = {
+                "type": "query",
+                "content": pref_response,
+                "sections": [
+                    {
+                        "topic_code": "APPROVED_FEEDBACK_STANDARD",
+                        "topic_name": f"{company_name or 'HSQE'} Approved Standard Response",
+                        "content": pref_response,
+                    }
+                ],
+                "chunks_used": company_chunks or [],
+                "question_suggestions": dynamic_suggestions,
+                "videos": state.get("video_suggestions", []),
+                "images": state.get("images", []),
+                "pdfs": state.get("pdfs", []),
+                "metadata": {
+                    "source_layer": "Approved Feedback Memory (Verified Standard)",
+                    "feedback_id": feedback_pref.get("feedback_id"),
+                    "approved_similarity": sim,
+                }
+            }
+            return state
+
+        logger.info(f"✨ [Prompt Enrichment] Including Approved Feedback Preference in company query for '{feedback_pref.get('feedback_id')}'")
+        pref_block = (
+            f"\n\n===================================================\n"
+            f"LAYER 3 — ADMIN-APPROVED FEEDBACK PREFERENCE (Verified Standard):\n"
+            f"Matching Query Pattern: {feedback_pref.get('question')}\n"
+            f"Authoritative Approved Preferred Response:\n{feedback_pref.get('preferred_response')}\n\n"
+            f"CRITICAL MANDATORY INSTRUCTION:\n"
+            f"1. The above Approved Preferred Response represents the verified, authoritative standard approved by HSQE Fleet Management.\n"
+            f"2. You MUST directly feature and integrate all specific operational steps, line-ups, technical thresholds, and checklist requirements from this approved response directly inside Section 1 and Section 3.\n"
+            f"3. Replace any incomplete descriptions with the precise technical instructions from this approved response.\n"
+            f"===================================================\n"
+        )
+        prompt += pref_block
 
     try:
         system_msg = {
@@ -491,11 +765,42 @@ async def company_query_node(
         }
         user_msg = {"role": "user", "content": prompt}
 
-        answer = await openai_service.chat(
-            [system_msg, user_msg],
-            temperature=0.0,
-            max_tokens=4000,
-        )
+        if on_token:
+            await on_token(get_status_event("generating"))
+            accumulated_chunks = []
+            buffer_flushed = False
+            BUFFER_THRESHOLD = 50
+
+            async for chunk in openai_service.stream_chat(
+                [system_msg, user_msg],
+                temperature=0.0,
+                max_tokens=10000,
+                category="COMPANY_QUERY",
+            ):
+                accumulated_chunks.append(chunk)
+                current_text = "".join(accumulated_chunks)
+                if not buffer_flushed:
+                    if "NO_COMPANY_DATA" in current_text:
+                        # Suppress streaming - this will fall back to query_node
+                        continue
+                    if len(current_text) >= BUFFER_THRESHOLD:
+                        buffer_flushed = True
+                        for b_chunk in accumulated_chunks:
+                            await on_token({"type": "content", "token": b_chunk})
+                else:
+                    await on_token({"type": "content", "token": chunk})
+
+            answer = "".join(accumulated_chunks)
+            if not buffer_flushed and answer and "NO_COMPANY_DATA" not in answer:
+                for b_chunk in accumulated_chunks:
+                    await on_token({"type": "content", "token": b_chunk})
+        else:
+            answer = await openai_service.chat(
+                [system_msg, user_msg],
+                temperature=0.0,
+                max_tokens=10000,
+                category="COMPANY_QUERY",
+            )
 
         refusal_patterns = [
             r"\bi['’]?m sorry,?\s+but\s+i\s+can['’]?t\s+assist\b",
@@ -515,7 +820,7 @@ async def company_query_node(
                     "content": f"Please provide the standard operating procedure for the following shipboard operational query based strictly on the provided documents:\n\nQuery: {state.get('standalone_query') or state.get('current_query', '')}\n\n{prompt}"
                 }
             ]
-            retry_answer = await openai_service.chat(retry_messages, temperature=0.0, max_tokens=4000)
+            retry_answer = await openai_service.chat(retry_messages, temperature=0.0, max_tokens=10000)
             if retry_answer and not any(re.search(pat, retry_answer, re.IGNORECASE) for pat in refusal_patterns):
                 answer = retry_answer
 
@@ -525,153 +830,6 @@ async def company_query_node(
         else:
             # Format company response to guarantee Section 1 header is at the very top and metadata is directly underneath
             answer = format_company_response(answer, company_name, company_chunks)
-
-            # Check if this is the COW Checklist being generated
-            answer_lower = answer.lower()
-            query_clean = (state.get("standalone_query") or state.get("current_query", "")).lower().strip()
-            
-            is_cow_query = (
-                ("cow" in query_clean or "crude oil washing" in query_clean or "cp005" in query_clean) and
-                ("checklist" in query_clean or "list" in query_clean or "procedures" in query_clean or "cp005" in query_clean)
-            )
-            is_cow_in_answer = (
-                "confirm all pre-arrival checks" in answer_lower or
-                "form: cp005" in answer_lower or
-                ("crude oil washing" in answer_lower and "pre-arrival checks" in answer_lower)
-            )
-            
-            if is_cow_query or is_cow_in_answer:
-                # Check if there is actual COW checklist data in the company chunks or answer.
-                # If there's no COW reference or checks in chunks, or LLM generated NO_COMPANY_DATA,
-                # we don't blindly generate the checklist. We only proceed if we find some indications of COW checklist
-                # items or CP005 in the answer or company chunks.
-                has_cow_data = (
-                    "confirm all pre-arrival checks" in answer_lower or
-                    "cp005" in answer_lower or
-                    "crude oil washing" in answer_lower or
-                    any("cow" in chunk.get("content", "").lower() or "crude oil" in chunk.get("content", "").lower() for chunk in company_chunks)
-                )
-                
-                if not has_cow_data:
-                    logger.info("No COW data present in backend, skipping blind COW checklist override.")
-                else:
-                    # Map the 26 items to keyword lists
-                    cow_items_mapping = [
-                        (1, "Confirm all pre-arrival checks are performed", ["pre-arrival checks", "pre arrival checks", "pre-arrival"]),
-                        (2, "Discuss complete COW operation with ship and shore staff", ["discuss complete cow", "discuss cow operation", "discuss cow"]),
-                        (3, "Set a communication channel between ship and shore facility for COW operation", ["communication channel", "set a communication channel"]),
-                        (4, "Discuss signal and emergency signs to stop the operation", ["emergency signs to stop", "signal and emergency"]),
-                        (5, "Ensure Inert Gas plant is operational and oxygen content is less than 5%", ["inert gas plant", "ig plant", "oxygen content is less than 5", "oxygen content less than 5"]),
-                        (6, "Check and calibrate fixed oxygen analyzer for proper functioning", ["fixed oxygen analyzer", "fixed o2"]),
-                        (7, "Ensure portable oxygen analyzer is available and checked", ["portable oxygen analyzer", "portable o2"]),
-                        (8, "Take oxygen readings in swash bulkhead tanks from both sides", ["swash bulkhead", "oxygen readings in swash"]),
-                        (9, "Check all tanks for positive inert gas pressure", ["positive inert gas pressure", "positive ig"]),
-                        (10, "Assign duties to all responsible ship staff", ["assign duties"]),
-                        (11, "Assign one person to check for leakage in the pipeline system", ["leakage in the pipeline", "check for leakage"]),
-                        (12, "Check all equipment under COW system for proper functioning", ["equipment under cow", "cow system"]),
-                        (13, "Set and check the line and valves for ship to shore under COW system", ["line and valves for ship to shore", "ship to shore under cow"]),
-                        (14, "Frequently check inert gas values - tank pressure and O2 value", ["frequently check inert gas", "tank pressure and o2"]),
-                        (15, "Ensure crude oil washing is done in designated tanks as per plan", ["designated tanks as per plan", "done in designated tanks"]),
-                        (16, "Have a responsible person present on deck at all times", ["present on deck at all times", "person present on deck"]),
-                        (17, "Frequently check all deck lines and valves for leakages", ["deck lines and valves for leakages", "frequently check all deck lines"]),
-                        (18, "Monitor parameters and running conditions of all machinery involved", ["running conditions of all machinery", "machinery involved"]),
-                        (19, "Raise ullage gauge floats for tanks being washed", ["raise ullage gauge", "ullage gauge floats"]),
-                        (20, "Monitor level of holding tanks to avoid slops overflow", ["holding tanks to avoid slops", "slops overflow"]),
-                        (21, "Ensure trim is sufficient to assist bottom washing of tanks", ["trim is sufficient", "trim"]),
-                        (22, "Drain tank wash line off crude oil after operation", ["drain tank wash line", "wash line off crude oil"]),
-                        (23, "Shut all valves in the line used for the operation", ["shut all valves"]),
-                        (24, "Stop and drain all machines involved in the operation", ["stop and drain all machines", "machines involved in the operation"]),
-                        (25, "Drain all cargo pumps after the operation is finished", ["drain all cargo pumps"]),
-                        (26, "Stop COW operation immediately if any trouble is sensed", ["stop cow operation immediately", "trouble is sensed"])
-                    ]
-                    
-                    # Combine LLM answer and chunks content to form the search text
-                    chunks_text = "\n".join(chunk.get("content", "") for chunk in company_chunks)
-                    search_text = (answer + "\n" + chunks_text).lower()
-                    
-                    rows_str = []
-                    for item_num, item_desc, keywords in cow_items_mapping:
-                        # Check if the item is present/mentioned in the search text
-                        is_present = False
-                        matched_snippet = ""
-                        
-                        # Find matching line or sentence in search_text
-                        for kw in keywords:
-                            if kw in search_text:
-                                is_present = True
-                                # Find context around the match to look for checkboxes
-                                start_idx = search_text.find(kw)
-                                # Take 150 chars before and after for context
-                                matched_snippet = search_text[max(0, start_idx - 150): min(len(search_text), start_idx + 150)]
-                                break
-                        
-                        ship_check = ""
-                        terminal_check = ""
-                        
-                        if is_present:
-                            # Extract checkboxes [ ] or [x] from matched_snippet or matching line
-                            lines = search_text.split('\n')
-                            matching_line = ""
-                            for line in lines:
-                                if any(kw in line for kw in keywords):
-                                    matching_line = line
-                                    break
-                            
-                            brackets = []
-                            if matching_line:
-                                brackets = re.findall(r'\[\s*[xX]?\s*\]', matching_line)
-                            
-                            if not brackets and matched_snippet:
-                                brackets = re.findall(r'\[\s*[xX]?\s*\]', matched_snippet)
-                                    
-                            def normalize_checkbox(chk_str):
-                                inner = re.sub(r'\s+', '', chk_str[1:-1])
-                                if inner.lower() == 'x':
-                                    return "[x]"
-                                return ""
-
-                            if len(brackets) >= 2:
-                                ship_check = normalize_checkbox(brackets[0])
-                                terminal_check = normalize_checkbox(brackets[1])
-                            elif len(brackets) == 1:
-                                # Determine if it is ship or terminal based on context
-                                context_line = matching_line or matched_snippet
-                                if "terminal" in context_line or "shore" in context_line or "port" in context_line:
-                                    terminal_check = normalize_checkbox(brackets[0])
-                                else:
-                                    ship_check = normalize_checkbox(brackets[0])
-                        
-                        # Format row: | Check | Ship | Terminal | Code | Remarks |
-                        rows_str.append(f"| {item_num}. {item_desc} |  |  | R | |")
-                    
-                    # Determine doc title dynamically from retrieved chunks
-                    doc_title_val = "Shipboard SMS Manual (Vol. II)-Oil Tanker 2016.docx"
-                    if company_chunks:
-                        for chunk in company_chunks:
-                            if chunk.get("document_title"):
-                                doc_title_val = chunk.get("document_title")
-                                break
-
-                    table_rows = "\n".join(rows_str)
-                    custom_sec1 = f"""#### 🏢 1. According to {company_name}'s Safety Management System (SMS / QMS)
-**Document Title:** {doc_title_val}
-**SOP Name:** Crude Oil Washing (COW) Procedures
-**Section:** COW Checklist
-
-COW Entry and Cleaning Checklist
-| Check | Ship | Terminal | Code | Remarks |
-| :--- | :---: | :---: | :---: | :--- |
-{table_rows}"""
-                    
-                    match = re.search(r'(?:^|\n)(#*\s*📘\s*2\b.*)', answer)
-                    if match:
-                        answer = custom_sec1.strip() + "\n\n" + answer[match.start():]
-                    else:
-                        match2 = re.search(r'(?:^|\n)(#*\s*\d*\.?\s*Dolphin\b.*)', answer, re.IGNORECASE)
-                        if match2:
-                            answer = custom_sec1.strip() + "\n\n" + answer[match2.start():]
-                        else:
-                            answer = custom_sec1.strip()
 
             # Sanitize any accidental bracket checkboxes
             answer = re.sub(r'\[\s*[xX]?\s*\]', '', answer)
@@ -685,16 +843,14 @@ COW Entry and Cleaning Checklist
             if "node_response" not in state or not isinstance(state["node_response"], dict):
                 state["node_response"] = {}
 
-            default_suggestions = [
-                f"What are the specific checklists for this {company_name} procedure?",
-                "What safety equipment and precautions are required?",
-                "What are the relevant ISM / SOLAS regulatory standards?"
-            ]
-
-            existing_suggestions = (
-                state["node_response"].get("question_suggestions")
-                or state.get("question_suggestions")
-                or default_suggestions
+            # Generate dynamic, response-related question suggestions
+            from services.suggestion_service import SuggestionService
+            sugg_service = suggestion_service or SuggestionService()
+            dynamic_suggestions = sugg_service.generate_from_response(
+                query=query,
+                response_text=answer,
+                company_name=company_name,
+                chunks=company_chunks or state.get("retrieval_chunks", []),
             )
 
             state["node_response"]["type"] = state["node_response"].get("type") or "query"
@@ -707,7 +863,7 @@ COW Entry and Cleaning Checklist
                 }
             ]
             state["node_response"]["chunks_used"] = state["node_response"].get("chunks_used") or company_chunks or []
-            state["node_response"]["question_suggestions"] = existing_suggestions
+            state["node_response"]["question_suggestions"] = dynamic_suggestions
             state["node_response"]["videos"] = state["node_response"].get("videos") or state.get("video_suggestions", [])
             state["node_response"]["images"] = state["node_response"].get("images") or state.get("images", [])
             state["node_response"]["pdfs"] = state["node_response"].get("pdfs") or state.get("pdfs", [])

@@ -33,7 +33,7 @@ from course_sync.course_sync_router import router as course_sync_router
 
 
 from config import settings
-from models.database import get_pool, close_pool
+from models.database import get_pool, close_pool, init_feedback_tables
 
 # Routers
 from api.chat_router import router as chat_router
@@ -45,6 +45,9 @@ from api.forgot_password import router as forgot_password_router
 from core.redis_client import redis_service
 from api.company_router import router as company_router
 from api.video_transcribe_router import router as transcribe_router
+from api.course_router import router as course_router
+from api.user_router import router as user_router
+from api.feedback_router import router as feedback_router
 
 # ============================================================
 # 1. Lifespan – DB init + FAISS rebuild + Scheduler
@@ -121,8 +124,9 @@ async def lifespan(app: FastAPI):
     # -----------------------------
     logger.info("⏳ Initializing PostgresSQL connection pool...")
     t0 = perf_counter()
-    await get_pool()
-    logger.info("✅ PostgresSQL pool ready in {:.2f}s", perf_counter() - t0)
+    pool = await get_pool()
+    await init_feedback_tables(pool)
+    logger.info("✅ PostgresSQL pool and feedback tables ready in {:.2f}s", perf_counter() - t0)
 
     # -----------------------------
     # FAISS init + scheduler
@@ -198,11 +202,13 @@ if settings.enable_rate_limiting:
     app.add_middleware(RateLimitMiddleware)
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-if settings.all_cors_origins:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"https?://.*",
+    allow_origins=[
         "https://dolphin.aduacademy.in",
+        "http://mmt.compunnet.com",
+        "https://mmt.compunnet.com",
         "http://localhost:3000",
         "http://localhost:3001",
         "http://localhost:3002",
@@ -233,10 +239,10 @@ if settings.all_cors_origins:
         "http://192.168.0.21:3001",
         "http://192.168.0.31:3001"
     ],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ============================================================
 # 3. UI Static Files
@@ -285,11 +291,14 @@ app.include_router(session_router)
 app.include_router(forgot_password_router)
 app.include_router(company_router)
 app.include_router(transcribe_router)
+app.include_router(course_router)
+app.include_router(user_router)
+app.include_router(feedback_router)
 
 # add parth
 app.include_router(course_sync_router)
 
-logger.info("🔗 Routers registered")
+logger.info("🔗 Routers registered (including /feedback)")
 
 
 # ============================================================

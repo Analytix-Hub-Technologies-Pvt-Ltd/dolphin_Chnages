@@ -21,6 +21,7 @@ class User(BaseModel):
     user_bio: str | None = None
     user_courses: str | None = None
     company_id: str | int | None = None
+    role_id: int | None = 1
 
 class UserCreate(BaseModel):
     name: str
@@ -37,6 +38,7 @@ class UserCreate(BaseModel):
     id_type: str | None =  None
     id_country: str | None = None
     company_id: str | int | None = None
+    role_id: int | None = 1
 
 class LoginRequest(BaseModel):
     email: Optional[str] = None
@@ -48,6 +50,7 @@ class LoginResponse(BaseModel):
     user_id: str
     name: str
     email: EmailStr | None = None
+    user_role: str | None = None
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
@@ -55,3 +58,11 @@ class ForgotPasswordRequest(BaseModel):
 class ForgotPasswordResponse(BaseModel):
     status: str
     message: str
+
+class UserListResponse(BaseModel):
+    total: int
+    users: List[User]
+
+class UpdateUserRoleRequest(BaseModel):
+    role_id: int
+

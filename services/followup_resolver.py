@@ -13,6 +13,7 @@ MARITIME_DOMAIN_TERMS = {
     "enclosed space", "enclosed spaces", "tank entry", "confined space",
     "cargo", "cargo loading", "cargo discharge", "bunker", "bunkering",
     "ballast", "ballast water", "bwts", "anchor", "anchoring", "mooring",
+    "snap", "snap back", "snap-back", "snapback", "snap back zone",
     "engine", "boiler", "purifier", "generator", "turbine", "steering",
     "rudder", "propeller", "shaft", "compressor", "pump", "valve",
     "navigation", "bridge", "oow", "passage planning", "ecdis", "radar", "ais",
@@ -23,17 +24,20 @@ MARITIME_DOMAIN_TERMS = {
     "bilge", "sludge", "oily water", "incinerator", "sewage", "garbage",
     "draft", "trim", "stability", "hydrodynamics", "free surface",
     "crane", "winch", "windlass", "hatch cover", "cargo hold", "ullage",
-    "sounding", "stripping", "crude oil washing", "tank cleaning"
+    "sounding", "stripping", "crude oil washing", "tank cleaning",
+    "salvage", "salvor", "salvors", "casualty", "bollard", "fairlead",
+    "chock", "bitts", "heaving line", "messenger line", "pilot ladder",
+    "gangway", "berth", "berthing", "unmooring", "towage", "towing"
 }
 
 # ---------------------------------------------------------------------------
 # Follow-up Pattern Categories (Regex & Keyword Matchers)
 # ---------------------------------------------------------------------------
 DEPTH_PATTERNS = [
-    r"\btell\s+me\s+(in\s*depth|indepth|more|everything|in\s*detail|all\s*about\s*it)\b",
-    r"\bexplain\s+(in\s*depth|indepth|more|further|everything|in\s*detail|the\s*above|this|that)\b",
-    r"\bgive\s+(me\s+)?(more\s+details?|in\s*depth|indepth|full\s+details?|more\s+info(rmation)?|further\s+details?)\b",
-    r"\b(elaborate|go\s+deeper|deep\s+dive|expand(\s+further|\s+more|\s+on\s+this)?|continue|more\s+details?|details?\s+please|indepth|in\s+depth|in\s+detail)\b",
+    r"\b(tell|tel)\s+me\s+(in\s*depth|indepth|more|mor|everything|in\s*detail|in\s*detial|all\s*about\s*it)\b",
+    r"\b(explain|explan|explai|exlpain)\s+(in\s*depth|indepth|more|mor|further|furthur|everything|in\s*detail|in\s*detial|the\s*above|this|that)\b",
+    r"\b(give|giv)\s+(me\s+)?(more\s+details?|mor\s+details?|in\s*depth|indepth|full\s+details?|more\s+info(rmation)?|mor\s+info(rmation)?|further\s+details?|furthur\s+details?)\b",
+    r"\b(elaborate|elaborat|go\s+deeper|deep\s+dive|expand(\s+further|\s+furthur|\s+more|\s+mor|\s+on\s+this)?|continue|more\s+details?|mor\s+details?|details?\s+please|detials?\s+please|indepth|in\s+depth|in\s+detail|in\s+detial)\b",
 ]
 
 REQUIREMENTS_PATTERNS = [
@@ -99,7 +103,7 @@ RESPONSIBILITY_PATTERNS = [
 ]
 
 ANAPHORIC_PRONOUN_PATTERNS = [
-    r"^(what\s+about|explain|tell\s+me\s+about|how\s+about)\s+(this|that|these|those|it|the\s+above)\b",
+    r"^(what\s+about|explain|explan|tell\s+me\s+about|how\s+about)\s+(this|that|these|those|it|the\s+above)\b",
     r"^(why|how|when|where)\s+(is|are|does|do|did|was|were)\s+(this|that|it)\b",
     r"^(what\s+does\s+this\s+mean|what\s+does\s+that\s+mean)\b",
     r"^(why\s+so|how\s+so)\b",
@@ -112,7 +116,7 @@ POINT_REFERENCE_PATTERNS = [
 ]
 
 TOPIC_SWITCH_PREFIXES = [
-    r"^now\s+(explain|tell\s+me\s+about|describe|what\s+is|what\s+are|how\s+about)\s+",
+    r"^now\s+(explain|explan|tell\s+me\s+about|describe|what\s+is|what\s+are|how\s+about)\s+",
     r"^switch\s+to\s+",
     r"^let'?s\s+talk\s+about\s+",
     r"^next\s+(topic\s+is|question\s+is|explain)\s+",
@@ -122,8 +126,9 @@ TOPIC_SWITCH_PREFIXES = [
 
 
 FOLLOWUP_META_WORDS = {
-    "tell", "me", "in", "depth", "indepth", "more", "everything", "detail", "details", "detailed",
-    "explain", "explanation", "give", "further", "elaborate", "elaboration", "go", "deeper", "deep",
+    "tell", "me", "in", "depth", "indepth", "more", "mor", "everything", "detail", "details", "detailed",
+    "detial", "detials", "explain", "explan", "explai", "exlpain", "explanation", "give", "further",
+    "furthur", "elaborate", "elaborat", "elaboration", "go", "deeper", "deep",
     "dive", "expand", "expansion", "continue", "continuation", "what", "is", "are", "the", "a", "an",
     "for", "of", "about", "to", "on", "and", "or", "this", "that", "these", "those", "it", "above",
     "precaution", "precautions", "safety", "hazard", "hazards", "procedure", "procedures", "step",
@@ -133,10 +138,10 @@ FOLLOWUP_META_WORDS = {
     "when", "where", "can", "could", "would", "will", "you", "please", "point", "points", "item",
     "items", "section", "sections", "clause", "clauses", "paragraph", "first", "second", "third",
     "fourth", "fifth", "last", "one", "two", "three", "four", "five", "all", "full", "complete",
-    "specific", "necessary", "needed", "required", "info", "information", "guidance", "standard",
-    "operating", "sop", "sops", "meaning", "does", "do", "did", "was", "were", "so", "case",
-    "during", "regarding", "work", "look", "overview", "summary", "summarize", "brief", "briefly",
-    "clarify", "clarification", "outline", "list", "notes", "note", "provide", "show"
+    "specific", "necessary", "needed", "required", "info", "information", "guidance", "guidelines",
+    "standard", "standards", "operating", "sop", "sops", "meaning", "does", "do", "did", "was", "were",
+    "so", "case", "during", "regarding", "work", "look", "overview", "summary", "summarize", "brief",
+    "briefly", "clarify", "clarification", "outline", "list", "notes", "note", "provide", "show"
 }
 
 
@@ -170,8 +175,8 @@ def extract_topic_from_query(query: str) -> str:
 
     # Strip standard conversational opening phrases
     openers = [
-        r"^(can|could|would|will)\s+(you\s+)?(please\s+)?(explain|tell\s+me\s+about|describe|detail|show|give\s+me)\s+(to\s+me\s+)?",
-        r"^(please\s+)?(explain|tell\s+me\s+about|describe|detail|give\s+me\s+details\s+on)\s+",
+        r"^(can|could|would|will)\s+(you\s+)?(please\s+)?(explain|explan|explai|exlpain|tell\s+me\s+about|describe|detail|show|give\s+me)\s+(to\s+me\s+)?",
+        r"^(please\s+)?(explain|explan|explai|exlpain|tell\s+me\s+about|describe|detail|give\s+me\s+details\s+on)\s+",
         r"^(what\s+is|what\s+are|what\s+do\s+you\s+know\s+about|how\s+does|how\s+do|how\s+to)\s+",
         r"^(tell\s+me\s+the\s+procedure\s+for|give\s+me\s+the\s+procedure\s+for)\s+",
     ]
@@ -205,6 +210,62 @@ def extract_topic_from_query(query: str) -> str:
     return q.rstrip("?.!,:;").strip()
 
 
+def is_standalone_substantive_query(query: str) -> bool:
+    """Check if a query is a genuine substantive question and not a follow-up or conversational filler."""
+    if not query or not isinstance(query, str):
+        return False
+    q = clean_query_text(query).lower()
+    words = re.findall(r"\b[a-z0-9]+\b", q)
+    if not words:
+        return False
+
+    # Check if purely conversational/follow-up words
+    if all(w in FOLLOWUP_META_WORDS or w in {"hi", "hello", "hey", "thanks", "thank", "ok", "yes", "no"} for w in words):
+        return False
+
+    # Check depth patterns
+    if any(re.search(pat, q, re.IGNORECASE) for pat in DEPTH_PATTERNS):
+        return False
+
+    # Check anaphoric pronouns
+    if any(re.search(pat, q, re.IGNORECASE) for pat in ANAPHORIC_PRONOUN_PATTERNS):
+        return False
+
+    # Check point references
+    if any(re.search(pat, q, re.IGNORECASE) for pat in POINT_REFERENCE_PATTERNS):
+        return False
+
+    return True
+
+
+def find_substantive_topic_from_history(
+    previous_questions: List[str],
+    conversation_topic: str = "",
+) -> str:
+    """
+    Scan backwards through previous questions to find the active substantive maritime topic,
+    skipping follow-up queries ('explain more', 'more', 'this', 'point 2', etc.) and greetings.
+    """
+    if conversation_topic and isinstance(conversation_topic, str) and len(conversation_topic.strip()) >= 3:
+        return conversation_topic.strip()
+
+    if not previous_questions:
+        return ""
+
+    for q in reversed(previous_questions):
+        if not q or not isinstance(q, str):
+            continue
+        q_clean = q.strip()
+        if not is_standalone_substantive_query(q_clean):
+            continue
+        topic = extract_topic_from_query(q_clean)
+        if topic and len(topic) >= 3 and topic.lower() not in {"more", "mor", "this", "that", "it", "explain", "details"}:
+            return topic
+
+    # Fallback to the last question's extracted topic if nothing earlier found
+    return extract_topic_from_query(previous_questions[-1]) if previous_questions else ""
+
+
 def is_followup_query(
     current_query: str,
     previous_questions: List[str] | None = None,
@@ -224,10 +285,8 @@ def is_followup_query(
     q = clean_query_text(current_query).lower()
     words = re.findall(r"\b[a-z0-9]+\b", q)
 
-    # If no prior conversation history or active topic exists, cannot be a follow-up
+    # If no prior conversation history or active topic exists, check for standalone follow-up patterns
     has_prior_context = bool(previous_questions) or bool(conversation_topic)
-    if not has_prior_context:
-        return False
 
     # Check for explicit topic switch prefixes
     for prefix_pat in TOPIC_SWITCH_PREFIXES:
@@ -302,11 +361,12 @@ def is_followup_query(
     # 9. Short phrases (<= 4 words) that lack a distinct maritime subject
     if len(words) <= 4:
         followup_short_terms = {
-            "this", "that", "these", "those", "it", "above", "more", "detail", "details",
-            "indepth", "depth", "elaborate", "further", "continue", "deeper", "procedure",
-            "checklist", "checklists", "precaution", "precautions", "requirement", "requirements",
-            "rules", "regulations", "equipment", "responsible", "responsibility", "steps", "why",
-            "how", "when", "clarify", "explain", "tell", "expand"
+            "this", "that", "these", "those", "it", "above", "more", "mor", "detail", "details",
+            "detial", "detials", "indepth", "depth", "elaborate", "elaborat", "further", "furthur",
+            "continue", "deeper", "procedure", "checklist", "checklists", "precaution", "precautions",
+            "requirement", "requirements", "rules", "regulations", "equipment", "responsible",
+            "responsibility", "steps", "why", "how", "when", "clarify", "explain", "explan", "explai",
+            "exlpain", "tell", "expand"
         }
         if any(w in followup_short_terms for w in words):
             domain_overlap = set(words).intersection(MARITIME_DOMAIN_TERMS)
@@ -395,58 +455,37 @@ def resolve_followup_retrieval_query(
 
     # 1. Depth / In-depth / Elaboration Requests
     if any(re.search(pat, q_lower) for pat in DEPTH_PATTERNS):
-        resolved = (
-            f"{topic} — detailed explanation of all relevant procedures, requirements, "
-            f"precautions, equipment, responsibilities and emergency arrangements."
-        )
+        resolved = f"Explain {topic} in detail — comprehensive explanation of all operational guidelines, procedures, and safety precautions."
         return resolved, True
 
     # 2. Checklists / Forms / PTW Requests
     if any(re.search(pat, q_lower) for pat in CHECKLIST_PATTERNS):
-        resolved = (
-            f"{topic} — checklists, permit to work forms, verification steps, "
-            f"and safety checks."
-        )
+        resolved = f"{topic} checklists, permit to work forms, and verification steps."
         return resolved, False
 
     # 3. Requirements / Statutory Regulations Requests
     if any(re.search(pat, q_lower) for pat in REQUIREMENTS_PATTERNS):
-        resolved = (
-            f"{topic} — statutory requirements, SOLAS regulations, ISM code standards, "
-            f"and mandatory operational criteria."
-        )
+        resolved = f"{topic} statutory requirements, SOLAS regulations, and ISM code standards."
         return resolved, False
 
     # 4. Precautions / Safety / Hazards Requests
     if any(re.search(pat, q_lower) for pat in PRECAUTIONS_PATTERNS):
-        resolved = (
-            f"{topic} — safety precautions, hazard identification, risk assessment, "
-            f"atmospheric testing, personal protective equipment, and protective measures."
-        )
+        resolved = f"{topic} safety precautions, hazards, and protective measures."
         return resolved, False
 
     # 5. Procedures / Steps / Execution Requests
     if any(re.search(pat, q_lower) for pat in PROCEDURES_PATTERNS):
-        resolved = (
-            f"{topic} — step-by-step operating procedure, preparation, execution, "
-            f"and completion checklist."
-        )
+        resolved = f"{topic} step by step operating procedure and guidelines."
         return resolved, False
 
     # 6. Equipment / Tools / PPE Requests
     if any(re.search(pat, q_lower) for pat in EQUIPMENT_PATTERNS):
-        resolved = (
-            f"{topic} — required safety equipment, gas detectors, personal protective equipment (PPE), "
-            f"minimum required quantities, and testing instruments."
-        )
+        resolved = f"{topic} required safety equipment, PPE, and testing instruments."
         return resolved, False
 
     # 7. Responsibility / Duties Requests
     if any(re.search(pat, q_lower) for pat in RESPONSIBILITY_PATTERNS):
-        resolved = (
-            f"{topic} — duties and responsibilities of Master, Chief Officer, "
-            f"officers of the watch (OOW), safety officer, and entry team."
-        )
+        resolved = f"{topic} duties and responsibilities of Master, Officers, and Crew."
         return resolved, False
 
     # 8. Point / Step Reference (e.g. "explain point 2", "step 3")
@@ -457,10 +496,11 @@ def resolve_followup_retrieval_query(
 
     # 9. Generic Anaphoric or Combined Follow-up
     # Strip pronouns like "what about this" -> combine with topic
-    clean_followup = re.sub(r"^(what\s+about|tell\s+me\s+about|explain|how\s+about)\s+(this|that|it|the\s+above)\s*", "", q, flags=re.IGNORECASE).strip()
+    clean_followup = re.sub(r"^(what\s+about|tell\s+me\s+about|explain|explan|how\s+about)\s+(this|that|it|the\s+above)\s*", "", q, flags=re.IGNORECASE).strip()
     if not clean_followup or clean_followup.lower() in {"this", "that", "it", "the above"}:
         resolved = f"{topic} — comprehensive details, procedures, and guidance."
     else:
         resolved = f"{topic} — {clean_followup}"
 
     return resolved, False
+
