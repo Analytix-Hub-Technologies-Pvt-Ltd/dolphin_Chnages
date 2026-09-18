@@ -1,17 +1,16 @@
-import React, { useState, useMemo } from "react";
-import { Box, Typography, Avatar, Tooltip, IconButton } from "@mui/material";
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import DownloadIcon from "@mui/icons-material/Download";
+import React, { useState, useMemo, useEffect } from "react";
+import { ChevronDown, ChevronUp, Download, Play, User as UserIcon } from "lucide-react";
 import QuizDisplay from "./QuizDisplay";
 import { sanitizeMarkdown } from "./ChatWindow";
 import DolphinIconW from "../../assets/images/dolphin_w.png";
+import DolphinIconB from "../../assets/images/dolphin_b.png";
 import { useThemeMode } from "../../context/ThemeModeContext";
 import { VideoIcon } from "../../assets/svgIcons/VideoIcon";
 import { ImageIcon } from "../../assets/svgIcons/ImageIcon";
-import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 import { DocumentIcon } from "../../assets/svgIcons/DocumentIcon";
-import MediaPreviewModal from "./MediaPreviewModal";
+import FeedbackRatingButtons from "../feedback/FeedbackRatingButtons";
+const MediaPreviewModal = React.lazy(() => import("./MediaPreviewModal"));
+
 const exportMarkdownToWordDoc = (markdownText, filename = "document.doc") => {
   const htmlBody = sanitizeMarkdown(markdownText);
 
@@ -152,12 +151,15 @@ const exportMarkdownToWordDoc = (markdownText, filename = "document.doc") => {
 
 const ChatMessage = ({
   msg,
+  question = "",
+  userProfile = null,
   videos_suggestions,
   images_suggestions,
   pdf_suggestions,
   sessionId,
   setSearchQuery,
   handleSend,
+  onTopicClick,
 }) => {
   const [showAllVideos, setShowAllVideos] = useState(false);
   const [showAllImages, setShowAllImages] = useState(false);
@@ -170,6 +172,24 @@ const ChatMessage = ({
     type: null,
     src: null,
   });
+
+  const rawTargetContent = useMemo(() => {
+    return (
+      msg.content ||
+      msg.company_answer ||
+      (Array.isArray(msg.sections)
+        ? msg.sections
+            .map((s) => s.content)
+            .filter(Boolean)
+            .join("\n\n")
+        : "") ||
+      ""
+    );
+  }, [msg.content, msg.company_answer, msg.sections]);
+
+  // Direct content rendering without typewriter delays
+  const displayedContent = rawTargetContent;
+  const isTyping = Boolean(!isUser && msg.isStreaming && msg.isThinking !== false);
 
   const openPreview = (type, src) => {
     setPreviewMedia({ open: true, type, src });
@@ -186,7 +206,7 @@ const ChatMessage = ({
     for (const img of images_suggestions) {
       if (!img) continue;
       const b64 = img.base64 && typeof img.base64 === "string" && img.base64.startsWith("data:image/") ? img.base64 : "";
-      const directUrl = img.url || img.Url || img.thumbnail || img.Thumbnail || "";
+      const directUrl = img.url || img.Url || img.thumbnail || img.Thumbnail || img.src || img.image_url || img.imageUrl || "";
       const imgSrc = b64 || directUrl || "";
       if (!imgSrc) continue;
 
@@ -214,8 +234,8 @@ const ChatMessage = ({
   }, [images_suggestions]);
 
   const handleFollowUpQuestion = async (query) => {
-    setSearchQuery(query);
-    await handleSend(query);
+    setSearchQuery?.(query);
+    await handleSend?.(query);
   };
 
   const isGapAnalysis = msg.metadata?.category === "GAP_ANALYSIS" || (msg.sections && msg.sections[0] && msg.sections[0].topic_code === "GAP_ANALYSIS");
@@ -223,7 +243,12 @@ const ChatMessage = ({
   const isOutOfScope =
     msg.metadata?.category === "OUT_OF_SCOPE" ||
     msg.metadata?.routing_reason === "out_of_scope" ||
-    (typeof msg.content === "string" && msg.content.includes("This is not part of the available course material"));
+    (typeof msg.content === "string" && (
+      msg.content.includes("not covered in the available course material") ||
+      msg.content.includes("falls outside the available course material") ||
+      msg.content.includes("not included in the current course content") ||
+      msg.content.includes("This is not part of the available course material")
+    ));
 
   const handleDownloadWordDoc = () => {
     try {
@@ -259,599 +284,461 @@ const ChatMessage = ({
   };
 
   return (
-    <Box
-      sx={{
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 1,
-        flexDirection: isUser ? "row-reverse" : "row",
-      }}
+    <div
+      data-testid="chat-message"
+      data-role={msg.role}
+      className={`flex items-start gap-2 sm:gap-2.5 ${isUser ? "flex-row-reverse" : "flex-row w-full"}`}
     >
+      {/* Avatar */}
       {isUser ? (
-        <Avatar
-          sx={{
-            width: { xs: 40, sm: 50 },
-            height: { xs: 40, sm: 50 },
-            backgroundColor: "primary.main",
-          }}
-        />
+        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-primary text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
+          <UserIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+        </div>
       ) : (
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            width: { xs: 40, sm: 50 },
-            height: { xs: 40, sm: 50 },
-            borderRadius: 60,
-            backgroundColor: "primary.main",
-          }}
-        >
-          <Box
-            component="img"
+        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-primary flex items-center justify-center p-1 shrink-0 shadow-xs">
+          <img
             src={DolphinIconW}
             alt="Dolphin"
-            sx={{ width: { xs: 25, sm: 30 }, height: { xs: 25, sm: 30 } }}
+            className="w-4.5 h-4.5 sm:w-5 sm:h-5 object-contain"
           />
-        </Box>
+        </div>
       )}
 
-      <Box
-        sx={{
-          display: "flex",
-          flexDirection: "column",
-          width: isUser ? "auto" : "90%",
-          maxWidth: "90%",
-          gap: 1,
-        }}
+      {/* Message Content Container */}
+      <div
+        className={`flex flex-col gap-0.5 ${
+          isUser
+            ? "w-auto max-w-[92%] sm:max-w-[85%] items-end"
+            : "flex-1 min-w-0 w-full items-start"
+        }`}
       >
-        {isUser ? (
-          <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
-            <Typography
-              variant="h4"
-              sx={{ fontWeight: 700, color: "text.heading1" }}
-            >
-              You
-            </Typography>{" "}
-            <Typography variant="caption" sx={{ color: "text.caption" }}>
-              {new Date(msg?.timestamp).toLocaleTimeString("en-US", {
+        {/* Name and Timestamp Header */}
+        <div className="flex items-center gap-1.5 px-0.5 mb-0.5">
+          <span className="text-[11.5px] sm:text-xs font-semibold text-text-primary">
+            {isUser ? "You" : "Dolphin AI"}
+          </span>
+          <span className="text-[10px] sm:text-[11px] text-text-caption opacity-70">
+            {msg?.timestamp &&
+              new Date(msg.timestamp).toLocaleTimeString("en-US", {
                 hour: "numeric",
                 minute: "2-digit",
                 hour12: true,
               })}
-            </Typography>
-          </Box>
-        ) : (
-          <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
-            <Typography
-              variant="body1"
-              sx={{ fontWeight: 700, color: "text.heading1" }}
-            >
-              Dolphin AI
-            </Typography>
-            {/* <Typography
-              variant="body1"
-              sx={{ fontWeight: 700, color: "text.heading1" }}
-            >
-              |
-            </Typography>
-            <Typography
-              variant="body1"
-              sx={{fontWeight: 700, color: "primary.main" }}
-            >
-              AI
-            </Typography> */}
-            <Typography variant="caption" sx={{ color: "text.caption" }}>
-              {new Date(msg?.timestamp).toLocaleTimeString("en-US", {
-                hour: "numeric",
-                minute: "2-digit",
-                hour12: true,
-              })}
-            </Typography>
-          </Box>
-        )}
+          </span>
+        </div>
 
-        <Box
-          sx={{
-            bgcolor: isUser ? "background.light" : "background.chatbackground",
-            p: 2,
-            borderRadius: 5,
-            whiteSpace: isUser ? "pre-wrap" : "normal",
-            overflowX: "auto",
-          }}
+        {/* Bubble */}
+        <div
+          className={`text-[13px] sm:text-[13.5px] leading-snug overflow-x-auto shadow-xs ${
+            isUser
+              ? "w-fit max-w-full px-2 py-1 sm:px-2.5 sm:py-1 rounded-xl rounded-tr-xs bg-bg-paper text-text-primary border border-black/[0.04] dark:border-white/[0.06] whitespace-pre-wrap"
+              : "w-full px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl rounded-tl-xs bg-bg-chatbackground text-text-primary border border-black/[0.04] dark:border-white/[0.06]"
+          }`}
         >
           {isUser ? (
-            <Typography variant="body1" sx={{ color: "text.secondary" }}>
-              {msg.content}
-            </Typography>
+            <p className="m-0 text-text-primary font-normal leading-snug">{msg.content}</p>
           ) : msg.category !== "QUIZ" ? (
-            <div style={{ display: "flex", flexDirection: "column" }}>
+            <div className="flex flex-col gap-1">
               <div
+                className="leading-snug break-words [&>p]:my-0.5 [&>ul]:my-0.5 [&>ol]:my-0.5 [&>table]:my-1 [&>h1]:my-1 [&>h2]:my-0.5 [&>h3]:my-0.5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+                onClick={(e) => {
+                  const target = e.target.closest(".topic-citation");
+                  if (target) {
+                    const index =
+                      parseInt(target.getAttribute("data-topic-index")) - 1;
+                    const topicCode =
+                      Array.isArray(msg.topics) && msg.topics[index]
+                        ? msg.topics[index]
+                        : (Array.isArray(msg.topics) && msg.topics[0]) || "";
+                    onTopicClick?.(topicCode, msg.topics || []);
+                  }
+                }}
                 dangerouslySetInnerHTML={{
-                  __html: sanitizeMarkdown(msg.content),
+                  __html: sanitizeMarkdown(displayedContent).replace(
+                    /(?:@@SOURCE_REF_|\[\[\s*Ref:?\s*)(\d+)\s*(?:@@|\]\])/gi,
+                    '<span class="topic-citation" data-topic-index="$1" title="Click to see related topic notes">$1</span>',
+                  ),
                 }}
               />
-              {showDownloadButton && (
-                <Box
-                  sx={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "flex-end",
-                    mt: 2,
-                    pt: 1,
-                    borderTop: "1px solid",
-                    borderColor: mode === "dark" ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)",
-                  }}
-                >
-                  <Tooltip title="Download Word Document">
-                    <IconButton
-                      onClick={handleDownloadWordDoc}
-                      size="small"
-                      sx={{
-                        color: "primary.main",
-                        border: "1px solid",
-                        borderColor: "primary.main",
-                        borderRadius: "4px",
-                        padding: "4px 8px",
-                        fontSize: "0.8rem",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 0.5,
-                        textTransform: "none",
-                        "&:hover": {
-                          backgroundColor: "rgba(28, 176, 246, 0.08)",
-                        },
-                      }}
-                    >
-                      <DownloadIcon fontSize="small" />
-                      <span>Download Word Doc</span>
-                    </IconButton>
-                  </Tooltip>
+              {isTyping && (
+                <span className="inline-flex items-center ml-1.5 align-middle select-none">
+                  <img
+                    src={mode === "dark" ? DolphinIconW : DolphinIconB}
+                    alt="Dolphin"
+                    className="w-4 h-4 sm:w-4.5 sm:h-4.5 object-contain animate-dolphin-wave drop-shadow-xs"
+                  />
+                </span>
+              )}
+
+              {!isTyping && showDownloadButton && (
+                <div className="flex flex-col items-end mt-4 pt-2 border-t border-border-theme animate-fade-in">
+                  <button
+                    type="button"
+                    onClick={handleDownloadWordDoc}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary text-primary font-semibold text-xs hover:bg-primary/10 transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download Word Doc</span>
+                  </button>
                   {docError && (
-                    <Typography
-                      variant="caption"
-                      sx={{ color: "error.main", mt: 0.5 }}
-                    >
-                      {docError}
-                    </Typography>
+                    <span className="text-xs text-rose-500 mt-1">{docError}</span>
                   )}
-                </Box>
+                </div>
               )}
             </div>
           ) : (
             <QuizDisplay quizContet={msg.content} />
           )}
 
-          {videos_suggestions?.length > 0 && !isOutOfScope && (
-            <Box sx={{ mt: 2 }}>
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 0.5,
-                }}
-              >
+          {/* Bottom attachments rendered with fade-in after streaming completes */}
+          {!isTyping && (
+            <div className="animate-fade-in flex flex-col">
+              {/* Video Suggestions */}
+              {videos_suggestions?.length > 0 && !isOutOfScope && (
+            <div className="mt-4 pt-2">
+              <div className="flex items-center gap-1.5 mb-2.5">
                 <VideoIcon
-                  size={30}
-                  color={mode === "dark" ? "#e8f1fb" : "#0f1c2e"}
-                />
-                <Typography variant="h3" sx={{ color: "text.primary" }}>
-                  Video Suggestions
-                </Typography>
-              </Box>
-
-              <Box
-                sx={{
-                  display: "flex",
-                  gap: 2,
-                  flexWrap: "wrap",
-                  maxHeight: showAllVideos ? "none" : { xs: 150, sm: 180 },
-                  overflow: "hidden",
-                  py: 1,
-                }}
-              >
-                {videos_suggestions.map((video, i) => {
-                  const videoUrl = video.url || video.Url || "";
-                  const videoThumb = video.thumbnail || video.Thumbnail || video.thumbnail_url || "";
-                  const videoTitle = video.title || video.Title || video.About || "Video";
-
-                  return (
-                    <Box
-                      key={i}
-                      sx={{
-                        position: "relative",
-                        display: "flex",
-                        flexDirection: "column",
-                        justifyContent: "space-between",
-                        width: { xs: "43%", sm: "23%" },
-                        height: { xs: 140, sm: 170 },
-                        textDecoration: "none",
-                        borderRadius: 2,
-                        p: 0.5,
-                        backgroundColor: "background.light",
-                        transition: "0.2s",
-                        border: "1px solid",
-                        borderColor: "text.caption",
-                        cursor: "pointer",
-                        "&:hover": {
-                          borderColor: "primary.main",
-                          transform: "translateY(-2px)",
-                        },
-                      }}
-                      onClick={() => openPreview("video", videoUrl)}
-                    >
-                      <Box
-                        component="img"
-                        src={videoThumb}
-                        alt={videoTitle}
-                        sx={{
-                          width: "100%",
-                          height: { xs: 80, sm: 130 },
-                          borderRadius: 1,
-                          objectFit: "cover",
-                        }}
-                      />
-                      <Box
-                        sx={{
-                          position: "absolute",
-                          inset: 0,
-                          display: "flex",
-                          alignItems: "center",
-                          left: 10,
-                          bottom: -50,
-                        }}
-                      >
-                        <PlayArrowRoundedIcon
-                          sx={{
-                            color: "background.default",
-                            fontSize: 30,
-                            "&:hover": {
-                              borderColor: "primary.main",
-                              fontSize: 32,
-                            },
-                          }}
-                        />
-                      </Box>
-                      <Typography
-                        variant="caption"
-                        sx={{
-                          width: "100%",
-                          textAlign: "center",
-                          color: "primary.main",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {videoTitle}
-                      </Typography>
-                    </Box>
-                  );
-                })}
-              </Box>
-
-              {videos_suggestions.length > 4 && (
-                <Typography
-                  onClick={() => setShowAllVideos((prev) => !prev)}
-                  variant="body1"
-                  sx={{
-                    mt: 1,
-                    cursor: "pointer",
-                    display: "flex",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    color: "text.primary",
-                  }}
-                >
-                  {showAllVideos ? "Show less" : "Show more"}
-                  {showAllVideos ? (
-                    <KeyboardArrowUpIcon />
-                  ) : (
-                    <KeyboardArrowDownIcon />
-                  )}
-                </Typography>
-              )}
-            </Box>
-          )}
-
-          {validImages?.length > 0 && !isOutOfScope && (
-            <Box className="ref-images-section" sx={{ mt: 2 }}>
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 0.5,
-                }}
-              >
-                <ImageIcon
                   size={24}
                   color={mode === "dark" ? "#e8f1fb" : "#0f1c2e"}
                 />
-                <Typography variant="h3" sx={{ color: "text.primary" }}>
-                  Reference Images
-                </Typography>
-              </Box>
+                <h4 className="text-base font-bold text-text-primary m-0">
+                  Video Suggestions
+                </h4>
+              </div>
 
-              <Box
-                className="ref-images-container"
-                sx={{
-                  display: "flex",
-                  gap: 2,
-                  flexWrap: "wrap",
-                  maxHeight: showAllImages ? "none" : { xs: 150, sm: 180 },
-                  overflow: "hidden",
-                  py: 1,
-                }}
-              >
-                {validImages.map((img, i) => (
-                  <Box
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-1">
+                {(showAllVideos ? videos_suggestions : videos_suggestions.slice(0, 4)).map((video, i) => {
+                  const videoUrl = video.url || video.Url || "";
+                  const videoThumb =
+                    video.thumbnail || video.Thumbnail || video.thumbnail_url || "";
+                  const videoTitle =
+                    video.title || video.Title || video.About || "Video";
+
+                  return (
+                    <div
+                      key={i}
+                      onClick={() => openPreview("video", videoUrl)}
+                      className="group relative w-full h-36 sm:h-44 rounded-xl bg-bg-paper border border-border-theme p-1.5 flex flex-col justify-between hover:border-primary hover:-translate-y-0.5 transition-all cursor-pointer shadow-xs"
+                    >
+                      <div className="relative w-full h-24 sm:h-32 rounded-lg overflow-hidden bg-black/5">
+                        <img
+                          src={videoThumb}
+                          alt={videoTitle}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/30 transition-colors">
+                          <div className="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center shadow-md group-hover:scale-110 transition-transform">
+                            <Play className="w-4 h-4 fill-white ml-0.5" />
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-[0.72rem] font-medium text-primary text-center truncate block mt-1">
+                        {videoTitle}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {videos_suggestions.length > 4 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllVideos((prev) => !prev)}
+                  className="mt-1.5 text-xs font-semibold text-text-primary hover:text-primary flex items-center justify-center gap-1 w-full py-1 transition-colors cursor-pointer"
+                >
+                  <span>{showAllVideos ? "Show less" : "Show more"}</span>
+                  {showAllVideos ? (
+                    <ChevronUp className="w-4 h-4" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4" />
+                  )}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Reference Images */}
+          {validImages?.length > 0 && !isOutOfScope && (
+            <div className="mt-4 pt-2">
+              <div className="flex items-center gap-1.5 mb-2.5">
+                <ImageIcon
+                  size={20}
+                  color={mode === "dark" ? "#e8f1fb" : "#0f1c2e"}
+                />
+                <h4 className="text-base font-bold text-text-primary m-0">
+                  Reference Images
+                </h4>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-1">
+                {(showAllImages ? validImages : validImages.slice(0, 4)).map((img, i) => (
+                  <div
                     key={img.id || i}
-                    className="ref-image-item"
-                    sx={{
-                      position: "relative",
-                      display: "flex",
-                      flexDirection: "column",
-                      justifyContent: "space-between",
-                      width: { xs: "43%", sm: "23%" },
-                      height: { xs: 140, sm: 170 },
-                      textDecoration: "none",
-                      borderRadius: 2,
-                      p: 0.5,
-                      backgroundColor: "background.light",
-                      transition: "0.2s",
-                      border: "1px solid",
-                      borderColor: "text.caption",
-                      cursor: "pointer",
-                      "&:hover": {
-                        borderColor: "primary.main",
-                        transform: "translateY(-2px)",
-                      },
-                    }}
                     onClick={() => openPreview("image", img.imgSrc)}
+                    className="w-full h-36 sm:h-44 rounded-xl bg-bg-paper border border-border-theme p-1.5 flex flex-col justify-between hover:border-primary hover:-translate-y-0.5 transition-all cursor-pointer shadow-xs"
                   >
-                    <Box
-                      component="img"
+                    <img
                       src={img.imgSrc}
                       alt={img.imgTitle}
+                      className="w-full h-24 sm:h-32 object-cover rounded-lg"
                       onError={(e) => {
                         if (img.b64 && e.target.src !== img.b64) {
                           e.target.src = img.b64;
                         } else {
-                          const card = e.currentTarget.closest(".ref-image-item") || e.currentTarget.parentElement;
-                          if (card) {
-                            card.style.display = "none";
-                            const container = card.parentElement;
-                            if (container) {
-                              const remaining = Array.from(container.querySelectorAll(".ref-image-item")).filter(
-                                (el) => el.style.display !== "none"
-                              );
-                              if (remaining.length === 0) {
-                                const section = container.closest(".ref-images-section") || container.parentElement;
-                                if (section) section.style.display = "none";
-                              }
-                            }
-                          }
+                          e.currentTarget.parentElement.style.display = "none";
                         }
                       }}
-                      sx={{
-                        width: "100%",
-                        height: { xs: 80, sm: 130 },
-                        borderRadius: 1,
-                        objectFit: "cover",
-                      }}
                     />
-
-                    <Typography
-                      variant="caption"
-                      sx={{
-                        width: "100%",
-                        textAlign: "center",
-                        color: "primary.main",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
+                    <span className="text-[0.72rem] font-medium text-primary text-center truncate block mt-1">
                       {img.imgTitle}
-                    </Typography>
-                  </Box>
+                    </span>
+                  </div>
                 ))}
-              </Box>
+              </div>
 
               {validImages.length > 4 && (
-                <Typography
+                <button
+                  type="button"
                   onClick={() => setShowAllImages((prev) => !prev)}
-                  variant="body1"
-                  sx={{
-                    mt: 1,
-                    cursor: "pointer",
-                    display: "flex",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    color: "text.primary",
-                  }}
+                  className="mt-1.5 text-xs font-semibold text-text-primary hover:text-primary flex items-center justify-center gap-1 w-full py-1 transition-colors cursor-pointer"
                 >
-                  {showAllImages ? "Show less" : "Show more"}
+                  <span>{showAllImages ? "Show less" : "Show more"}</span>
                   {showAllImages ? (
-                    <KeyboardArrowUpIcon />
+                    <ChevronUp className="w-4 h-4" />
                   ) : (
-                    <KeyboardArrowDownIcon />
+                    <ChevronDown className="w-4 h-4" />
                   )}
-                </Typography>
+                </button>
               )}
-            </Box>
+            </div>
           )}
 
+          {/* Reference PDFs */}
           {pdf_suggestions?.length > 0 && !isOutOfScope && (
-            <Box sx={{ mt: 2 }}>
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 0.5,
-                }}
-              >
+            <div className="mt-4 pt-2">
+              <div className="flex items-center gap-1.5 mb-2.5">
                 <DocumentIcon
-                  size={25}
+                  size={20}
                   color={mode === "dark" ? "#e8f1fb" : "#0f1c2e"}
                 />
-                <Typography variant="h3" sx={{ color: "text.primary" }}>
+                <h4 className="text-base font-bold text-text-primary m-0">
                   Reference PDFs
-                </Typography>
-              </Box>
+                </h4>
+              </div>
 
-              <Box
-                sx={{
-                  display: "flex",
-                  gap: 2,
-                  flexWrap: "wrap",
-                  maxHeight: showAllPdfs ? "none" : { xs: 150, sm: 180 },
-                  overflow: "hidden",
-                  py: 1,
-                }}
-              >
-                {pdf_suggestions.map((pdf, i) => {
-                  const pdfUrl = pdf.url || pdf.Url || pdf.link || pdf.Link || pdf.file_url || "";
-                  const pdfTitle = pdf.title || pdf.Title || pdf.name || pdf.Name || "Reference PDF";
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-1">
+                {(showAllPdfs ? pdf_suggestions : pdf_suggestions.slice(0, 4)).map((pdf, i) => {
+                  const pdfUrl =
+                    pdf.url || pdf.Url || pdf.link || pdf.Link || pdf.file_url || "";
+                  const pdfTitle =
+                    pdf.title || pdf.Title || pdf.name || pdf.Name || "Reference PDF";
                   return (
-                    <Box
+                    <div
                       key={i}
-                      sx={{
-                        position: "relative",
-                        display: "flex",
-                        flexDirection: "column",
-                        justifyContent: "space-between",
-                        width: { xs: "43%", sm: "23%" },
-                        height: { xs: 140, sm: 170 },
-                        textDecoration: "none",
-                        borderRadius: 2,
-                        p: 0.5,
-                        backgroundColor: "background.light",
-                        transition: "0.2s",
-                        border: "1px solid",
-                        borderColor: "text.caption",
-                        cursor: "pointer",
-                        "&:hover": {
-                          borderColor: "primary.main",
-                          transform: "translateY(-2px)",
-                        },
-                      }}
                       onClick={() => openPreview("pdf", pdfUrl)}
+                      className="w-full h-36 sm:h-44 rounded-xl bg-bg-paper border border-border-theme p-1.5 flex flex-col justify-between hover:border-primary hover:-translate-y-0.5 transition-all cursor-pointer shadow-xs"
                     >
-                      {/* PDF Thumbnail */}
-                      <Box
-                        sx={{
-                          width: "100%",
-                          height: { xs: 80, sm: 130 },
-                          borderRadius: 1,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          backgroundColor: "background.paper",
-                          fontSize: 32,
-                        }}
-                      >
+                      <div className="w-full h-24 sm:h-32 rounded-lg bg-bg-default flex items-center justify-center text-3xl">
                         📄
-                      </Box>
-
-                      {/* Title */}
-                      <Typography
-                        variant="caption"
-                        sx={{
-                          width: "100%",
-                          textAlign: "center",
-                          color: "primary.main",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
+                      </div>
+                      <span className="text-[0.72rem] font-medium text-primary text-center truncate block mt-1">
                         {pdfTitle}
-                      </Typography>
-                    </Box>
+                      </span>
+                    </div>
                   );
                 })}
-              </Box>
+              </div>
 
               {pdf_suggestions.length > 4 && (
-                <Typography
+                <button
+                  type="button"
                   onClick={() => setShowAllPdfs((prev) => !prev)}
-                  variant="body1"
-                  sx={{
-                    mt: 1,
-                    cursor: "pointer",
-                    display: "flex",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    color: "text.primary",
-                  }}
+                  className="mt-1.5 text-xs font-semibold text-text-primary hover:text-primary flex items-center justify-center gap-1 w-full py-1 transition-colors cursor-pointer"
                 >
-                  {showAllPdfs ? "Show less" : "Show more"}
+                  <span>{showAllPdfs ? "Show less" : "Show more"}</span>
                   {showAllPdfs ? (
-                    <KeyboardArrowUpIcon />
+                    <ChevronUp className="w-4 h-4" />
                   ) : (
-                    <KeyboardArrowDownIcon />
+                    <ChevronDown className="w-4 h-4" />
                   )}
-                </Typography>
+                </button>
               )}
-            </Box>
+            </div>
           )}
 
+          {/* Related / Licensed Courses */}
+          {(() => {
+            const rawCourses = msg.checkLicCoursesData || msg.courses || msg.related_courses;
+            if (
+              !rawCourses ||
+              !Array.isArray(rawCourses) ||
+              rawCourses.length === 0
+            )
+              return null;
+
+            const flatList = rawCourses.flat(Infinity).filter(Boolean);
+            if (flatList.length === 0) return null;
+
+            const userType =
+              flatList[0]?.user_type?.toLowerCase() ||
+              flatList[0]?.role?.toLowerCase() ||
+              "";
+            const isStudent = userType === "student";
+
+            const coursesToShow = flatList.filter((item) => {
+              if (isStudent) return item?.matched;
+              return true;
+            });
+
+            const uniqueCoursesMap = new Map();
+            coursesToShow.forEach((item) => {
+              const rawCourse =
+                item?.data?.course ||
+                item?.course ||
+                item?.data?.courses ||
+                item?.courses ||
+                (item?.CourseName || item?.courseName ? item : null);
+
+              const courseList = Array.isArray(rawCourse) ? rawCourse : [rawCourse];
+
+              courseList.forEach((c) => {
+                if (!c) return;
+                let code = "";
+                let name = "";
+                if (typeof c === "string") {
+                  code = c;
+                  name = c;
+                } else if (typeof c === "object") {
+                  code =
+                    c.CourseCode ||
+                    c.courseCode ||
+                    c.code ||
+                    c.id ||
+                    c.CourseName ||
+                    c.courseName ||
+                    c.title ||
+                    "";
+                  name =
+                    c.CourseName ||
+                    c.courseName ||
+                    c.title ||
+                    c.name ||
+                    code ||
+                    "Unknown Course";
+                }
+
+                if (code && !uniqueCoursesMap.has(code)) {
+                  uniqueCoursesMap.set(code, {
+                    CourseName: name,
+                    CourseCode: code,
+                    matched: Boolean(item.matched),
+                    topicName:
+                      item.data?.topic_name ||
+                      item.topic_name ||
+                      item.data?.topicName ||
+                      item.topicName ||
+                      "",
+                  });
+                }
+              });
+            });
+
+            const uniqueCourses = Array.from(uniqueCoursesMap.values());
+            if (uniqueCourses.length === 0) return null;
+
+            return (
+              <div className="mt-4 pt-2 border-t border-border-theme">
+                <span className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">
+                  Related Courses
+                </span>
+                <div className="space-y-2">
+                  {uniqueCourses.map((course, i) => (
+                    <div
+                      key={i}
+                      className={`flex items-center justify-between p-3 rounded-xl border text-xs ${
+                        course.matched
+                          ? "bg-emerald-500/10 border-emerald-500/30 dark:bg-emerald-500/15"
+                          : "bg-bg-paper border-border-theme"
+                      }`}
+                    >
+                      <div>
+                        <p className="font-semibold text-text-primary text-sm m-0">
+                          {course.CourseName || course.courseName || "Unknown Course"}
+                        </p>
+                        {course.topicName && (
+                          <span className="text-xs text-text-secondary block mt-0.5">
+                            Topic: {course.topicName}
+                          </span>
+                        )}
+                      </div>
+                      {course.matched && (
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white font-bold text-[0.65rem] tracking-wider uppercase">
+                          LICENSED
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Question Suggestions */}
           {msg.question_suggestions?.length > 0 && (
-            <Box
-              sx={{ mt: 2, display: "flex", flexDirection: "column", gap: 1 }}
-            >
-              <Typography
-                variant="body1"
-                sx={{
-                  color: "text.primary",
-                  fontWeight: 600,
-                  letterSpacing: "0.08em",
-                }}
-              >
+            <div className="mt-4 pt-2 flex flex-col gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-text-primary">
                 Try asking...
-              </Typography>
-              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                {" "}
+              </span>
+              <div className="flex flex-wrap gap-2">
                 {msg.question_suggestions.map((q, i) => (
-                  <Box
+                  <button
                     key={i}
-                    sx={(theme) => ({
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      width: "auto",
-                      p: 1,
-                      borderRadius: 3,
-                      backgroundColor: "background.light",
-                      cursor: "pointer",
-                      transition: "all 0.2s ease",
-
-                      "&:hover": {
-                        border: "1.5px solid",
-                        borderColor: theme.palette.primary.main,
-                        color: theme.palette.primary.main,
-                      },
-                    })}
-                    onClick={() => {
-                      handleFollowUpQuestion(q);
-                    }}
+                    type="button"
+                    onClick={() => handleFollowUpQuestion(q)}
+                    className="py-1.5 px-3 rounded-xl bg-bg-paper border border-border-theme text-text-primary text-xs font-medium hover:border-primary hover:text-primary transition-all cursor-pointer shadow-xs text-left"
                   >
-                    <Typography variant="body2">{q}</Typography>
-                  </Box>
+                    {q}
+                  </button>
                 ))}
-              </Box>
-            </Box>
+              </div>
+            </div>
           )}
-        </Box>
-      </Box>
-      <MediaPreviewModal
-        open={previewMedia.open}
-        type={previewMedia.type}
-        src={previewMedia.src}
-        onClose={closePreview}
-      />
-    </Box>
+
+          {/* Feedback Rating Buttons */}
+          {!isUser && !isTyping && (msg.content || msg.company_answer || (Array.isArray(msg.sections) && msg.sections.length > 0)) && (
+            <div className="mt-3 pt-2 border-t border-border-theme/60 flex items-center justify-between">
+              <FeedbackRatingButtons
+                question={question || msg.question || msg.user_query || msg.query || "Maritime query"}
+                userProfile={userProfile}
+                originalResponse={
+                  (typeof msg.content === "string" && msg.content)
+                    ? msg.content
+                    : (typeof msg.company_answer === "string" && msg.company_answer)
+                    ? msg.company_answer
+                    : (Array.isArray(msg.sections) ? msg.sections.map((s) => s.content).filter(Boolean).join("\n\n") : "") ||
+                      "Maritime response"
+                }
+                sessionId={sessionId}
+                messageId={msg.id || msg.message_id}
+              />
+            </div>
+          )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {previewMedia.open && (
+        <React.Suspense fallback={null}>
+          <MediaPreviewModal
+            open={previewMedia.open}
+            type={previewMedia.type}
+            src={previewMedia.src}
+            onClose={closePreview}
+          />
+        </React.Suspense>
+      )}
+    </div>
   );
 };
 

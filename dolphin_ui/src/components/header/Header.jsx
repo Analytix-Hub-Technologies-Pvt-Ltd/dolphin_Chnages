@@ -1,48 +1,29 @@
+import React, { useState, useEffect, useRef } from "react";
 import {
-  AppBar,
-  Box,
-  Button,
-  IconButton,
-  Popover,
-  Slider,
-  Stack,
-  Toolbar,
-  Typography,
-  Drawer,
-  useMediaQuery,
-  Divider,
-  Avatar,
-  Chip,
-  Tooltip,
-} from "@mui/material";
-import React, { useState, useEffect } from "react";
-import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
-import LogoutOutlinedIcon from "@mui/icons-material/LogoutOutlined";
-import AddRoundedIcon from "@mui/icons-material/AddRounded";
-import MenuIcon from "@mui/icons-material/Menu";
-import TextFieldsIcon from "@mui/icons-material/TextFields";
-import BadgeOutlinedIcon from "@mui/icons-material/BadgeOutlined";
-import BusinessOutlinedIcon from "@mui/icons-material/BusinessOutlined";
-import DirectionsBoatOutlinedIcon from "@mui/icons-material/DirectionsBoatOutlined";
-import MailOutlineRoundedIcon from "@mui/icons-material/MailOutlineRounded";
-import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined";
-
+  Menu,
+  Plus,
+  User,
+  LogOut,
+  Settings,
+  ChevronLeft,
+  Sun,
+  Moon,
+  Shield,
+  ArrowLeft,
+  ThumbsUp,
+} from "lucide-react";
 import DolphinIconB from "../../assets/images/dolphin_b.png";
 import DolphinIconW from "../../assets/images/dolphin_w.png";
 import ShipIconB from "../../assets/images/ship.png";
 import ShipIconW from "../../assets/images/ship_w.png";
-
-import { useTheme } from "@mui/material/styles";
 import { useThemeMode } from "../../context/ThemeModeContext";
-
-import DarkModeIcon from "@mui/icons-material/DarkMode";
-
-import LightModeIcon from "@mui/icons-material/LightMode";
+import { useNavigate, useLocation } from "react-router-dom";
 import ChatSidebar from "../chat/ChatSideBar";
 import { fetchUserProfile } from "../../api/apiAuth";
 
 const Header = ({
   userId,
+  userRole,
   onLogout,
   setActiveIndex,
   setCurrentSessionId,
@@ -56,50 +37,105 @@ const Header = ({
   sidebarOpen,
   setSidebarOpen,
   fetchSessions,
+  drawerContent,
+  currentSessionId,
 }) => {
-  const theme = useTheme();
-   const { mode, toggleMode } = useThemeMode();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { mode, toggleMode, fontLevel, setFontLevel } = useThemeMode();
 
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
-  const isTablet = useMediaQuery(theme.breakpoints.between("sm", "md"));
+  const isAdminRoute = location?.pathname?.includes("/admin");
+  const isFeedbackRoute = location?.pathname?.includes("/feedback");
 
-  const [anchorElFont, setAnchorElFont] = useState(null);
-  const [anchorElUser, setAnchorElUser] = useState(null);
+  const [openUserMenu, setOpenUserMenu] = useState(false);
+  const [popoverView, setPopoverView] = useState("profile"); // "profile" | "settings"
+  const popoverRef = useRef(null);
+  const userButtonRef = useRef(null);
 
   const [userProfile, setUserProfile] = useState(() => {
     try {
       const stored = localStorage.getItem("userData");
       return stored ? JSON.parse(stored) : null;
-    } catch (e) {
+    } catch {
       return null;
     }
   });
 
+  // Close popover when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(event.target) &&
+        userButtonRef.current &&
+        !userButtonRef.current.contains(event.target)
+      ) {
+        setOpenUserMenu(false);
+        setPopoverView("profile");
+      }
+    };
+
+    if (openUserMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [openUserMenu]);
+
   useEffect(() => {
     const loadProfile = async () => {
-      const currentUserId = userId || localStorage.getItem("userId");
+      const currentUserId =
+        userId || localStorage.getItem("userId") || localStorage.getItem("user_id");
       if (currentUserId) {
         const profile = await fetchUserProfile(currentUserId);
         if (profile) {
-          setUserProfile(profile);
+          setUserProfile((prev) => {
+            const stored = (() => {
+              try {
+                return JSON.parse(localStorage.getItem("userData") || "{}");
+              } catch {
+                return {};
+              }
+            })();
+            return {
+              ...stored,
+              ...prev,
+              ...profile,
+              user_role:
+                profile.user_role ||
+                prev?.user_role ||
+                stored?.user_role ||
+                localStorage.getItem("userRole"),
+            };
+          });
         }
       }
     };
     loadProfile();
-  }, [userId]);
+  }, [userId, userRole]);
 
-  const { fontLevel, setFontLevel } = useThemeMode();
+  const isAdmin = (() => {
+    const stored = (() => {
+      try {
+        return JSON.parse(localStorage.getItem("userData") || "{}");
+      } catch {
+        return {};
+      }
+    })();
 
-  const handleOpenFontMenu = (event) => {
-    setAnchorElFont(event.currentTarget);
-  };
+    const rawRole = String(
+      userProfile?.user_role ||
+        stored?.user_role ||
+        localStorage.getItem("userRole") ||
+        userRole ||
+        ""
+    )
+      .trim()
+      .toUpperCase();
 
-  const handleOpenUserMenu = (event) => {
-    setAnchorElUser(event.currentTarget);
-  };
-
-  const openFontMenu = Boolean(anchorElFont);
-  const openUserMenu = Boolean(anchorElUser);
+    return rawRole === "SUPER_ADMIN" || rawRole === "ADMIN" || rawRole.includes("ADMIN");
+  })();
 
   const getUserInitial = () => {
     if (userProfile?.name && userProfile.name.trim()) {
@@ -114,545 +150,359 @@ const Header = ({
     return "U";
   };
 
-  const handleCreateNewSession = async () => {
-    setCurrentSessionData();
-    setActiveIndex(null);
-    setCurrentSessionId(null);
-    setmessages([]);
+  const handleCreateNewSession = () => {
+    setCurrentSessionData?.(null);
+    setActiveIndex?.(null);
+    setCurrentSessionId?.(null);
+    setmessages?.([]);
+    navigate("/");
   };
 
   return (
     <>
       {/* ================= HEADER ================= */}
-      <AppBar
-        position="static"
-        elevation={0}
-        sx={{
-          height: "10vh",
-          backgroundColor: "background.header",
-          justifyContent: "center",
-        }}
-      >
-        <Toolbar
-          sx={{
-            height: "100%",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            px: { xs: 1, sm: 3, md: 4 },
-          }}
-        >
-          {/* ================= LEFT ================= */}
-          <Box
-            display="flex"
-            alignItems="center"
-            gap={{ xs: 1.5, sm: 2, md: 3.5 }}
+      <header className="h-full w-full bg-bg-header flex items-center justify-between px-3 sm:px-6 md:px-8 border-b border-border-theme select-none">
+        {/* ================= LEFT ================= */}
+        <div className="flex items-center gap-3 md:gap-5">
+          {/* Mobile menu toggle */}
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(true)}
+            className="md:hidden p-1.5 rounded-lg text-text-primary hover:bg-bg-paper/40 transition-colors"
+            aria-label="Open navigation menu"
           >
-            {(isMobile || isTablet) && (
-              <IconButton onClick={() => setSidebarOpen(true)}>
-                <MenuIcon sx={{ color: "text.primary" }} />
-              </IconButton>
-            )}
+            <Menu className="w-6 h-6" />
+          </button>
 
-            <Box
-              component="img"
+          {/* Logo Brand */}
+          <div
+            onClick={() => {
+              if (isAdminRoute) navigate("/");
+            }}
+            className={`flex items-center gap-2 sm:gap-3 ${isAdminRoute ? "cursor-pointer" : "cursor-default"}`}
+          >
+            <img
               src={mode === "dark" ? DolphinIconW : DolphinIconB}
               alt="Dolphin"
-              sx={{
-                width: { xs: 40, sm: 34, md: 60 },
-                height: { xs: 40, sm: 34, md: 60 },
-              }}
+              className="w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 object-contain"
             />
-
-            <Box
-              component="img"
+            <img
               src={mode === "dark" ? ShipIconW : ShipIconB}
               alt="Ship"
-              sx={{
-                width: { xs: 30, sm: 34, md: 40 },
-                height: { xs: 30, sm: 34, md: 40 },
-              }}
+              className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 object-contain"
             />
+          </div>
 
-            {/* Desktop title (UNCHANGED) */}
-            {!isMobile && !isTablet && (
-              <Box sx={{ display: "flex", gap: 1.5 }}>
-                <Typography
-                  variant="h2"
-                  sx={{
-                    // fontSize: 22,
-                    fontWeight: 700,
-                    color: "text.heading1",
-                  }}
-                >
-                  Dolphin
-                </Typography>
-                <Typography
-                  variant="h2"
-                  sx={{
-                    // fontSize: 22,
-                    fontWeight: 700,
-                    color: "text.heading1",
-                  }}
-                >
-                  |
-                </Typography>
-                <Typography
-                  variant="h2"
-                  sx={{
-                    // fontSize: 22,
-                    fontWeight: 700,
-                    color: "primary.main",
-                  }}
-                >
-                  AI
-                </Typography>
-              </Box>
-            )}
+          {/* Desktop Title */}
+          <div className="hidden md:flex items-center gap-2 text-xl font-bold">
+            <span className="text-text-primary">Dolphin</span>
+            <span className="text-text-primary">|</span>
+            <span className="text-primary">AI</span>
+          </div>
 
-            {/* Connection */}
-            <Box display="flex" alignItems="center" gap={1}>
-              <Box
-                sx={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  backgroundColor: "#22c55e",
-                }}
-              />
-              {!isMobile && (
-                <Typography variant="body2" color="text.secondary">
-                  Connected
-                </Typography>
-              )}
-            </Box>
-          </Box>
+          {/* Connection Status */}
+          <div className="flex items-center gap-1.5 ml-1">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="hidden sm:inline text-xs font-medium text-text-secondary">
+              Connected
+            </span>
+          </div>
+        </div>
 
-          {/* ================= RIGHT ================= */}
-          <Stack
-            direction="row"
-            spacing={{ xs: 0.5, sm: 1, md: 2 }}
-            alignItems="center"
-          >
-            {/* New Chat */}
-            <Button
+        {/* ================= RIGHT ================= */}
+        <div className="flex items-center gap-1.5 sm:gap-3">
+          {/* Action Button: New Chat on Chat Route */}
+          {!isAdminRoute && (
+            <button
+              type="button"
               disabled={disableNewChat}
               onClick={handleCreateNewSession}
-              variant="contained"
-              startIcon={!isMobile && <AddRoundedIcon />}
-              sx={{
-                backgroundColor: "background.light",
-                color: "text.primary",
-                textTransform: "none",
-                fontWeight: 600,
-                boxShadow: "none",
-                minWidth: isMobile ? 40 : "auto",
-                px: isMobile ? 1 : 2,
-                "&:hover": {
-                  backgroundColor: "background.light",
-                  boxShadow: "none",
-                },
-              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-bg-paper text-text-primary font-semibold text-sm shadow-sm hover:bg-bg-paper/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {!isMobile && "New Chat"}
-              {isMobile && <AddRoundedIcon />}
-            </Button>
+              <Plus className="w-4 h-4 text-primary" />
+              <span className="hidden sm:inline">New Chat</span>
+            </button>
+          )}
 
-            {/* Settings */}
-            <Button
-              startIcon={
-                <SettingsOutlinedIcon sx={{ color: "text.primary" }} />
-              }
-              onClick={handleOpenFontMenu}
-              sx={{
-                textTransform: "none",
-                color: "text.primary",
-                minWidth: isMobile || isTablet ? 40 : "auto",
-                px: isMobile || isTablet ? 1 : 2,
+          {/* User Profile Avatar / Menu Button */}
+          <div className="relative">
+            <button
+              ref={userButtonRef}
+              id="user-profile-button"
+              type="button"
+              onClick={() => {
+                setPopoverView("profile");
+                setOpenUserMenu(!openUserMenu);
               }}
+              className={`p-1 rounded-full transition-colors ${openUserMenu ? "bg-bg-paper" : "hover:bg-bg-paper/50"}`}
+              title="User Profile"
             >
-              {!isMobile && !isTablet && "Settings"}
-            </Button>
+              <div className="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                {getUserInitial()}
+              </div>
+            </button>
 
-            {/* User Profile Logo Button (Left side of Logout button) */}
-            <Tooltip title="User Info">
-              <IconButton
-                id="user-profile-button"
-                onClick={handleOpenUserMenu}
-                sx={{
-                  p: 0.5,
-                  borderRadius: "50%",
-                  backgroundColor: openUserMenu ? "background.light" : "transparent",
-                  "&:hover": {
-                    backgroundColor: "background.light",
-                  },
-                }}
+            {/* ================= USER INFO & SETTINGS POPOVER ================= */}
+            {openUserMenu && (
+              <div
+                ref={popoverRef}
+                id="user-info-popover"
+                className="absolute right-0 mt-2 w-72 sm:w-80 p-4 rounded-2xl bg-bg-paper border border-border-theme shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150"
               >
-                <Avatar
-                  sx={{
-                    width: 32,
-                    height: 32,
-                    bgcolor: "primary.main",
-                    color: "#ffffff",
-                    cursor: "pointer",
-                  }}
-                >
-                  <PersonOutlineOutlinedIcon sx={{ fontSize: 20 }} />
-                </Avatar>
-              </IconButton>
-            </Tooltip>
+                {popoverView === "settings" ? (
+                  /* ================= SETTINGS VIEW ================= */
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <button
+                        type="button"
+                        onClick={() => setPopoverView("profile")}
+                        className="p-1 rounded-lg hover:bg-bg-default text-text-primary transition-colors"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      <h3 className="text-sm font-bold text-text-primary m-0">Settings</h3>
+                    </div>
 
-            {/* Logout */}
-            <Button
-              startIcon={<LogoutOutlinedIcon sx={{ color: "text.primary" }} />}
-              onClick={onLogout}
-              sx={{
-                textTransform: "none",
-                color: "text.primary",
-                minWidth: isMobile || isTablet ? 40 : "auto",
-                px: isMobile || isTablet ? 1 : 2,
-              }}
-            >
-              {!isMobile && !isTablet && "Logout"}
-            </Button>
-          </Stack>
-        </Toolbar>
-      </AppBar>
+                    {/* Font Size */}
+                    <span className="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">
+                      Font Size
+                    </span>
+                    <div className="px-1 mb-4">
+                      <div className="flex justify-between text-xs text-text-secondary mb-1">
+                        <span className={fontLevel === 0 ? "font-bold text-primary" : ""}>Small</span>
+                        <span className={fontLevel === 1 ? "font-bold text-primary" : ""}>Medium</span>
+                        <span className={fontLevel === 2 ? "font-bold text-primary" : ""}>Large</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="2"
+                        step="1"
+                        value={fontLevel}
+                        onChange={(e) => setFontLevel(Number(e.target.value))}
+                        className="w-full h-1.5 bg-border-theme rounded-lg appearance-none cursor-pointer accent-primary"
+                      />
+                    </div>
 
-      {/* ================= SIDEBAR DRAWER ================= */}
-      <Drawer
-        anchor="left"
-        open={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-        ModalProps={{ keepMounted: true }} // better mobile performance
-        PaperProps={{
-          sx: {
-            width: 280,
-            backgroundColor: "background.default",
-            height: "100vh",
-          },
-        }}
-      >
-        {/* 🔹 YOUR EXISTING CHAT SIDEBAR COMPONENT */}
-        <ChatSidebar
-          onClose={() => setSidebarOpen(false)}
-          sessionData={sessionData}
-          loading={loading}
-          activeIndex={activeIndex}
-          setActiveIndex={setActiveIndex}
-          sidebarOpen={sidebarOpen}
-          setSidebarOpen={setSidebarOpen}
-          selectSession={selectSession}
-          fetchSessions={fetchSessions}
-        />
-      </Drawer>
+                    <div className="h-px w-full bg-border-theme my-3" />
 
-      {/* ================= FONT POPOVER ================= */}
-      <Popover
-        open={openFontMenu}
-        anchorEl={anchorElFont}
-        onClose={() => setAnchorElFont(null)}
-        anchorOrigin={{
-          vertical: "bottom",
-          horizontal: "right",
-        }}
-        transformOrigin={{
-          vertical: "top",
-          horizontal: "right",
-        }}
-        PaperProps={{
-          sx: {
-            py: 2,
-            px: 5,
-            width: 400,
-            borderRadius: 5,
-            mt: 3,
-            boxShadow: "none",
-            border: "1px solid",
-            borderColor: "primary.main",
-            backgroundColor: "background.paper",
-          },
-        }}
-      >
-        <Typography variant="h4" fontWeight={600} mb={1}>
-          Font
-        </Typography>
+                    {/* Theme Mode */}
+                    <span className="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">
+                      Theme
+                    </span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => mode !== "light" && toggleMode()}
+                        className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold border transition-colors ${
+                          mode === "light"
+                            ? "bg-primary text-white border-primary"
+                            : "border-border-theme text-text-primary hover:bg-bg-default"
+                        }`}
+                      >
+                        <Sun className="w-4 h-4" />
+                        Light
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => mode !== "dark" && toggleMode()}
+                        className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold border transition-colors ${
+                          mode === "dark"
+                            ? "bg-primary text-white border-primary"
+                            : "border-border-theme text-text-primary hover:bg-bg-default"
+                        }`}
+                      >
+                        <Moon className="w-4 h-4" />
+                        Dark
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* ================= PROFILE CARD VIEW ================= */
+                  <div>
+                    {/* Top Bar: Label + Settings Button */}
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-[0.68rem] font-bold text-text-secondary uppercase tracking-wider">
+                        User Profile
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPopoverView("settings")}
+                        className="p-1.5 rounded-lg border border-border-theme text-text-secondary hover:text-primary hover:border-primary hover:bg-bg-default transition-colors"
+                        title="Settings"
+                      >
+                        <Settings className="w-4 h-4" />
+                      </button>
+                    </div>
 
-        <Slider
-          value={fontLevel}
-          min={0}
-          max={2}
-          step={1}
-          marks={[
-            { value: 0, label: "Small" },
-            { value: 1, label: "Medium" },
-            { value: 2, label: "Large" },
-          ]}
-          onChange={(_, value) => setFontLevel(value)}
-        />
+                    {/* User ID Card */}
+                    <div className="p-3.5 rounded-xl bg-primary/5 dark:bg-white/5 border border-primary/15 dark:border-white/10 mb-3">
+                      {/* Avatar + Main Identity */}
+                      <div className="flex items-center gap-3 mb-2.5">
+                        <div className="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center font-bold text-base shadow-sm shrink-0">
+                          {getUserInitial()}
+                        </div>
+                        <div className="overflow-hidden flex-1 min-w-0">
+                          <p className="text-sm font-bold text-text-primary truncate m-0">
+                            {userProfile?.name || "Mariner"}
+                          </p>
+                          <p className="text-xs text-text-secondary truncate m-0">
+                            {userProfile?.email || "No email"}
+                          </p>
+                          {userProfile?.user_type && (
+                            <span className="inline-block mt-1 px-2 py-0.5 text-[0.65rem] font-bold uppercase rounded bg-primary text-white">
+                              {userProfile.user_type}
+                            </span>
+                          )}
+                        </div>
+                      </div>
 
-        <Stack direction="row" justifyContent="space-between" mt={1}>
-          <Stack alignItems="center">
-            <TextFieldsIcon fontSize="small" />
-            <Typography variant="caption">Small</Typography>
-          </Stack>
-          <Stack alignItems="center">
-            <TextFieldsIcon />
-            <Typography variant="caption">Medium</Typography>
-          </Stack>
-          <Stack alignItems="center">
-            <TextFieldsIcon fontSize="large" />
-            <Typography variant="caption">Large</Typography>
-          </Stack>
-        </Stack>
+                      {/* Details Grid */}
+                      {(userProfile?.company_name || userProfile?.ship_name || userProfile?.ship_type) && (
+                        <div className="pt-2 border-t border-dashed border-border-theme space-y-1.5 text-xs">
+                          {userProfile?.company_name && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-text-secondary">Company</span>
+                              <span className="font-semibold text-text-primary truncate max-w-[60%] text-right">
+                                {userProfile.company_name}
+                              </span>
+                            </div>
+                          )}
+                          {userProfile?.ship_name && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-text-secondary">Ship Name</span>
+                              <span className="font-semibold text-text-primary truncate max-w-[60%] text-right">
+                                {userProfile.ship_name}
+                              </span>
+                            </div>
+                          )}
+                          {userProfile?.ship_type && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-text-secondary">Ship Type</span>
+                              <span className="font-semibold text-text-primary truncate max-w-[60%] text-right">
+                                {userProfile.ship_type}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
 
-        <Divider sx={{ my: 1 }} />
+                    {/* Feedback Link */}
+                    <button
+                      id="feedback-dashboard-link-button"
+                      type="button"
+                      onClick={() => {
+                        setOpenUserMenu(false);
+                        if (isFeedbackRoute) {
+                          navigate("/");
+                        } else {
+                          navigate("/feedback");
+                        }
+                      }}
+                      className="w-full flex items-center justify-center gap-2 mb-2 py-2 px-3 rounded-lg border border-primary text-primary font-bold text-xs hover:bg-primary/10 transition-colors"
+                    >
+                      {isFeedbackRoute ? (
+                        <>
+                          <ArrowLeft className="w-4 h-4" />
+                          Back to Chat
+                        </>
+                      ) : (
+                        <>
+                          <ThumbsUp className="w-4 h-4" />
+                          Feedback Dashboard →
+                        </>
+                      )}
+                    </button>
 
-        {/* Theme section */}
-        <Typography variant="h4" fontWeight={600} mb={2}>
-          Theme
-        </Typography>
+                    {/* Admin Link */}
+                    {(isAdmin || isAdminRoute) && (
+                      <button
+                        id="admin-panel-link-button"
+                        type="button"
+                        onClick={() => {
+                          setOpenUserMenu(false);
+                          if (isAdminRoute) {
+                            navigate("/");
+                          } else {
+                            navigate("/admin/chat-history");
+                          }
+                        }}
+                        className="w-full flex items-center justify-center gap-2 mb-2 py-2 px-3 rounded-lg bg-primary text-white font-bold text-xs shadow hover:bg-primary-hover transition-colors"
+                      >
+                        {isAdminRoute ? (
+                          <>
+                            <ArrowLeft className="w-4 h-4" />
+                            Back to Chat
+                          </>
+                        ) : (
+                          <>
+                            <Shield className="w-4 h-4" />
+                            Go to Admin Panel →
+                          </>
+                        )}
+                      </button>
+                    )}
 
-        <Stack direction="row" spacing={1}>
-          <Button
-            fullWidth
-            variant={mode === "dark"?"outlined":"contained"}
-            startIcon={<LightModeIcon />}
-            size="medium"
-            sx={{
-              borderRadius: 3,
-              // py: 1.5,
-              textTransform: "none",
-              fontWeight: 600,
-            }}
-            onClick={toggleMode}
+                    {/* Logout Button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenUserMenu(false);
+                        onLogout();
+                      }}
+                      className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-rose-600 text-white font-semibold text-xs shadow hover:bg-rose-700 transition-colors"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Logout
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Quick Logout Button */}
+          <button
+            type="button"
+            onClick={onLogout}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-text-primary hover:text-rose-600 transition-colors text-sm font-semibold"
+            title="Logout"
           >
-            Light Mode
-          </Button>
+            <LogOut className="w-4 h-4" />
+            <span className="hidden md:inline">Logout</span>
+          </button>
+        </div>
+      </header>
 
-          <Button
-            fullWidth
-            variant={mode === "dark"?"contained":"outlined"}
-            startIcon={<DarkModeIcon />}
-             size="medium"
-            sx={{
-              borderRadius: 3,
-              // py: 1.5,
-              textTransform: "none",
-              fontWeight: 600,
-            }}
-            onClick={toggleMode}
-          >
-            Dark Mode
-          </Button>
-        </Stack>
-      </Popover>
+      {/* ================= MOBILE SIDEBAR DRAWER ================= */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-50 md:hidden flex">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/50 transition-opacity"
+            onClick={() => setSidebarOpen(false)}
+          />
 
-      {/* ================= USER INFO POPOVER ================= */}
-      <Popover
-        id="user-info-popover"
-        open={openUserMenu}
-        anchorEl={anchorElUser}
-        onClose={() => setAnchorElUser(null)}
-        anchorOrigin={{
-          vertical: "bottom",
-          horizontal: "right",
-        }}
-        transformOrigin={{
-          vertical: "top",
-          horizontal: "right",
-        }}
-        PaperProps={{
-          sx: {
-            py: 2.5,
-            px: 3,
-            width: { xs: 290, sm: 350 },
-            borderRadius: 4,
-            mt: 1.5,
-            boxShadow: "0 10px 30px rgba(0, 0, 0, 0.18)",
-            border: "1px solid",
-            borderColor: "primary.main",
-            backgroundColor: "background.paper",
-          },
-        }}
-      >
-        {/* User Card Header */}
-        <Stack direction="row" spacing={2} alignItems="center" mb={1.5}>
-          <Avatar
-            sx={{
-              width: 50,
-              height: 50,
-              bgcolor: "primary.main",
-              color: "#ffffff",
-              fontSize: "1.3rem",
-              fontWeight: 700,
-              boxShadow: "0 4px 10px rgba(17, 135, 214, 0.35)",
-            }}
-          >
-            {getUserInitial()}
-          </Avatar>
-          <Box sx={{ overflow: "hidden", flex: 1 }}>
-            <Typography
-              variant="h4"
-              fontWeight={700}
-              sx={{
-                color: "text.primary",
-                fontSize: "1.1rem",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {userProfile?.name || "Mariner"}
-            </Typography>
-            <Typography
-              variant="body2"
-              sx={{
-                color: "text.secondary",
-                fontSize: "0.82rem",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {userProfile?.email || "No email"}
-            </Typography>
-            {(userProfile?.role || userProfile?.user_type) && (
-              <Chip
-                label={userProfile?.role || userProfile?.user_type}
-                size="small"
-                sx={{
-                  mt: 0.5,
-                  height: 20,
-                  fontSize: "0.7rem",
-                  fontWeight: 600,
-                  bgcolor: "primary.main",
-                  color: "#ffffff",
-                  borderRadius: 1,
-                }}
+          {/* Drawer Paper */}
+          <div className="relative w-72 max-w-[85vw] h-full bg-bg-default shadow-2xl z-10 overflow-y-auto">
+            {drawerContent || (
+              <ChatSidebar
+                onClose={() => setSidebarOpen(false)}
+                sessionData={sessionData}
+                loading={loading}
+                activeIndex={activeIndex}
+                setActiveIndex={setActiveIndex}
+                sidebarOpen={sidebarOpen}
+                setSidebarOpen={setSidebarOpen}
+                selectSession={selectSession}
+                fetchSessions={fetchSessions}
+                currentSessionId={currentSessionId}
               />
             )}
-          </Box>
-        </Stack>
-
-        <Divider sx={{ my: 1.5 }} />
-
-        {/* User Details list */}
-        <Stack spacing={1.2} my={1.5}>
-          {/* User ID / Username */}
-          {(userProfile?.user_name || userProfile?.user_id || userId) && (
-            <Stack direction="row" spacing={1.5} alignItems="center">
-              <BadgeOutlinedIcon fontSize="small" sx={{ color: "primary.main" }} />
-              <Box sx={{ overflow: "hidden" }}>
-                <Typography variant="caption" color="text.secondary" display="block">
-                  User ID / Login ID
-                </Typography>
-                <Typography variant="body2" fontWeight={600} color="text.primary">
-                  {userProfile?.user_name || userProfile?.user_id || userId}
-                </Typography>
-              </Box>
-            </Stack>
-          )}
-
-          {/* Email */}
-          {userProfile?.email && (
-            <Stack direction="row" spacing={1.5} alignItems="center">
-              <MailOutlineRoundedIcon fontSize="small" sx={{ color: "primary.main" }} />
-              <Box sx={{ overflow: "hidden" }}>
-                <Typography variant="caption" color="text.secondary" display="block">
-                  Email
-                </Typography>
-                <Typography variant="body2" fontWeight={600} color="text.primary">
-                  {userProfile.email}
-                </Typography>
-              </Box>
-            </Stack>
-          )}
-
-          {/* Company */}
-          {userProfile?.company_name && (
-            <Stack direction="row" spacing={1.5} alignItems="center">
-              <BusinessOutlinedIcon fontSize="small" sx={{ color: "primary.main" }} />
-              <Box sx={{ overflow: "hidden" }}>
-                <Typography variant="caption" color="text.secondary" display="block">
-                  Company
-                </Typography>
-                <Typography variant="body2" fontWeight={600} color="text.primary">
-                  {userProfile.company_name}
-                </Typography>
-              </Box>
-            </Stack>
-          )}
-
-          {/* Ship Name */}
-          {userProfile?.ship_name && (
-            <Stack direction="row" spacing={1.5} alignItems="center">
-              <DirectionsBoatOutlinedIcon fontSize="small" sx={{ color: "primary.main" }} />
-              <Box sx={{ overflow: "hidden" }}>
-                <Typography variant="caption" color="text.secondary" display="block">
-                  Ship Name
-                </Typography>
-                <Typography variant="body2" fontWeight={600} color="text.primary">
-                  {userProfile.ship_name}
-                </Typography>
-              </Box>
-            </Stack>
-          )}
-
-          {/* Ship Type */}
-          {userProfile?.ship_type && (
-            <Stack direction="row" spacing={1.5} alignItems="center">
-              <DirectionsBoatOutlinedIcon fontSize="small" sx={{ color: "primary.main" }} />
-              <Box sx={{ overflow: "hidden" }}>
-                <Typography variant="caption" color="text.secondary" display="block">
-                  Ship Type
-                </Typography>
-                <Typography variant="body2" fontWeight={600} color="text.primary">
-                  {userProfile.ship_type}
-                </Typography>
-              </Box>
-            </Stack>
-          )}
-        </Stack>
-
-        <Divider sx={{ my: 1.5 }} />
-
-        {/* Popover Actions */}
-        <Stack direction="row" spacing={1} justifyContent="flex-end" mt={1.5}>
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => setAnchorElUser(null)}
-            sx={{
-              borderRadius: 2,
-              textTransform: "none",
-              fontWeight: 600,
-              fontSize: "0.8rem",
-            }}
-          >
-            Close
-          </Button>
-          <Button
-            size="small"
-            variant="contained"
-            color="error"
-            startIcon={<LogoutOutlinedIcon fontSize="small" />}
-            onClick={() => {
-              setAnchorElUser(null);
-              onLogout();
-            }}
-            sx={{
-              borderRadius: 2,
-              textTransform: "none",
-              fontWeight: 600,
-              fontSize: "0.8rem",
-              boxShadow: "none",
-            }}
-          >
-            Logout
-          </Button>
-        </Stack>
-      </Popover>
+          </div>
+        </div>
+      )}
     </>
   );
 };

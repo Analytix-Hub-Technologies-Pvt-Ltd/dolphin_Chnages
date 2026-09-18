@@ -1,137 +1,54 @@
-import { Box, Typography } from "@mui/material";
 import React from "react";
 import DolphinIconB from "../../assets/images/dolphin_b.png";
 import DolphinIconW from "../../assets/images/dolphin_w.png";
 import ShipIconB from "../../assets/images/ship.png";
 import ShipIconW from "../../assets/images/ship_w.png";
 import { useThemeMode } from "../../context/ThemeModeContext";
-import {
-  getWelcomeMaxWidth,
-  getDescriptionWidth,
-  getDescriptionGap,
-} from "../../theme/layoutScale";
 
 const WelcomeChatScreen = () => {
-  const { mode, fontLevel } = useThemeMode();
+  const { mode } = useThemeMode();
+
   return (
-    <Box
-      sx={{
-        flex: 1,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <Box
-        sx={{
-          backgroundColor: "background.paper",
-          borderRadius: 8,
-          px: { xs: 1,sm:4, md: 5 },
-          py: { xs: 1, sm:3,md: 3 },
-          // minWidth:500,
-          maxWidth: { xs: "90%", sm:"60%", md: getWelcomeMaxWidth(500, fontLevel) },
-          textAlign: "center",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: getDescriptionGap(fontLevel),
-          border: "1px solid",
-          borderColor: "primary.main",
-        }}
-      >
+    <div className="flex-1 flex items-center justify-center p-4 select-none">
+      <div className="w-full max-w-[420px] bg-bg-paper rounded-2xl sm:rounded-3xl px-5 sm:px-7 py-5 sm:py-6 text-center flex flex-col items-center gap-2.5 sm:gap-3 border border-primary/25 dark:border-primary/35 shadow-md hover:shadow-lg hover:border-primary/40 transition-all duration-200">
         {/* Icons */}
-        <Box
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 2,
-          }}
-        >
-          <Box
-            component="img"
+        <div className="flex items-center justify-center gap-2.5">
+          <img
             src={mode === "dark" ? DolphinIconW : DolphinIconB}
             alt="Dolphin"
-            sx={{ width: 60, height: 60 }}
+            className="w-9 h-9 sm:w-10 sm:h-10 object-contain drop-shadow-xs"
           />
-          <Box
-            component="img"
+          <img
             src={mode === "dark" ? ShipIconW : ShipIconB}
-            alt="Cap"
-            sx={{ width: 40, height: 40 }}
+            alt="Ship"
+            className="w-6 h-6 sm:w-7 sm:h-7 object-contain drop-shadow-xs"
           />
-        </Box>
+        </div>
 
         {/* Title */}
-        <Box
-          sx={{
-            display: "flex",
-            gap: 1.5,
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
-          <Typography
-            variant="h3"
-            sx={{ fontWeight: 700, color: "text.heading1" }}
-          >
-            Dolphin
-          </Typography>
-          <Typography
-            variant="h3"
-            sx={{ fontWeight: 700, color: "text.heading1" }}
-          >
-            |
-          </Typography>
-          <Typography
-            variant="h3"
-            sx={{ fontWeight: 700, color: "primary.main" }}
-          >
-            AI
-          </Typography>
-        </Box>
+        <div className="flex items-center justify-center gap-1.5 text-base sm:text-lg font-bold tracking-tight">
+          <span className="text-text-primary">Dolphin</span>
+          <span className="text-text-secondary opacity-60 font-light">|</span>
+          <span className="text-primary">AI</span>
+        </div>
 
-        {/* Subtitle */}
-        <Typography
-          variant="signupPageh2"
-          sx={{
-            fontWeight: 400,
-            color: "text.heading1",
-          }}
-        >
+        {/* Subtitle with gradient */}
+        <h2 className="text-base sm:text-lg font-medium text-text-primary m-0">
           How can I{" "}
-          <Box
-            component="span"
-            sx={(theme) => ({
-              background: `linear-gradient(90deg, ${theme.palette.text.heading1}, ${theme.palette.text.heading2})`,
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              fontWeight: 400,
-              paddingLeft: "5px", // 👈 clears the h
-              marginLeft: "-5px",
-            })}
-          >
+          <span className="bg-linear-to-r from-primary to-sky-400 bg-clip-text text-transparent font-semibold">
             help
-          </Box>{" "}
+          </span>{" "}
           you today?
-        </Typography>
+        </h2>
 
-        {/* Description */}
-        <Typography
-          variant="h6"
-          sx={{
-            fontWeight: 500,
-            width: { xs: "96%", md: getDescriptionWidth(fontLevel) },
-            color: "text.smallheading",
-            lineHeight: 1.4,
-          }}
-        >
+        {/* Description - content unchanged */}
+        <p className="text-xs sm:text-[13px] font-normal text-text-secondary leading-relaxed m-0 max-w-sm">
           You can ask me anything. I can provide summaries, key takeaways and
           knowledge checks, as well as help you locate specific videos from our
           library and recommend training courses to enhance your skills.
-        </Typography>
-      </Box>
-    </Box>
+        </p>
+      </div>
+    </div>
   );
 };
 

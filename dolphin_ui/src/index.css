@@ -1,4 +1,57 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-poppins: 'Poppins', sans-serif;
+
+  --color-primary: var(--theme-primary);
+  --color-primary-hover: var(--theme-primary-hover);
+
+  --color-bg-default: var(--theme-bg-default);
+  --color-bg-paper: var(--theme-bg-paper);
+  --color-bg-header: var(--theme-bg-header);
+  --color-bg-sidebar: var(--theme-bg-sidebar);
+  --color-bg-lightblue1: var(--theme-bg-lightblue1);
+  --color-bg-light1: var(--theme-bg-light1);
+  --color-bg-chatbackground: var(--theme-bg-chatbackground);
+  --color-bg-grey: var(--theme-bg-grey);
+
+  --color-text-main: var(--theme-primary);
+  --color-text-primary: var(--theme-text-primary);
+  --color-text-secondary: var(--theme-text-secondary);
+  --color-text-placeholder: var(--theme-text-placeholder);
+  --color-text-placeholder1: var(--theme-text-placeholder1);
+  --color-text-smallheading: var(--theme-text-smallheading);
+  --color-text-caption: var(--theme-text-caption);
+  --color-text-menu: var(--theme-text-menu);
+
+  --color-border-theme: var(--theme-border);
+}
+
 :root {
+  --theme-primary: #106BA3;
+  --theme-primary-hover: #0c5380;
+  --theme-bg-default: #ffffff;
+  --theme-bg-paper: #ffffff;
+  --theme-bg-header: #AFE0FF;
+  --theme-bg-sidebar: #FFFFFF;
+  --theme-bg-lightblue1: #DCF6FF;
+  --theme-bg-light1: #edfaff;
+  --theme-bg-chatbackground: #EBEBEB;
+  --theme-bg-grey: #E9E9E9;
+
+  --theme-text-primary: #0f1c2e;
+  --theme-text-secondary: #5c7080;
+  --theme-text-placeholder: #464646;
+  --theme-text-placeholder1: #A0A7BB;
+  --theme-text-smallheading: #464646;
+  --theme-text-caption: #a1abad;
+  --theme-text-menu: #464646;
+
+  --theme-border: #d8e2ec;
+
+  /* Legacy CSS vars */
   --marine-blue: #0c3b5d;
   --marine-blue2: #106ba3;
   --marine-deep: #062842;
@@ -14,6 +67,33 @@
   --shadow: 0 14px 40px rgba(0, 40, 73, 0.18);
 }
 
+.dark {
+  --theme-primary: #1cb0f6;
+  --theme-primary-hover: #38bdf8;
+  --theme-bg-default: #0f1c2e;
+  --theme-bg-paper: #062842;
+  --theme-bg-header: #031623;
+  --theme-bg-sidebar: #031623;
+  --theme-bg-lightblue1: #23333E;
+  --theme-bg-light1: #000d13;
+  --theme-bg-chatbackground: #031623;
+  --theme-bg-grey: #1a2a38;
+
+  --theme-text-primary: #e8f1fb;
+  --theme-text-secondary: #9fb3c8;
+  --theme-text-placeholder: #A9A9A9;
+  --theme-text-placeholder1: #A9A9A9;
+  --theme-text-smallheading: #A6A6A6;
+  --theme-text-caption: #E9E9E9;
+  --theme-text-menu: #ffffff;
+
+  --theme-border: #1e3a52;
+
+  --text: #e8f1fb;
+  --muted: #9fb3c8;
+  --border: #1e3a52;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -21,6 +101,31 @@
 body {
   margin: 0;
   font-family: 'Poppins', sans-serif;
+  color: var(--text);
+  background-color: var(--theme-bg-default);
+}
+
+/* Scrollbar styles matching MUI CssBaseline */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--theme-primary);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--theme-primary-hover);
+}
+*::-webkit-scrollbar-button {
+  display: none;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--theme-primary) transparent;
 }
 
 h1, h2, h4, h5, h6 {
@@ -69,12 +174,14 @@ p {
 /* Markdown Tables */
 table {
   width: 100%;
+  min-width: 100%;
   border-collapse: collapse;
-  margin: 1rem 0;
+  margin: 0.75rem 0;
   font-size: 0.92rem;
   border-radius: 6px;
   overflow: hidden;
   border: 1px solid var(--border);
+  table-layout: auto;
 }
 
 thead {
@@ -170,3 +277,69 @@ pre code {
   background: transparent;
   padding: 0;
 }
+
+@keyframes dolphinWaveFloat {
+  0% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-2.5px) rotate(-7deg);
+  }
+  50% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  75% {
+    transform: translateY(2.5px) rotate(7deg);
+  }
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+}
+
+.animate-dolphin-wave {
+  animation: dolphinWaveFloat 2.2s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  display: inline-block;
+  will-change: transform;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ── Topic Citation Badge ── */
+.topic-citation {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background-color: var(--theme-primary);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  cursor: pointer;
+  margin: 0 3px;
+  vertical-align: middle;
+  line-height: 1;
+  transition: transform 0.18s ease, background-color 0.18s ease;
+  user-select: none;
+}
+
+.topic-citation:hover {
+  transform: scale(1.25);
+  background-color: var(--theme-primary-hover);
+}
+
+

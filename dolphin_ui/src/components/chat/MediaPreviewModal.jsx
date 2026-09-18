@@ -1,8 +1,5 @@
-import { Dialog, DialogContent, IconButton, Box, Stack } from "@mui/material";
-import CloseIcon from "@mui/icons-material/Close";
-import FullscreenIcon from "@mui/icons-material/Fullscreen";
-import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
 import { useEffect, useRef, useState } from "react";
+import { X, Maximize, Minimize } from "lucide-react";
 import SecurePdfViewer from "./SecurePdfViewer";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -63,113 +60,92 @@ const MediaPreviewModal = ({ open, onClose, type, src }) => {
 
   const toggleFullscreen = () => setIsFullscreen((p) => !p);
 
+  if (!open) return null;
+
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      fullScreen={isFullscreen}
-      maxWidth="md"
-      fullWidth
-      PaperProps={{
-        sx: {
-          backgroundColor: "black",
-          userSelect: "none",
-          overflow: "hidden", // 🚫 no scroll in modal
-        },
+    <div
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs transition-opacity duration-200 ${
+        isFullscreen ? "p-0" : "p-4"
+      }`}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
       }}
     >
-      {/* Top Right Controls */}
-      <Stack
-        direction="row"
-        spacing={1}
-        sx={{
-          position: "absolute",
-          top: 8,
-          right: 8,
-          zIndex: 10,
-        }}
+      <div
+        className={`relative bg-black select-none overflow-hidden transition-all duration-200 ${
+          isFullscreen
+            ? "w-screen h-screen max-w-none rounded-none"
+            : "w-full max-w-3xl rounded-xl shadow-2xl"
+        }`}
       >
-        {(type === "image" || type === "pdf") && (
-          <IconButton
-            onClick={toggleFullscreen}
-            sx={{
-              bgcolor: "black",
-              color: "white",
-              "&:hover": {
-                bgcolor: "black",
-              },
-            }}
+        {/* Top Right Controls */}
+        <div className="absolute top-2.5 right-2.5 z-20 flex items-center gap-1.5">
+          {(type === "image" || type === "pdf") && (
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+              className="p-1.5 rounded-full bg-black/70 hover:bg-black/95 text-white/85 hover:text-white transition-colors cursor-pointer"
+            >
+              {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="p-1.5 rounded-full bg-black/70 hover:bg-black/95 text-white/85 hover:text-white transition-colors cursor-pointer"
           >
-            {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
-          </IconButton>
-        )}
+            <X className="w-5 h-5" />
+          </button>
+        </div>
 
-        <IconButton
-          onClick={onClose}
-          sx={{
-            bgcolor: "black",
-            color: "white",
-            "&:hover": {
-              bgcolor: "black",
-            },
-          }}
-        >
-          <CloseIcon />
-        </IconButton>
-      </Stack>
-
-      <DialogContent
-        sx={{
-          p: 0,
-          height: isFullscreen ? "100vh" : 500,
-          overflow:
+        {/* Content Area */}
+        <div
+          className={`p-0 w-full ${
+            isFullscreen ? "h-screen" : "h-[500px]"
+          } ${
             isFullscreen && (type === "pdf" || type === "image")
-              ? "auto"
-              : "hidden",
-        }}
-      >
-        {/* 🎥 VIDEO */}
-        {type === "video" && (
-          <video
-            ref={videoRef}
-            src={src}
-            autoPlay
-            controls
-            controlsList="nodownload noplaybackrate"
-            disablePictureInPicture
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "contain", // ✅ handles all aspect ratios
-            }}
-          />
-        )}
+              ? "overflow-auto"
+              : "overflow-hidden"
+          }`}
+        >
+          {/* 🎥 VIDEO */}
+          {type === "video" && (
+            <video
+              ref={videoRef}
+              src={src}
+              autoPlay
+              controls
+              controlsList="nodownload noplaybackrate"
+              disablePictureInPicture
+              className="w-full h-full object-contain"
+            />
+          )}
 
-        {/* 🖼 IMAGE */}
-        {type === "image" && (
-          <Box
-            component="img"
-            src={src}
-            alt="Preview"
-            sx={{
-              width: "100%",
-              height: isFullscreen ? "auto" : "100%",
-              maxHeight: "100%",
-              objectFit: "contain",
-            }}
-          />
-        )}
+          {/* 🖼 IMAGE */}
+          {type === "image" && (
+            <img
+              src={src}
+              alt="Preview"
+              className={`w-full ${
+                isFullscreen ? "h-auto" : "h-full"
+              } max-h-full object-contain`}
+            />
+          )}
 
-        {/* 📄 PDF */}
-        {type === "pdf" && (
-          <SecurePdfViewer
-            src={src}
-            isFullscreen={isFullscreen}
-            onClose={onClose}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+          {/* 📄 PDF */}
+          {type === "pdf" && (
+            <SecurePdfViewer
+              src={src}
+              isFullscreen={isFullscreen}
+              onClose={onClose}
+            />
+          )}
+        </div>
+      </div>
+    </div>
   );
 };
 

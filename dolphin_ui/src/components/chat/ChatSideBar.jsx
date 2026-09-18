@@ -1,32 +1,13 @@
-import {
-  Box,
-  InputAdornment,
-  Stack,
-  TextField,
-  Typography,
-  Skeleton,
-  Avatar,
-  Button,
-  IconButton,
-  Tabs,
-  Tab,
-  Dialog,
-  DialogContent,
-  RadioGroup,
-  FormControlLabel,
-  Radio,
-} from "@mui/material";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { ChatItem } from "./ChatItem";
-import LightModeIcon from "@mui/icons-material/LightMode";
 import { useThemeMode } from "../../context/ThemeModeContext";
-import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 import { Message } from "../../assets/svgIcons/message";
 import { SaveIcon } from "../../assets/svgIcons/Saveicon";
 import { Search } from "../../assets/svgIcons/Search";
 import { FilterIcon } from "../../assets/svgIcons/FilterIcon";
-import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
+import { Check, X } from "lucide-react";
 import { getSidebarWidth } from "../../theme/layoutScale";
+import { saveSession } from "../../api/fetchApi";
 
 const ChatSideBar = ({
   sessionData,
@@ -37,367 +18,201 @@ const ChatSideBar = ({
   sidebarOpen,
   setSidebarOpen,
   fetchSessions,
+  currentSessionId,
 }) => {
-  const { mode } = useThemeMode();
-  const [valueTab, setValueTab] = useState(0);
-
+  const { mode, fontLevel } = useThemeMode();
+  const [valueTab, setValueTab] = useState(0); // 0 = My Chats, 1 = Saved Chats
   const [openFilter, setOpenFilter] = useState(false);
   const [filterValue, setFilterValue] = useState("pinned");
-
   const [searchTerm, setSearchTerm] = useState("");
 
-  const [userData, setUserData] = useState(() => {
-    try {
-      const stored = localStorage.getItem("userData");
-      return stored ? JSON.parse(stored) : null;
-    } catch (e) {
-      return null;
-    }
-  });
-
+  const isInitialMount = useRef(true);
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
     const delayDebounce = setTimeout(() => {
       fetchSessions(searchTerm);
-    }, 400); // debounce delay (ms)
+    }, 400);
 
     return () => clearTimeout(delayDebounce);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm]);
 
-  const tabStyle = (active) => ({
-    flex: "0 0 auto", // 👈 do NOT grow
-    width: "auto",
-    // textTransform: "none",
-    px: 0.6,
-    py: 0.5,
-    borderRadius: 2,
-    minHeight: 35,
-    fontWeight: 500,
-    color: active ? "text.white" : "text.primary",
-    bgcolor: active ? "primary.main" : "transparent",
-    transition: "all 0.25s ease",
+  const primaryColor = mode === "dark" ? "#1cb0f6" : "#106BA3";
 
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 0.5,
-
-    "&.Mui-selected": {
-      color: "text.white",
-    },
-  });
-
-  const { fontLevel } = useThemeMode();
   return (
-    <Box
-      sx={{
-        width: { xs: "100%", md: getSidebarWidth(fontLevel) },
-        p: 2,
-        display: "flex",
-        flexDirection: "column",
-        boxSizing: "border-box",
-        bgcolor: "background.sidebar",
-        height: { xs: "100vh", md: "90vh" },
+    <aside
+      style={{
+        width:
+          typeof window !== "undefined" && window.innerWidth >= 768
+            ? getSidebarWidth(fontLevel)
+            : "100%",
       }}
+      className="p-4 flex flex-col box-border bg-bg-sidebar h-full min-w-[240px] max-w-[340px] border-r border-border-theme select-none shrink-0"
     >
-      <Box
-        sx={{
-          width: "100%",
-          bgcolor: "background.lightblue1",
-          p: 0.3,
-          borderRadius: 2,
-          mb: 1.5,
-        }}
-      >
-        <Tabs
-          value={valueTab}
-          onChange={(_, newValue) => setValueTab(newValue)}
-          TabIndicatorProps={{ style: { display: "none" } }}
-          sx={{
-            minHeight: 45,
-            height: 40,
-            width: "100%",
-            "& .MuiTabs-flexContainer": {
-              gap: 0.5,
-              width: "100%",
-            },
-            "& .MuiTabs-list": {
-              display: "flex",
-              justifyContent: "space-around",
-              alignItems: "center",
-            },
-            "& .MuiTabs-scroller": {
-              display: "flex",
-              mx: 0.5,
-            },
-          }}
+      {/* Tab Switcher Pills */}
+      <div className="w-full bg-bg-lightblue1 p-1 rounded-xl mb-3 flex items-center justify-between gap-1">
+        <button
+          type="button"
+          onClick={() => setValueTab(0)}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
+            valueTab === 0
+              ? "bg-primary text-white shadow-xs"
+              : "text-text-primary hover:bg-white/40 dark:hover:bg-white/10"
+          }`}
         >
-          <Tab
-            icon={
-              <Message
-                size={18}
-                color={
-                  valueTab === 0
-                    ? "#ffffff"
-                    : mode === "dark"
-                    ? "#1cb0f6"
-                    : "#106BA3"
-                }
-              />
-            }
-            iconPosition="start"
-            label="My Chats"
-            sx={tabStyle(valueTab === 0)}
-          />
+          <Message size={16} color={valueTab === 0 ? "#ffffff" : primaryColor} />
+          <span>My Chats</span>
+        </button>
 
-          <Tab
-            icon={
-              <SaveIcon
-                size={18}
-                color={
-                  valueTab === 1
-                    ? "#ffffff"
-                    : mode === "dark"
-                    ? "#1cb0f6"
-                    : "#106BA3"
-                }
-              />
-            }
-            iconPosition="start"
-            label="Saved Chats"
-            sx={tabStyle(valueTab === 1)}
-          />
-        </Tabs>
-      </Box>
+        <button
+          type="button"
+          onClick={() => setValueTab(1)}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
+            valueTab === 1
+              ? "bg-primary text-white shadow-xs"
+              : "text-text-primary hover:bg-white/40 dark:hover:bg-white/10"
+          }`}
+        >
+          <SaveIcon size={16} color={valueTab === 1 ? "#ffffff" : primaryColor} />
+          <span>Saved Chats</span>
+        </button>
+      </div>
 
-      <Box
-        sx={{
-          display: "flex",
-          gap: 0.5,
-          border: "1",
-          mb: 2,
-          justifyContent: "space-between",
-        }}
-      >
-        <TextField
-          placeholder="Search here..."
-          size="small"
-          onChange={(e) => setSearchTerm(e.target.value)}
-          sx={{
-            bgcolor: "background.grey",
-            border: "none",
-            height: 35,
-            width: "85%",
-            borderRadius: 2,
-            "& .MuiOutlinedInput-root": {
-              height: 35,
-              borderRadius: 2,
-              fontSize: 10,
-              border: "none",
-              color: "text.placeholder",
-              "& fieldset": {
-                border: "none",
-              },
-              "&:hover fieldset": {
-                border: "none",
-              },
-              "&.Mui-focused fieldset": {
-                border: "none",
-              },
-            },
-            "& .MuiOutlinedInput-input": {
-              padding: "0 8px",
-            },
-          }}
-          slotProps={{
-            input: {
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search size={18} color={"#0f1c2e"} />
-                </InputAdornment>
-              ),
-            },
-          }}
-        />
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            height: 35,
-            width: 35,
-            borderRadius: 2,
-            bgcolor: "background.grey",
-            cursor: "pointer",
-          }}
+      {/* Search and Filter Row */}
+      <div className="flex items-center gap-2 mb-3">
+        <div className="relative flex-1 flex items-center">
+          <div className="absolute left-2.5 pointer-events-none">
+            <Search size={16} color="#0f1c2e" />
+          </div>
+          <input
+            type="text"
+            placeholder="Search here..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-bg-grey text-text-placeholder text-xs border-none focus:outline-hidden focus:ring-1 focus:ring-primary transition-all"
+          />
+        </div>
+
+        <button
+          type="button"
           onClick={() => {
-            setSidebarOpen(false);
+            setSidebarOpen?.(false);
             setOpenFilter(true);
           }}
+          className="w-8 h-8 rounded-xl bg-bg-grey flex items-center justify-center text-primary hover:opacity-80 transition-opacity shrink-0"
+          aria-label="Filter chats"
         >
-          <FilterIcon
-            size={20}
-            color={mode === "dark" ? "#1cb0f6" : "#106BA3"}
-          />
-        </Box>
-      </Box>
+          <FilterIcon size={18} color={primaryColor} />
+        </button>
+      </div>
 
-      <Typography variant={"body2"} sx={{ mb: 1, color: "text.smallheading" }}>
+      {/* Section Header */}
+      <span className="block text-xs font-semibold text-text-smallheading mb-2">
         Your Chats
-      </Typography>
+      </span>
 
-      <Box
-        sx={{
-          flex: 1,
-          overflowY: "auto",
-          display: "flex",
-          flexDirection: "column",
-          gap: 1,
-          pr: 0.5,
-        }}
-      >
+      {/* Chat List Scroll Area */}
+      <div className="flex-1 overflow-y-auto space-y-1 pr-1">
         {loading ? (
-          <Stack spacing={1}>
-            {[...Array(6)].map((_, index) => (
-              <Skeleton
-                key={index}
-                variant="rounded"
-                height={35}
-                animation="wave"
-                sx={{ borderRadius: 2 }}
+          <div className="space-y-2">
+            {[...Array(6)].map((_, i) => (
+              <div
+                key={i}
+                className="w-full h-9 rounded-xl bg-bg-grey/70 animate-pulse"
               />
             ))}
-          </Stack>
-        ) : sessionData && sessionData.length ? (
-          sessionData.map((chat, index) => (
-            <ChatItem
-              key={chat.session_id || index}
-              title={chat.title}
-              active={index === activeIndex}
-              onClick={() => {
-                setActiveIndex(index);
-                selectSession(chat.session_id);
-                setSidebarOpen(false);
-              }}
-            />
-          ))
-        ) : (
-          <Typography
-            variant={"body2"}
-            sx={{ fontSize: 12, color: "text.secondary" }}
-          >
-            Your chat history is empty.
-          </Typography>
-        )}
-      </Box>
+          </div>
+        ) : (() => {
+          const displayedChats = (sessionData || []).filter((chat) => {
+            if (valueTab === 1) return chat.is_saved;
+            return true;
+          });
 
-      <Box sx={{ display: "flex", alignItems: "center" }}>
-        <Avatar sx={{ width: 35, height: 35, bgcolor: "primary.main", fontSize: "0.9rem", fontWeight: 700 }}>
-          {userData?.name ? userData.name.charAt(0).toUpperCase() : "U"}
-        </Avatar>
-        <Box
-          sx={{ display: "flex", flexDirection: "column", width: "70%", pl: 1 }}
-        >
-          <Typography variant="body1" color="primary.main">
-            {userData?.name
-              ? userData.name.charAt(0).toUpperCase() + userData.name.slice(1)
-              : ""}
-          </Typography>
-          <Typography variant="caption" color="primary.main" fontWeight={500}>
-            {userData?.email || ""}
-          </Typography>
-        </Box>
-        <IconButton
-          // onClick={toggleMode}
-          sx={{
-            width: 35,
-            height: 35,
-            background: "linear-gradient(180deg, #1187D6 0%, #2F428D 100%)",
-            padding: 2,
-            "&:hover": {
-              bgcolor: "primary.main",
-            },
-          }}
-        >
-          {mode === "dark" ? (
-            <DarkModeOutlinedIcon sx={{ color: "text.primary" }} />
+          return displayedChats.length ? (
+            displayedChats.map((chat, index) => (
+              <ChatItem
+                key={chat.session_id || index}
+                sessionId={chat.session_id}
+                title={chat.title}
+                isSaved={Boolean(chat.is_saved)}
+                active={
+                  currentSessionId
+                    ? String(chat.session_id) === String(currentSessionId)
+                    : index === activeIndex
+                }
+                onClick={() => {
+                  setActiveIndex(index);
+                  selectSession(chat.session_id);
+                  setSidebarOpen?.(false);
+                }}
+                onDelete={() => {
+                  if (currentSessionId && String(chat.session_id) === String(currentSessionId)) {
+                    selectSession?.(null);
+                  }
+                  fetchSessions?.("", true);
+                }}
+                onToggleSave={async (id) => {
+                  await saveSession(id);
+                  await fetchSessions?.("", true);
+                }}
+              />
+            ))
           ) : (
-            <LightModeIcon sx={{ color: "background.default" }} />
-          )}
-        </IconButton>
-      </Box>
+            <p className="text-xs text-text-secondary py-4 text-center m-0">
+              {valueTab === 1
+                ? "No saved chats found."
+                : "Your chat history is empty."}
+            </p>
+          );
+        })()}
+      </div>
 
-      <Dialog
-        open={openFilter}
-        sx={{
-          "& .MuiDialog-container": {
-            width: { xs: "100vw", md: "80vw" },
-            height: "90vh",
-            marginTop: "10vh",
-            marginLeft: { xs: 0, md: "20vw" },
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          },
-        }}
-        onClose={() => {
-          setOpenFilter(false);
-        }}
-        BackdropProps={{
-          sx: {
-            width: { xs: "100vw", md: "80vw" },
-            height: "90vh",
-            marginTop: "10vh",
-            marginLeft: { xs: 0, md: "20vw" },
-            backdropFilter: "blur(1px)",
-          },
-        }}
-        PaperProps={{
-          sx: {
-            borderRadius: 5,
-            width: 360,
-            border: "1.5px solid",
-            borderColor: "primary.main",
-            // p: 2,
-          },
-        }}
-      >
-        <DialogContent>
-          <Typography fontSize={18} fontWeight={600} mb={2}>
-            Filter
-          </Typography>
+      {/* Filter Modal Dialog */}
+      {openFilter && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-sm rounded-3xl bg-bg-paper border-2 border-primary p-6 shadow-2xl animate-in zoom-in-95 duration-150 relative">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-base font-bold text-text-primary m-0">Filter</h3>
+              <button
+                type="button"
+                onClick={() => setOpenFilter(false)}
+                className="p-1 rounded-full text-text-secondary hover:text-text-primary transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-          <RadioGroup
-            value={filterValue}
-            onChange={(e) => setFilterValue(e.target.value)}
-          >
-            <FormControlLabel
-              value="pinned"
-              control={<Radio />}
-              label="Pinned Chat"
-            />
-          </RadioGroup>
+            <div className="space-y-3 mb-6">
+              <label className="flex items-center gap-2.5 text-sm text-text-primary cursor-pointer select-none">
+                <input
+                  type="radio"
+                  name="chatFilter"
+                  value="pinned"
+                  checked={filterValue === "pinned"}
+                  onChange={(e) => setFilterValue(e.target.value)}
+                  className="w-4 h-4 text-primary accent-primary"
+                />
+                <span>Pinned Chat</span>
+              </label>
+            </div>
 
-          <Box display="flex" justifyContent="flex-end" mt={3}>
-            <Button
-              variant="contained"
-              startIcon={<CheckRoundedIcon />}
-              onClick={() => {
-                setOpenFilter(false);
-              }}
-              sx={{
-                borderRadius: 2,
-                px: 3,
-                textTransform: "none",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-              }}
-            >
-              Apply
-            </Button>
-          </Box>
-        </DialogContent>
-      </Dialog>
-    </Box>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setOpenFilter(false)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-white font-semibold text-xs shadow hover:bg-primary-hover transition-colors"
+              >
+                <Check className="w-4 h-4" />
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </aside>
   );
 };
 

@@ -1,129 +1,194 @@
-import { Box, Menu, MenuItem, Typography, useTheme } from "@mui/material";
+import React, { useState, useRef, useEffect } from "react";
 import { Message } from "../../assets/svgIcons/message";
-import { Pin } from "../../assets/svgIcons/Pin";
 import { Threedot } from "../../assets/svgIcons/ThreeDots";
-import { useState } from "react";
 import { DeleteIcon } from "../../assets/svgIcons/DeleteIcon";
+import { SaveIcon } from "../../assets/svgIcons/Saveicon";
+import { Saveoutlined } from "../../assets/svgIcons/SaveIconOutlined";
+import ActionDialog from "./ActionDialog";
+import { deleteSession, saveSession } from "../../api/fetchApi";
+import { useThemeMode } from "../../context/ThemeModeContext";
 
-export const ChatItem = ({ title, active, onClick }) => {
-  const theme = useTheme();
-  const [anchorEl, setAnchorEl] = useState(null);
+export const ChatItem = ({
+  title,
+  active,
+  onClick,
+  sessionId,
+  onDelete,
+  tabType,
+  isSaved,
+  onToggleSave,
+}) => {
+  const { mode } = useThemeMode();
+  const [openMenu, setOpenMenu] = useState(false);
+  const menuRef = useRef(null);
+  const menuButtonRef = useRef(null);
 
-  const open = Boolean(anchorEl);
+  // Close menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(e.target) &&
+        menuButtonRef.current &&
+        !menuButtonRef.current.contains(e.target)
+      ) {
+        setOpenMenu(false);
+      }
+    };
+    if (openMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [openMenu]);
 
-  const handleMenuOpen = (event) => {
-    event.stopPropagation(); // ⛔ prevent chat click
-    setAnchorEl(event.currentTarget);
+  const [dialog, setDialog] = useState({
+    open: false,
+    mode: "confirm",
+    message: "",
+  });
+
+  const handleDeleteClick = (e) => {
+    e.stopPropagation();
+    setOpenMenu(false);
+    setDialog({
+      open: true,
+      mode: "confirm",
+      message: "Are you sure you want to permanently delete this session?",
+    });
   };
 
-  const handleMenuClose = () => {
-    setAnchorEl(null);
+  const handleConfirmDelete = async () => {
+    try {
+      await deleteSession(sessionId);
+      onDelete?.(sessionId);
+      setDialog({
+        open: true,
+        mode: "success",
+        message: "Session deleted successfully!",
+      });
+    } catch (error) {
+      setDialog({
+        open: true,
+        mode: "error",
+        message: error.message || "Failed to delete session",
+      });
+    }
   };
+
+  const handleToggleSave = async (e) => {
+    e.stopPropagation();
+    setOpenMenu(false);
+    try {
+      if (onToggleSave) {
+        await onToggleSave(sessionId);
+      } else {
+        await saveSession(sessionId);
+      }
+    } catch (error) {
+      setDialog({
+        open: true,
+        mode: "error",
+        message: error.message || "Failed to update saved chat",
+      });
+    }
+  };
+
+  const primaryColor = mode === "dark" ? "#1cb0f6" : "#106BA3";
+  const textColor = mode === "dark" ? "#e8f1fb" : "#0f1c2e";
+  const menuColor = mode === "dark" ? "#ffffff" : "#464646";
+
   return (
-    <Box
-      sx={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 1,
-        py: 1,
-        px: 1,
-        borderRadius: 2,
-        bgcolor: active ? "background.lightblue1" : "transparent",
-        "&:hover": {
-          bgcolor: "background.lightblue1",
-        },
-      }}
-    >
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-start",
-          gap: 1,
-          width: "70%",
-          cursor: "pointer",
-        }}
-        onClick={onClick}
+    <>
+      <div
+        className={`group flex items-center justify-between gap-2 py-2 px-2.5 rounded-xl transition-colors select-none ${
+          active
+            ? "bg-bg-lightblue1 text-primary font-semibold"
+            : "hover:bg-bg-lightblue1/60 text-text-primary font-medium"
+        }`}
       >
-        <Message size={22} color={theme.palette.text.main} />
+        {/* Chat Title & Icon */}
+        <div
+          className="flex items-center gap-2 w-[70%] cursor-pointer min-w-0"
+          onClick={onClick}
+        >
+          <div className="shrink-0">
+            <Message size={20} color={active ? primaryColor : primaryColor} />
+          </div>
+          <span
+            className={`truncate text-sm ${
+              active ? "text-primary font-semibold" : "text-text-primary"
+            }`}
+          >
+            {title ? title : "Untitled session"}
+          </span>
+        </div>
 
-        <Typography
-          variant="body2"
-          sx={{
-            width: "80%",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            color: active ? "text.main" : "text.primary",
-          }}
-        >
-          {title ? title : "Untitled session"}
-        </Typography>
-      </Box>
+        {/* Actions (Save & Three-Dots) */}
+        <div className="flex items-center gap-1.5 shrink-0 relative">
+          {isSaved && (
+            <div className="w-5 h-5 flex items-center justify-center" title="Saved chat">
+              <SaveIcon size={14} color={primaryColor} />
+            </div>
+          )}
 
-      <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1 }}>
-        {/* <Box
-          sx={{
-            width: 22,
-            height: 22,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: "50%",
-            cursor: "pointer",
-            "&:hover": {
-              bgcolor: "text.placeholder1",
-            },
-          }}
-        >
-          <Pin size={16} color={"#FFAE00"} />
-        </Box> */}
-        <Box
-          sx={{
-            width: 22,
-            height: 22,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: "50%",
-            cursor: "pointer",
-            "&:hover": {
-              bgcolor: "text.placeholder1",
-            },
-          }}
-          onClick={handleMenuOpen}
-        >
-          <Threedot size={22} color={theme.palette.text.menu} />
-        </Box>
-        <Menu
-          anchorEl={anchorEl}
-          open={open}
-          onClose={handleMenuClose}
-          anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-          transformOrigin={{ vertical: "top", horizontal: "right" }}
-          PaperProps={{
-            sx: {
-              borderRadius: 2,
-              minWidth: 140,
-              border: "1px solid",
-              borderColor: "primary.main",
-              backgroundColor: "background.paper",
-              marginLeft: 15,
-            },
-          }}
-        >
-          <MenuItem onClick={handleMenuClose} sx={{ display: "flex", gap: 1 }}>
-            <Pin size={16} color={theme.palette.text.primary} />
-            Pin
-          </MenuItem>
+          <button
+            ref={menuButtonRef}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpenMenu(!openMenu);
+            }}
+            className="w-6 h-6 rounded-full flex items-center justify-center hover:bg-black/10 dark:hover:bg-white/10 transition-colors focus:outline-hidden"
+            aria-label="Chat options"
+          >
+            <Threedot size={18} color={menuColor} />
+          </button>
 
-          <MenuItem sx={{ display: "flex", gap: 1 }} onClick={handleMenuClose}>
-            <DeleteIcon size={18} color={theme.palette.text.primary} />
-            Delete
-          </MenuItem>
-        </Menu>
-      </Box>
-    </Box>
+          {/* Context Dropdown Menu */}
+          {openMenu && (
+            <div
+              ref={menuRef}
+              className="absolute right-0 top-7 w-36 py-1.5 rounded-xl bg-bg-paper border border-primary shadow-xl z-50 animate-in fade-in zoom-in-95 duration-100"
+            >
+              {/* Save / Unsave Option */}
+              <button
+                type="button"
+                onClick={handleToggleSave}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-text-primary hover:bg-bg-default transition-colors text-left"
+              >
+                {isSaved ? (
+                  <SaveIcon size={16} color={primaryColor} />
+                ) : (
+                  <Saveoutlined size={16} color={primaryColor} />
+                )}
+                <span>{isSaved ? "Unsave Chat" : "Save Chat"}</span>
+              </button>
+
+              {/* Delete Option */}
+              <button
+                type="button"
+                onClick={handleDeleteClick}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-500/10 transition-colors text-left"
+              >
+                <DeleteIcon size={16} color="#e11d48" />
+                <span>Delete</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <ActionDialog
+        open={dialog.open}
+        mode={dialog.mode}
+        message={dialog.message}
+        onClose={() => setDialog({ ...dialog, open: false })}
+        onConfirm={handleConfirmDelete}
+      />
+    </>
   );
 };
+
+export default ChatItem;

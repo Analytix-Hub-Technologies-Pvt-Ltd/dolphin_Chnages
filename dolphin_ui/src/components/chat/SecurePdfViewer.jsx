@@ -1,4 +1,3 @@
-import { Box } from "@mui/material";
 import { useEffect, useRef } from "react";
 
 const SecurePdfViewer = ({ src, isFullscreen }) => {
@@ -15,13 +14,9 @@ const SecurePdfViewer = ({ src, isFullscreen }) => {
   }, [isFullscreen]);
 
   return (
-    <Box
+    <div
       ref={containerRef}
-      sx={{
-        width: "100%",
-        height: isFullscreen ? "100vh" : 500,
-        backgroundColor: "black",
-      }}
+      className={`w-full bg-black ${isFullscreen ? "h-screen" : "h-[500px]"}`}
     >
       <iframe
         src={pdfUrl}
@@ -29,9 +24,9 @@ const SecurePdfViewer = ({ src, isFullscreen }) => {
         width="100%"
         height="100%"
         allow="fullscreen"
-        style={{ border: "none" }}
+        className="w-full h-full border-none"
       />
-    </Box>
+    </div>
   );
 };
 

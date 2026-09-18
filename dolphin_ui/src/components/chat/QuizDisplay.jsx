@@ -1,25 +1,15 @@
-import {
-  Box,
-  Button,
-  FormControlLabel,
-  Paper,
-  Radio,
-  RadioGroup,
-  Typography,
-} from "@mui/material";
-import axios from "axios";
 import React, { useEffect, useState } from "react";
-
-const APP_URL =process.env.REACT_APP_BASE_URL;
+import axios from "axios";
+import APP_URL from "../../config/apiConfig";
 
 const QuizDisplay = ({ quizContet }) => {
   const [answers, setAnswers] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null); 
+  const [result, setResult] = useState(null);
 
   // initialize answers
   useEffect(() => {
-    setAnswers(new Array(quizContet.quiz_items.length).fill(null));
+    setAnswers(new Array(quizContet?.quiz_items?.length || 0).fill(null));
   }, [quizContet]);
 
   const handleChange = (qIndex, optionIndex) => {
@@ -54,120 +44,102 @@ const QuizDisplay = ({ quizContet }) => {
   };
 
   const retakeQuiz = () => {
-    setAnswers(new Array(quizContet.quiz_items.length).fill(null));
+    setAnswers(new Array(quizContet?.quiz_items?.length || 0).fill(null));
     setResult(null);
   };
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <Typography>{quizContet.content}</Typography>
-
+    <div className="flex flex-col gap-4 text-text-primary text-sm">
+      <p className="m-0 leading-relaxed font-medium">{quizContet.content}</p>
 
       {/* ===== QUESTIONS ===== */}
-      {quizContet.quiz_items.map((item, qIndex) => (
-        <Paper
+      {quizContet?.quiz_items?.map((item, qIndex) => (
+        <div
           key={qIndex}
-          elevation={0}
-          sx={{
-            p: 3,
-            borderRadius: 3,
-            border: "1px solid #e5e7eb",
-          }}
+          className="p-5 rounded-2xl bg-bg-paper border border-border-theme shadow-xs space-y-3"
         >
-          <Typography fontWeight={600} mb={1.5}>
+          <h4 className="font-semibold text-base text-text-primary m-0">
             {qIndex + 1}. {item.question}
-          </Typography>
+          </h4>
 
-          <RadioGroup
-            value={answers[qIndex] ?? ""}
-            onChange={(e) =>
-              handleChange(qIndex, Number(e.target.value))
-            }
-          >
-            {item.options.map((option, oIndex) => (
-              <FormControlLabel
-                key={oIndex}
-                value={oIndex}
-                control={<Radio />}
-                label={option}
-                sx={{
-                  mb: 1,
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 2,
-                  px: 1,
-                  transition: "all 0.2s ease",
-                }}
-              />
-            ))}
-          </RadioGroup>
-        </Paper>
+          <div className="space-y-2">
+            {item.options.map((option, oIndex) => {
+              const isSelected = answers[qIndex] === oIndex;
+              return (
+                <label
+                  key={oIndex}
+                  className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer select-none transition-all ${
+                    isSelected
+                      ? "border-primary bg-primary/5 text-primary font-medium"
+                      : "border-border-theme hover:bg-bg-default text-text-primary"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name={`quiz-q-${qIndex}`}
+                    value={oIndex}
+                    checked={isSelected}
+                    disabled={Boolean(result)}
+                    onChange={() => handleChange(qIndex, oIndex)}
+                    className="w-4 h-4 text-primary accent-primary cursor-pointer"
+                  />
+                  <span className="text-sm">{option}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
       ))}
 
-      
       {/* ===== RESULT SUMMARY ===== */}
       {result && (
-        <Paper
-          elevation={0}
-          sx={{
-            p: 2,
-            borderRadius: 2,
-            border: "1px solid #e5e7eb",
-            backgroundColor: "#f8fafc",
-          }}
-        >
-          <Typography fontWeight={600}>
+        <div className="p-4 rounded-2xl bg-bg-paper border border-border-theme shadow-xs space-y-2">
+          <p className="font-bold text-base text-text-primary m-0">
             You scored {result.score_percent}% ({result.correct_count}/
             {result.total})
-          </Typography>
+          </p>
 
-          <Typography mt={1} fontWeight={500}>
+          <p className="font-semibold text-sm text-text-secondary m-0 mt-2">
             Correct answers:
-          </Typography>
+          </p>
 
-          <Box component="ul" sx={{ pl: 2, mt: 1 }}>
+          <ul className="pl-5 space-y-1 mt-1 text-sm list-disc">
             {result.corrections.map((item, idx) => {
-              const isCorrect =
-                item.correct_answer === item.user_answer;
-
+              const isCorrect = item.correct_answer === item.user_answer;
               return (
-                <li key={idx}>
-                  <Typography
-                    sx={{
-                      color: isCorrect ? "green" : "red",
-                      fontSize: "0.9rem",
-                    }}
-                  >
+                <li key={idx} className={isCorrect ? "text-emerald-600" : "text-rose-600"}>
+                  <span className="font-medium">
                     Q{idx + 1}: Correct: {item.correct_answer} | You chose:{" "}
                     {item.user_answer || "No answer"}
-                  </Typography>
+                  </span>
                 </li>
               );
             })}
-          </Box>
-        </Paper>
+          </ul>
+        </div>
       )}
 
       {/* ===== ACTION BUTTONS ===== */}
-      <Box sx={{ display: "flex", gap: 1 }}>
-        <Button
-          variant="contained"
+      <div className="flex items-center gap-3 pt-2">
+        <button
+          type="button"
           onClick={submitQuiz}
-          disabled={loading || result}
-          sx={{ textTransform: "none" }}
+          disabled={loading || Boolean(result)}
+          className="px-5 py-2 rounded-xl bg-primary text-white font-semibold text-sm shadow hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {loading ? "Submitting..." : "Submit Quiz"}
-        </Button>
+        </button>
 
-        <Button
-          variant="outlined"
+        <button
+          type="button"
           onClick={retakeQuiz}
           disabled={loading}
-          sx={{ textTransform: "none" }}
+          className="px-5 py-2 rounded-xl border border-border-theme text-text-primary font-semibold text-sm hover:bg-bg-default disabled:opacity-50 transition-colors"
         >
           Retake Quiz
-        </Button>
-      </Box>
-    </Box>
+        </button>
+      </div>
+    </div>
   );
 };
 
