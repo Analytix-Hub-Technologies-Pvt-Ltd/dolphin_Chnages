@@ -1,0 +1,14 @@
+Safety Management System (SMS) - Cargo Operations Manual
+Version: 1.2
+Date: 2026-01-01
+
+Section 1: General Cargo Safety
+All crew members must follow safety precautions during cargo loading and discharging. Safe working load (SWL) of cargo gear must not be exceeded.
+
+Section 2: Cargo Gear Inspection
+Cargo gear must be inspected annually by a competent authority. Chief Mate must keep records of all cargo gear inspections and certificates in the Ship Safety log.
+
+Section 3: Dangerous Cargo Regulations
+Handling of dangerous goods must comply with local port regulations. Proper safety equipment must be worn.
+No mention of MARPOL Annex III or SOLAS Chapter VII compliance certificates or STCW specialized training requirements.
+Emergency response drills for chemical spills are conducted once every 12 months.

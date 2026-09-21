@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Marine Quiz</title>
+    <link rel="stylesheet" href="/ui/css/style.css" />
+  </head>
+  <body class="marine-bg">
+    <div class="quiz-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-icon">🌊</div>
+          <div>
+            <h2>Marine Quiz</h2>
+            <p>Test your knowledge before heading back to the bridge.</p>
+          </div>
+        </div>
+        <a href="/ui/chat.html" class="btn ghost small">Back to Tutor</a>
+      </header>
+
+      <main class="quiz-grid">
+        <section class="quiz-panel">
+          <div class="quiz-panel__header">
+            <div>
+              <p class="eyebrow">Topic</p>
+              <h3 id="quiz-topic-label">Marine Engine Readiness</h3>
+            </div>
+            <div class="topic-input">
+              <input
+                type="text"
+                id="quiz-topic"
+                placeholder="Enter a topic (e.g., Marine Engine)"
+                value="Marine Engine"
+              />
+              <button class="btn primary small" id="load-quiz">Load Quiz</button>
+            </div>
+          </div>
+
+          <div id="quiz-questions" class="quiz-questions"></div>
+
+          <div class="quiz-actions">
+            <button class="btn primary" id="submit-quiz" disabled>Submit Quiz</button>
+            <button class="btn ghost" id="retake-quiz" hidden>Retake Quiz</button>
+          </div>
+        </section>
+
+        <aside class="result-panel" id="result-panel" hidden>
+          <div class="result-summary">
+            <p class="eyebrow">Your Performance</p>
+            <div class="score-row">
+              <div>
+                <h3 id="score-text">0/0</h3>
+                <p>Score</p>
+              </div>
+              <div class="percentage" id="percentage-text">0%</div>
+            </div>
+          </div>
+          <div class="result-details">
+            <p class="eyebrow">Question Review</p>
+            <div id="detailed-results" class="result-list"></div>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script src="/ui/js/quiz.js"></script>
+  </body>
+</html>

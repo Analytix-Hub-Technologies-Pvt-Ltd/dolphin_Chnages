@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marine Tutor AI | Chat</title>
+  <link rel="stylesheet" href="/ui/css/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+</head>
+
+<body class="marine-bg">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon">⚓</div>
+      <div>
+        <h1>Marine Tutor AI</h1>
+        <p>Adaptive maritime learning</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button id="logout-button" class="btn ghost">Logout</button>
+    </div>
+  </header>
+
+  <main class="chat-shell">
+    <aside class="session-sidebar">
+      <div class="session-header">
+        <div>
+          <h2>Sessions</h2>
+          <p>Search and jump back into any chat</p>
+        </div>
+        <button id="new-session-button" class="btn ghost small" type="button">New</button>
+      </div>
+      <div class="session-search">
+        <input id="session-search" type="search" placeholder="Search sessions" aria-label="Search sessions" />
+      </div>
+      <div id="session-list" class="session-list" aria-live="polite"></div>
+    </aside>
+
+    <section class="chat-area">
+     <div class="chat-panel">
+  <div id="chat-window" class="chat-window" aria-live="polite">
+
+        </div>
+        <!-- <div id="loading" class="loading" aria-live="assertive" hidden>
+          <span class="spinner"></span>
+          <span>Generating response...</span>
+        </div> -->
+
+       
+        <div class="suggestions">
+          <div id="video-suggestions" class="video-section" aria-live="polite" hidden>
+            <h3>🎬 Video Suggestions</h3>
+            <div id="video-list" class="video-list"></div>
+          </div>
+          <div id="image-suggestions" class="media-section" aria-live="polite" hidden>
+            <h3>🖼️ Reference Images</h3>
+            <div id="image-list" class="media-list"></div>
+          </div>
+          <div id="pdf-suggestions" class="media-section" aria-live="polite" hidden>
+            <h3>📄 Reference PDFs</h3>
+            <div id="pdf-list" class="media-list"></div>
+          </div>
+          <div class="question-suggestions">
+            <h3>Try asking</h3>
+            <div id="question-list" class="question-list"></div>
+          </div>
+        </div>
+         <div id="loading" class="thinking-loader" hidden>
+      <div class="thinking-bubble">
+        <span class="emoji">🐬</span>
+        <span class="text">
+          Dolphin is thinking<span class="dots"></span>
+        </span>
+      </div>
+    </div>
+      </div>
+      <form id="chat-form" class="chat-input" autocomplete="off">
+        <textarea id="message" name="message" rows="2" placeholder="Ask about navigation, safety, or systems..."
+          required></textarea>
+        <button type="submit" id="send-button" class="btn primary">Send</button>
+      </form>
+    </section>
+  </main>
+<!-- Video Modal -->
+<div id="videoModal" class="video-modal hidden">
+  <div class="video-backdrop"></div>
+
+  <div class="video-container">
+    <button class="video-close" id="closeVideoBtn">✕</button>
+
+    <video id="popupVideo" controls autoplay controlsList="nodownload" disablePictureInPicture
+      oncontextmenu="return false"></video>
+  </div>
+</div>
+<!-- Image Popup Modal -->
+<div id="imageModal" class="image-modal hidden">
+  <div class="image-backdrop"></div>
+
+  <div class="image-container">
+    <button class="image-close" id="closeImageBtn">✕</button>
+
+    <img id="popupImage" alt="Preview" draggable="false" />
+  </div>
+</div>
+<!-- PDF Popup Modal -->
+<div id="pdfModal" class="pdf-modal hidden">
+  <div class="pdf-backdrop"></div>
+
+  <div class="pdf-container">
+    <button class="pdf-close" id="closePdfBtn">✕</button>
+
+    <iframe id="popupPdf" title="PDF Preview"></iframe>
+  </div>
+</div>
+
+<script src="/ui/js/chat.js"></script>
+
+</body>
+
+</html>

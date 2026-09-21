@@ -1,0 +1,24 @@
+# Bitbucket Pipelines configuration for dolphin-api
+# Triggers on Pull Request creation and updates (Test & Build only, no deployment)
+
+image: python:3.11-slim
+
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: 'Install Dependencies & Run Tests'
+          caches:
+            - pip
+          script:
+            - apt-get update && apt-get install -y --no-install-recommends build-essential gcc
+            - pip install --upgrade pip
+            - pip install -r requirements.txt
+            - pytest
+      - step:
+          name: 'Build Docker Image (Dry Run)'
+          image: docker:latest
+          services:
+            - docker
+          script:
+            - docker build -t dolphin-api:test .

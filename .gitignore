@@ -1,0 +1,74 @@
+# Root .gitignore for dolphin monorepo
+
+# Environment variables
+.env
+.env.*
+.exampleenv2
+!.env.example
+*.env
+*.env.local
+*.env.development.local
+*.env.test.local
+*.env.production.local
+
+# Python
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+**/*/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+**/*/.pytest_cache/
+.coverage
+htmlcov/
+*.sqlite3
+*.db
+
+# Node / Frontend
+node_modules/
+**/node_modules/
+build/
+**/build/
+dist/
+**/dist/
+.vite/
+**/vite/
+.pnp
+.pnp.js
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Storage & FAISS binary indices
+storage/
+**/storage/
+retrieval/*.bin
+retrieval/*.meta.json
+retrieval/faiss_index.bin
+retrieval/faiss_index.meta.json
+retrieval/company_index.bin
+retrieval/company_index.meta.json
+retrieval/transcribe_index.bin
+retrieval/transcribe_index.meta.json
+data/checkpoints/
+
+# Backups and nested git
+.git_backup/
+**/.git_backup/
+**/.git_backup*
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*.log
+
+# Gemini / Scratch
+.gemini/
+.system_generated/
