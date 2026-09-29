@@ -14,17 +14,18 @@ async def well_wish_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
     decision = safe_get(state, "router_decision", {}) or {}
 
-    user_name = decision.get("user_name")
+    user_profile = safe_get(state, "user_profile", {}) or {}
+    user_name = decision.get("user_name") or user_profile.get("user_name") or user_profile.get("name")
 
     if user_name:
         content = (
-            "## I'm doing well, thank you!\n"
-            "How can I assist you with the marine course today?\n"
+            f"Hello {user_name}! I'm doing well, thank you for asking.\n\n"
+            "How can I assist you with your maritime course lessons, operations, or company SMS procedures today?"
         )
     else:
         content = (
-            "## I'm doing well, thank you!\n"
-            "How can I assist you with the marine course today?\n"
+            "I'm doing well, thank you for asking!\n\n"
+            "How can I assist you with your maritime course lessons, operations, or company SMS procedures today?"
         )
 
     response = {
@@ -37,6 +38,7 @@ async def well_wish_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "pdfs": [],
         "question_suggestions": [],
         "metadata": {
+            "category": "WELL_WISH",
             "short_topic": "well_wish",
             "routing_reason": decision.get("reason", "well_wish"),
         },

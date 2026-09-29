@@ -84,16 +84,13 @@ class Settings(BaseSettings):
     serve_static_files: bool = Field(True, alias="SERVE_STATIC_FILES")
     ui_directory: str = Field("ui", alias="UI_DIRECTORY")
 
-    # Voice Mode Settings (STT & TTS)
-    whisper_model: str = Field("small.en", alias="WHISPER_MODEL")
-    whisper_device: str = Field("cpu", alias="WHISPER_DEVICE")
-    whisper_compute_type: str = Field("int8", alias="WHISPER_COMPUTE_TYPE")
-    piper_model_path: str = Field("./storage/piper_models/en_US-lessac-medium.onnx", alias="PIPER_MODEL_PATH")
-    piper_config_path: str = Field("./storage/piper_models/en_US-lessac-medium.onnx.json", alias="PIPER_CONFIG_PATH")
-    piper_length_scale: float = Field(1.12, alias="PIPER_LENGTH_SCALE")
-    piper_noise_scale: float = Field(0.667, alias="PIPER_NOISE_SCALE")
-    piper_noise_w: float = Field(0.8, alias="PIPER_NOISE_W")
-    piper_speaker_id: int | None = Field(None, alias="PIPER_SPEAKER_ID")
+    # Voice Mode Settings (Deepgram Streaming STT & ElevenLabs Streaming TTS)
+    deepgram_api_key: str = Field("", alias="DEEPGRAM_API_KEY")
+    deepgram_model: str = Field("nova-2", alias="DEEPGRAM_MODEL")
+    elevenlabs_api_key: str = Field("", alias="ELEVENLABS_API_KEY")
+    elevenlabs_voice_id: str = Field("Xb7hH8MSUJpSbSDYk0k2", alias="ELEVENLABS_VOICE_ID")
+    elevenlabs_model_id: str = Field("eleven_turbo_v2_5", alias="ELEVENLABS_MODEL_ID")
+    elevenlabs_optimize_latency: int = Field(4, alias="ELEVENLABS_OPTIMIZE_LATENCY")
 
     class Config:
         env_file = ".env"

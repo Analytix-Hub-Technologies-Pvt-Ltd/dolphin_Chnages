@@ -85,7 +85,7 @@ class QueryAnalyzer:
         
         # Fast-path: Check for simple intents first (no GPT call needed)
         # This avoids 300-800ms API latency for obvious greetings/goodbyes
-        simple_intent = self._is_simple_intent(standalone)
+        simple_intent = self._is_simple_intent(standalone) or self._is_simple_intent(current_query)
         if simple_intent:
             logger.info(f"[ANALYZER] ⚡ Fast-path: '{standalone}' → {simple_intent} (skipped GPT)")
             category = simple_intent
@@ -99,9 +99,9 @@ class QueryAnalyzer:
             # ✅ FIX: await GPT intent service
             gpt_intent = await self.intent_service.classify_intent(standalone)
 
-            dynamic_categories = {"GREETING", "GOODBYE", "THANK", "WELL_WISH", "THREADING", "NEGATIVE"}
+            dynamic_categories = {"GREETING", "GOODBYE", "THANK", "WELL_WISH", "THREADNING", "THREADING", "NEGATIVE", "OUT_OF_SCOPE"}
             if gpt_intent in dynamic_categories:
-                category = gpt_intent
+                category = "THREADNING" if gpt_intent == "THREADING" else gpt_intent
             else:
                 # ✅ FIX: await async call
                 category = await self._classify_query(standalone)
@@ -114,22 +114,15 @@ class QueryAnalyzer:
         return standalone, category, messages
 
     def _is_obvious_query(self, query: str) -> bool:
-        """Fast check for standard questions and marine technical terms to skip LLM classification."""
+        """Fast check for genuine maritime questions and marine technical terms to skip LLM classification."""
         q = query.lower().strip()
         if not q or len(q) < 3:
             return False
         
-        starters = (
-            "what", "why", "how", "when", "where", "which", "who",
-            "explain", "describe", "tell", "detail", "list", "define",
-            "procedure", "checklist", "guideline", "guidelines", "steps",
-            "can you", "could you", "please explain", "give me", "show me"
-        )
-        if any(q.startswith(s) for s in starters):
-            return True
-        if "?" in q and not self._is_simple_intent(q):
-            return True
-        
+        # Never treat simple conversational intents as obvious queries
+        if self._is_simple_intent(q):
+            return False
+
         domain_terms = {
             "solas", "marpol", "ism", "stcw", "colreg", "eedi", "seemp", "cow", "igs", "ows",
             "tank", "cargo", "ship", "vessel", "engine", "boiler", "oil", "fuel", "safety",
@@ -144,6 +137,13 @@ class QueryAnalyzer:
         words = set(re.findall(r'\b[a-z0-9]+\b', q.replace('-', ' ')))
         if words.intersection(domain_terms):
             return True
+
+        starters = (
+            "procedure", "checklist", "guideline", "guidelines", "steps", "standard operating procedure"
+        )
+        if any(q.startswith(s) for s in starters):
+            return True
+            
         return False
     
     def _is_simple_intent(self, query: str) -> str | None:
@@ -156,13 +156,16 @@ class QueryAnalyzer:
         Examples:
         - "hi" → "GREETING" (no GPT call needed)
         - "how are you" → "WELL_WISH" (no GPT call needed)
+        - "are you doing" → "WELL_WISH" (no GPT call needed)
         - "thanks" → "THANK" (no GPT call needed)
         - "cargo sampling" → None (needs normal classification)
         """
+        if not query:
+            return None
         query_lower = query.lower().strip()
         
         # Remove punctuation for matching
-        query_clean = query_lower.rstrip('.,!?')
+        query_clean = query_lower.rstrip('.,!?').strip()
         
         # Check spelling variations of greetings/thanks/goodbyes using regex (e.g. hii, heyyy, helloo, yoo)
         # Check greetings
@@ -188,27 +191,41 @@ class QueryAnalyzer:
         greeting_patterns = {
             "hi", "hello", "hey", "yo", "hola", "howdy", "greetings",
             "good morning", "good afternoon", "good evening", "good day",
-            "morning", "afternoon", "evening"
+            "morning", "afternoon", "evening", "namaste"
         }
         if query_clean in greeting_patterns or any(query_clean.startswith(gw) for gw in ("hello ", "hi ", "hey ", "good morning", "good afternoon", "good evening", "good day")):
             return "GREETING"
-        
-        # Well-wishes (how are you, etc.)
-        wellwish_patterns = {
-            "how are you", "how are you doing", "how r you", "how r u",
-            "how do you do", "hope you are well", "hope you're well",
-            "how are you feeling", "how have you been", "how you doing",
-            "hows it going", "how's it going", "what's up", "whats up",
-            "sup", "wassup"
+
+        # Bot identity and capability questions -> GREETING
+        identity_patterns = {
+            "who are you", "what are you", "who made you", "who created you",
+            "what can you do", "what is dolphin", "what is dolphin ai",
+            "tell me about yourself", "introduce yourself", "what is your name",
+            "what's your name", "whats your name", "can you help me",
+            "how can you help me", "what do you do"
         }
-        if query_clean in wellwish_patterns:
+        if query_clean in identity_patterns or any(query_clean.startswith(id_p) for id_p in ("who are you", "what can you do", "introduce yourself", "tell me about yourself")):
+            return "GREETING"
+        
+        # Well-wishes, status check-ins, and casual small talk
+        wellwish_patterns = {
+            "are you doing", "how are you", "how are you doing", "how r you", "how r u",
+            "how u doing", "how u doin", "how are u", "what are you doing", "what you doing",
+            "what r u doing", "what r you doing", "how is it going", "hows it going",
+            "how's it going", "how are things", "how's everything", "how is everything",
+            "how do you do", "hope you are well", "hope you're well", "how are you feeling",
+            "how have you been", "how you doing", "what's up", "whats up", "sup", "wassup",
+            "what's new", "whats new", "are you ok", "are you okay", "are you there",
+            "how's your day", "how is your day"
+        }
+        if query_clean in wellwish_patterns or any(query_clean.startswith(w) for w in ("how are you", "how are u", "are you doing", "what are you doing", "how is it going", "hows it going", "how's it going")):
             return "WELL_WISH"
         
         # Goodbyes
         goodbye_patterns = {
             "bye", "goodbye", "good bye", "see you", "see ya", "see you later",
             "cya", "later", "catch you later", "talk to you later", "ttyl",
-            "signing off", "log off", "logout", "gotta go", "gtg"
+            "signing off", "log off", "logout", "gotta go", "gtg", "farewell"
         }
         if query_clean in goodbye_patterns:
             return "GOODBYE"
@@ -454,6 +471,7 @@ class EnhancedQueryAnalyzer(QueryAnalyzer):
             "WELL_WISH": "WELL_WISH",
             "THREADNING": "THREADNING",
             "NEGATIVE": "NEGATIVE",
+            "OUT_OF_SCOPE": "OUT_OF_SCOPE",
             "QUIZ_REQUEST": "QUIZ",
             "SUMMARY_REQUEST": "SUMMARY",
             "QUERY": "QUERY",
@@ -468,6 +486,7 @@ class EnhancedQueryAnalyzer(QueryAnalyzer):
             "WELL_WISH": "well_wish",
             "THREADNING": "threadning",
             "NEGATIVE": "negative",
+            "OUT_OF_SCOPE": "fallback",
             "QUIZ": "quiz",
             "SUMMARY": "summary",
             "QUERY": "query",

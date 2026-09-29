@@ -337,13 +337,23 @@ async def company_retrieval_node(
             state["company_chunks"] = []
             return state
     else:
-        # For generic maritime queries without distinctive terms, include valid company candidates
-        qualifying_generic = [
-            (score, c) for score, c in scored_candidates
-            if score >= 0.4
-        ]
+        # Check if the query is an explicit company query (e.g. "What are our procedures?", "Show company SMS", "Company standing orders")
+        from pipeline.company_query import is_company_query
+        is_comp = is_company_query(query, company_name)
+        qualifying_generic = []
+        for score, c in scored_candidates:
+            breakdown = c.get("_precision_breakdown", {}) or {}
+            has_topic_match = float(breakdown.get("topic_score", 0.0) or 0.0) > 0
+            has_phrase_match = float(breakdown.get("content_phrase_score", 0.0) or 0.0) > 0
+            has_dist_match = float(breakdown.get("content_dist_score", 0.0) or 0.0) > 0
+            has_bm25_match = float(breakdown.get("norm_bm25", 0.0) or 0.0) >= 0.25
+
+            # If explicit company query or text match exists
+            if is_comp or ((has_topic_match or has_phrase_match or has_dist_match or has_bm25_match) and score >= 0.75):
+                qualifying_generic.append((score, c))
+
         if not qualifying_generic:
-            logger.info("[Company Retrieval] No generic company chunks qualified. Returning empty company_chunks.")
+            logger.info("[Company Retrieval] No generic company chunks had genuine textual/BM25 match. Returning empty company_chunks.")
             state["company_chunks"] = []
             return state
         seed_list = [c for score, c in sorted(qualifying_generic, key=lambda x: x[0], reverse=True)]

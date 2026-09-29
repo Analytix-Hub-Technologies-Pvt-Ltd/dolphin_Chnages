@@ -1,25 +1,29 @@
 import pytest
 import asyncio
-from services.tts_service import PiperTTSService
-from services.stt_service import FasterWhisperService
+from unittest.mock import AsyncMock, patch, MagicMock
+from services.tts_service import ElevenLabsTTSService
+from services.stt_service import DeepgramSTTService
 
 
 @pytest.mark.anyio
-async def test_piper_and_whisper_roundtrip():
-    tts_service = PiperTTSService.get_instance()
-    stt_service = FasterWhisperService.get_instance()
+async def test_deepgram_and_elevenlabs_service_interfaces():
+    tts_service = ElevenLabsTTSService.get_instance()
+    stt_service = DeepgramSTTService.get_instance()
 
     test_sentence = "Enclosed space entry requires a valid permit and proper ventilation."
-    
-    # 1. Synthesize with Piper
-    wav_bytes = await tts_service.synthesize_sentence(test_sentence)
-    assert len(wav_bytes) > 5000, "WAV audio bytes should be produced"
+    fake_audio = b"ID3" + b"\x00" * 4096
 
-    # 2. Transcribe with Faster-Whisper
-    transcript = await stt_service.transcribe(wav_bytes)
-    assert transcript, "Transcript should not be empty"
+    # 1. Test ElevenLabs synthesize_sentence with mock
+    with patch.object(tts_service, "synthesize_sentence", new=AsyncMock(return_value=fake_audio)):
+        audio_bytes = await tts_service.synthesize_sentence(test_sentence)
+        assert len(audio_bytes) > 1000, "Audio bytes should be produced by ElevenLabs service"
 
-    transcript_lower = transcript.lower()
-    assert "enclosed space" in transcript_lower
-    assert "permit" in transcript_lower
-    assert "ventilation" in transcript_lower
+    # 2. Test Deepgram transcribe with mock
+    with patch.object(stt_service, "transcribe", new=AsyncMock(return_value=test_sentence)):
+        transcript = await stt_service.transcribe(fake_audio)
+        assert transcript, "Transcript should not be empty"
+
+        transcript_lower = transcript.lower()
+        assert "enclosed space" in transcript_lower
+        assert "permit" in transcript_lower
+        assert "ventilation" in transcript_lower

@@ -1130,6 +1130,10 @@ class ChatService:
         Check if the query is in-scope of the available Marine/Maritime course material.
         Returns: "IN-SCOPE", "OUT-OF-SCOPE", or "MIXED".
         """
+        # If simple conversational intent, it is handled by fast-path/social nodes
+        if self.analyzer._is_simple_intent(query):
+            return "IN-SCOPE"
+
         # ⚡ Fast-path: Common maritime queries, acronyms, or company procedures are immediately IN-SCOPE
         q_lower = query.lower().strip()
         maritime_fast_terms = {
@@ -1158,7 +1162,7 @@ You are a strict scope control classifier for Marine Tutor AI.
 Analyze the User Question and determine whether it is relevant to Marine/Maritime topics or the provided Course Context.
 
 Answering Rules:
-1. A question is ALWAYS IN-SCOPE if it relates to ANY maritime, nautical, or shipboard subject, including:
+1. A question is ALWAYS IN-SCOPE if it relates to ANY maritime, nautical, shipboard, or marine safety subject, including:
 - Marine engineering or Engine-room operations
 - Marine operations, Ship operations, Deck operations, Seamanship
 - Navigation, Port operations, Ship management, Watchkeeping
@@ -1171,12 +1175,12 @@ Answering Rules:
 - Company procedures, SMS, SOPs, Checklists
 - Any other topic covered by the available Course Context.
 
-2. A question is OUT-OF-SCOPE ONLY if it is:
-- Clearly non-marine / unrelated to maritime (e.g. Python/Java programming, non-marine math, sports, movies, video games, pop culture, cooking, general world history).
+2. A question is STRICTLY OUT-OF-SCOPE if it is:
+- Clearly non-marine / unrelated to maritime (e.g. general casual questions like "are you doing", cooking/recipes, software programming/Python/Java, non-marine math/science, sports, celebrities, movies, video games, pop culture, general world history/trivia).
 - About a famous historical ship accident (e.g., Titanic sinking, Estonia sinking, Costa Concordia) UNLESS there is explicit, specific information about that event/ship in the provided Course Context.
 Note: If the query is about genuine commercial maritime, shipping, navigation, engine, or cargo operations, it is ALWAYS IN-SCOPE.
 
-3. Simple conversational phrases or acknowledgements (e.g. 'ok', 'yes', 'sure', 'understand', 'cool', 'continue', 'next') are IN-SCOPE.
+3. Simple conversational acknowledgements (e.g. 'ok', 'yes', 'sure', 'understand', 'cool', 'continue', 'next') within an active maritime discussion are IN-SCOPE.
 
 4. A question is MIXED if:
 - It contains both an in-scope Marine topic and a completely unrelated non-marine topic (e.g. "Explain boiler design and write a Python script for a calculator").
@@ -1246,6 +1250,9 @@ Rewritten Question:
     ) -> List[Dict[str, Any]]:
         if not self.company_vector_store or not user_profile:
             return []
+        # Skip company retrieval for conversational or trivial queries
+        if self.analyzer._is_simple_intent(standalone_query) or self.analyzer._is_simple_intent(current_query):
+            return []
         has_company = bool(
             user_profile.get("company_id")
             or user_profile.get("company_name")
@@ -1268,6 +1275,8 @@ Rewritten Question:
             )
             return c_chunks
         except Exception as e:
+            logger.warning(f"Parallel company retrieval error: {e}")
+            return []
             logger.warning(f"Parallel company retrieval error: {e}")
             return []
 
@@ -1357,13 +1366,21 @@ Rewritten Question:
 
         t_upstream_start = time.perf_counter()
 
-        is_user_social = is_user_greeting or bool(re.match(r"^(bye|goodbye|cya|thanks|thank you|thx|well done|good night|have a nice day)\b", current_query.lower().strip()))
+        simple_intent_fast = self.analyzer._is_simple_intent(current_query) or (self.analyzer._is_simple_intent(standalone_query) if standalone_query else None)
+        is_user_social = is_user_greeting or bool(simple_intent_fast) or bool(re.match(r"^(bye|goodbye|cya|thanks|thank you|thx|well done|good night|have a nice day)\b", current_query.lower().strip()))
 
         if not standalone_query:
             t_rew_start = time.perf_counter()
             if is_user_social:
                 standalone_query = current_query
-                router_decision = {"node_type": "greeting" if is_user_greeting else ("goodbye" if "bye" in current_query.lower() else "thank"), "category": "GREETING" if is_user_greeting else "SOCIAL"}
+                node_type_val = "well_wish" if simple_intent_fast == "WELL_WISH" else ("goodbye" if (simple_intent_fast == "GOODBYE" or "bye" in current_query.lower()) else ("thank" if simple_intent_fast == "THANK" else "greeting"))
+                cat_val = simple_intent_fast or ("GREETING" if is_user_greeting else "SOCIAL")
+                router_decision = {
+                    "node_type": node_type_val,
+                    "category": cat_val,
+                    "short_topic": cat_val.lower(),
+                    "reason": f"Social/conversational intent: {cat_val}",
+                }
             else:
                 rewrite_task = asyncio.create_task(
                     self.rewrite_query(
@@ -1382,7 +1399,8 @@ Rewritten Question:
             logger.info(f"⚡ Rewritten standalone query in {time.perf_counter() - t_rew_start:.3f}s: '{standalone_query}'")
 
             node_type_pre = router_decision.get("node_type", "").lower()
-            if node_type_pre in {"greeting", "goodbye", "thank", "well_wish"}:
+            cat_pre = router_decision.get("category", "").upper()
+            if node_type_pre in {"greeting", "goodbye", "thank", "well_wish"} or cat_pre in {"GREETING", "GOODBYE", "THANK", "WELL_WISH", "OUT_OF_SCOPE"}:
                 retrieval_chunks, video_suggestions = [], []
                 company_chunks = []
                 approved_feedback_memory = None
@@ -1391,7 +1409,7 @@ Rewritten Question:
                     session_id,
                     "user",
                     current_query,
-                    "GREETING" if node_type_pre == "greeting" else "QUERY",
+                    "GREETING" if node_type_pre == "greeting" else ("WELL_WISH" if node_type_pre == "well_wish" else "QUERY"),
                     user_id=user_id,
                     existing_messages=cleaned_messages,
                 )
@@ -1419,7 +1437,14 @@ Rewritten Question:
                 )
         else:
             if is_user_social:
-                router_decision = {"node_type": "greeting" if is_user_greeting else ("goodbye" if "bye" in current_query.lower() else "thank"), "category": "GREETING" if is_user_greeting else "SOCIAL"}
+                node_type_val = "well_wish" if simple_intent_fast == "WELL_WISH" else ("goodbye" if (simple_intent_fast == "GOODBYE" or "bye" in current_query.lower()) else ("thank" if simple_intent_fast == "THANK" else "greeting"))
+                cat_val = simple_intent_fast or ("GREETING" if is_user_greeting else "SOCIAL")
+                router_decision = {
+                    "node_type": node_type_val,
+                    "category": cat_val,
+                    "short_topic": cat_val.lower(),
+                    "reason": f"Social/conversational intent: {cat_val}",
+                }
                 retrieval_chunks, video_suggestions = [], []
                 company_chunks = []
                 approved_feedback_memory = None
@@ -1486,7 +1511,7 @@ Rewritten Question:
         logger.info(f"🧠 Rewritten Query:\n{standalone_query}")
         logger.info("===== END DEBUG =====\n")
 
-        is_social = node_type in {"greeting", "goodbye", "thank", "well_wish"}
+        is_social = node_type in {"greeting", "goodbye", "thank", "well_wish"} or router_decision.get("category") in {"GREETING", "GOODBYE", "THANK", "WELL_WISH"}
         is_gap_analysis = (
             node_type in {"gap_analysis_request", "gap_analysis"}
             or router_decision.get("category") == "GAP_ANALYSIS_REQUEST"
@@ -1500,7 +1525,7 @@ Rewritten Question:
         if is_social:
             logger.info(f"⚡ FAST MODE: {node_type}")
 
-            user_category = "GREETING"
+            user_category = router_decision.get("category") or "GREETING"
             full_history = cleaned_messages
             history_for_llm = []
             meaningful_history = []
@@ -1549,8 +1574,11 @@ Rewritten Question:
         # -----------------------------
         # 🕵️ SCOPE CONTROL CHECK
         # -----------------------------
-        is_out_of_scope = False
-        if not is_social and not is_gap_analysis:
+        is_out_of_scope = (
+            router_decision.get("category") == "OUT_OF_SCOPE"
+            or router_decision.get("node_type") == "out_of_scope"
+        )
+        if not is_social and not is_gap_analysis and not is_out_of_scope:
             t_scope_start = time.perf_counter()
             scope_decision = await self.check_query_scope(standalone_query, retrieval_chunks)
             logger.info(f"Scope decision: {scope_decision} (checked in {time.perf_counter() - t_scope_start:.3f}s)")
@@ -1566,6 +1594,10 @@ Rewritten Question:
                 course_task = asyncio.create_task(self._retrieve_chunks(standalone_query))
                 comp_task = asyncio.create_task(self._run_company_retrieval(standalone_query, current_query, user_profile))
                 (retrieval_chunks, video_suggestions), company_chunks = await asyncio.gather(course_task, comp_task)
+        elif is_out_of_scope:
+            retrieval_chunks = []
+            company_chunks = []
+            video_suggestions = []
         else:
             retrieval_chunks = []
             company_chunks = []

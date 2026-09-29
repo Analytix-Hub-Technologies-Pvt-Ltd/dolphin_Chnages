@@ -27,6 +27,8 @@ def get_openai_service() -> OpenAIService:
 def get_embedding_service(
     openai_service: OpenAIService = Depends(get_openai_service),
 ) -> EmbeddingService:
+    if not isinstance(openai_service, OpenAIService):
+        openai_service = get_openai_service()
     return EmbeddingService(openai_service)
 
 

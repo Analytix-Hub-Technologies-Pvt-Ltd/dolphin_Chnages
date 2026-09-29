@@ -11,8 +11,9 @@ import DolphinIconW from "../../assets/images/dolphin_w.png";
 import { StopIcon } from "../../assets/svgIcons/StopIcon";
 import axios from "axios";
 import { fetchUserProfile } from "../../api/apiAuth";
-import { X, ChevronLeft, Mic } from "lucide-react";
+import { X, ChevronLeft, MicOff } from "lucide-react";
 import VoiceModePanel from "./VoiceModePanel";
+import { VoiceWaveIcon } from "../../assets/svgIcons/VoiceWaveIcon";
 
 export const sanitizeMarkdown = (markdownText) => {
   if (!markdownText) return "";
@@ -142,12 +143,32 @@ const ChatWindow = ({
   const [selectedFile, setSelectedFile] = useState(null);
   const [isCaptainMode, setIsCaptainMode] = useState(false);
   const [isVoiceModeOpen, setIsVoiceModeOpen] = useState(false);
+  const [isVoiceMuted, setIsVoiceMuted] = useState(false);
+  const voiceSessionRef = useRef(null);
   const { mode } = useThemeMode();
+
+  const handleCloseVoice = useCallback(() => {
+    if (voiceSessionRef.current) {
+      voiceSessionRef.current.stop();
+      voiceSessionRef.current = null;
+    }
+    setIsVoiceModeOpen(false);
+    setIsVoiceMuted(false);
+  }, []);
+
+  const handleToggleVoiceMute = useCallback(() => {
+    if (voiceSessionRef.current) {
+      const nextMuted = voiceSessionRef.current.toggleMute();
+      setIsVoiceMuted(nextMuted);
+    } else {
+      setIsVoiceMuted((prev) => !prev);
+    }
+  }, []);
 
   const handleStartVoice = async () => {
     if (disableNewChat) return;
     if (isVoiceModeOpen) {
-      setIsVoiceModeOpen(false);
+      handleCloseVoice();
       return;
     }
     try {
@@ -166,38 +187,163 @@ const ChatWindow = ({
           }
         }
       }
+      setIsVoiceMuted(false);
       setIsVoiceModeOpen(true);
     } catch (err) {
       console.error("Error starting voice mode:", err);
+      setIsVoiceMuted(false);
       setIsVoiceModeOpen(true);
     }
   };
 
+  const handleVoiceStatusChunk = useCallback((status, message) => {
+    setmessages((prev) => {
+      if (!prev || prev.length === 0) return prev;
+      let lastAssistantIndex = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (prev[i]?.role === "assistant") {
+          lastAssistantIndex = i;
+          break;
+        }
+      }
+      if (lastAssistantIndex !== -1) {
+        const lastMsg = prev[lastAssistantIndex];
+        const updatedMsg = {
+          ...lastMsg,
+          status,
+          statusText: message || "Dolphin is thinking...",
+          isThinking: !lastMsg.content,
+        };
+        const newMessages = [...prev];
+        newMessages[lastAssistantIndex] = updatedMsg;
+        return newMessages;
+      }
+      return prev;
+    });
+  }, [setmessages]);
+
+  const handleSendRef = useRef(null);
+
+  const handleVoiceInterrupt = useCallback(() => {
+    console.log("⚡ [Voice Mode] Interrupted by user -> Cancelling ongoing response stream");
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setDisableNewChat(false);
+  }, [setDisableNewChat]);
+
+  const handleVoiceTranscript = useCallback((transcript) => {
+    if (!transcript || !transcript.trim()) return;
+    console.log("🎙️ [Voice Mode] Spoken transcript received -> Invoking normal chat API:", transcript);
+    if (handleSendRef.current) {
+      handleSendRef.current(transcript.trim());
+    }
+  }, []);
+
+  const handleVoiceTokenChunk = useCallback((token) => {
+    if (!token) return;
+    setmessages((prev) => {
+      if (!prev || prev.length === 0) return prev;
+      let lastAssistantIndex = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (prev[i]?.role === "assistant") {
+          lastAssistantIndex = i;
+          break;
+        }
+      }
+      if (lastAssistantIndex !== -1) {
+        const lastMsg = prev[lastAssistantIndex];
+        const updatedMsg = {
+          ...lastMsg,
+          content: (lastMsg.content || "") + token,
+          isThinking: false,
+          isStreaming: true,
+        };
+        const newMessages = [...prev];
+        newMessages[lastAssistantIndex] = updatedMsg;
+        return newMessages;
+      }
+      return prev;
+    });
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [setmessages]);
+
   const handleVoiceTurnComplete = useCallback((userQuery, assistantPayload) => {
-    if (!userQuery && !assistantPayload) return;
+    if (!assistantPayload) return;
 
-    const userMsg = {
-      role: "user",
-      content: userQuery,
-      timestamp: new Date().toISOString(),
-    };
+    setmessages((prev) => {
+      const rawContent = assistantPayload.content || "";
+      const sectionsContent = Array.isArray(assistantPayload.sections)
+        ? assistantPayload.sections
+            .map((s) => s.content)
+            .filter(Boolean)
+            .join("\n\n")
+        : "";
+      const fallbackMaritime = "I am here to assist with your maritime and company SMS procedures. How can I help you?";
+      const resolvedContent = rawContent || sectionsContent || fallbackMaritime;
 
-    const assistantMsg = {
-      role: "assistant",
-      content: assistantPayload.content || "",
-      sections: assistantPayload.sections || [],
-      question_suggestions: assistantPayload.question_suggestions || [],
-      metadata: assistantPayload.metadata || {},
-      videos: assistantPayload.media?.videos || [],
-      images: assistantPayload.media?.images || [],
-      pdfs: assistantPayload.media?.pdfs || [],
-      timestamp: new Date().toISOString(),
-    };
+      const assistantMsg = {
+        role: "assistant",
+        content: resolvedContent,
+        sections: assistantPayload.sections || [],
+        question_suggestions: assistantPayload.question_suggestions || [],
+        metadata: assistantPayload.metadata || {},
+        videos: assistantPayload.media?.videos || [],
+        images: assistantPayload.media?.images || [],
+        pdfs: assistantPayload.media?.pdfs || [],
+        isStreaming: false,
+        isThinking: false,
+        timestamp: new Date().toISOString(),
+      };
 
-    setmessages((prev) => [...prev, userMsg, assistantMsg]);
+      if (!prev || prev.length === 0) {
+        const userMsg = {
+          role: "user",
+          content: userQuery || "",
+          timestamp: new Date().toISOString(),
+        };
+        return [userMsg, assistantMsg];
+      }
+
+      let lastAssistantIndex = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (prev[i]?.role === "assistant") {
+          lastAssistantIndex = i;
+          break;
+        }
+      }
+
+      if (lastAssistantIndex !== -1) {
+        const existingMsg = prev[lastAssistantIndex];
+        const finalContent =
+          resolvedContent || existingMsg.content || fallbackMaritime;
+
+        const newMessages = [...prev];
+        newMessages[lastAssistantIndex] = {
+          ...existingMsg,
+          ...assistantMsg,
+          content: finalContent,
+          isStreaming: false,
+          isThinking: false,
+        };
+        return newMessages;
+      } else {
+        const userMsg = {
+          role: "user",
+          content: userQuery || "",
+          timestamp: new Date().toISOString(),
+        };
+        return [...prev, userMsg, assistantMsg];
+      }
+    });
+
     if (typeof fetchSessions === "function") {
       fetchSessions("", true);
     }
+    setTimeout(() => {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 50);
   }, [setmessages, fetchSessions]);
 
   const [sourcesData, setSourcesData] = useState({
@@ -652,9 +798,107 @@ const ChatWindow = ({
         textareaRef.current.style.height = "auto";
       }
       setDisableNewChat(true);
+      if (isVoiceModeOpen && voiceSessionRef.current) {
+        voiceSessionRef.current.setState("PROCESSING");
+      }
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
+
+      // Real-time Voice Streaming Sentence Buffer
+      let voiceSentenceBuffer = "";
+      let hasSentVoiceSentence = false;
+
+      const cleanForSpeech = (text) => {
+        if (!text) return "";
+        return text
+          .replace(/```[\s\S]*?```/g, "")
+          .replace(/`([^`]+)`/g, "$1")
+          .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+          .replace(/@@SOURCE_REF_\d+@@/g, "")
+          .replace(/[\(\*_]*\s*AI Advisory Observation only[\s\S]*?(?:Management of Change|\bMoC\b)[\s\S]*?[\)\*_]*/gi, "")
+          .replace(/^[ \t]*[#*\->+|]+[ \t]*/gm, "")
+          .replace(/\*\*([^*]+)\*\*/g, "$1")
+          .replace(/\*([^*]+)\*/g, "$1")
+          .replace(/\s+/g, " ")
+          .trim();
+      };
+
+      const isAbbreviationOrDigit = (cand) => {
+        const c = (cand || "").trim();
+        // If ends with single number or letter dot: '1.', 'A.', '21.'
+        if (/(?:^|\s)(?:[0-9]{1,3}|[a-zA-Z])\.$/.test(c)) return true;
+        if (/\b(?:e\.g|i\.e|vs|approx|dr|mr|mrs|capt|ch|sec|no|vol|ref|doc|min|max|temp)\.$/i.test(c)) return true;
+        if (/\b\d+\.$/.test(c)) return true;
+        return false;
+      };
+
+      const pushVoiceTokens = (newToken) => {
+        if (!isVoiceModeOpen || !voiceSessionRef.current) return;
+
+        voiceSentenceBuffer += newToken;
+
+        while (true) {
+          const match = voiceSentenceBuffer.match(/(\r?\n+|[.!?]\s+)/);
+          if (!match) break;
+
+          let punct = match[1];
+          let bIdx = match.index;
+          let bLen = punct.length;
+
+          let cand = voiceSentenceBuffer.slice(0, bIdx + (punct.startsWith(".") || punct.startsWith("!") || punct.startsWith("?") ? 1 : 0));
+          if (punct.startsWith(".") && isAbbreviationOrDigit(cand)) {
+            // Check next boundary
+            const nextMatch = voiceSentenceBuffer.slice(bIdx + bLen).match(/(\r?\n+|[.!?]\s+)/);
+            if (!nextMatch) break;
+            bIdx = bIdx + bLen + nextMatch.index;
+            punct = nextMatch[1];
+            bLen = punct.length;
+            cand = voiceSentenceBuffer.slice(0, bIdx + (punct.startsWith(".") || punct.startsWith("!") || punct.startsWith("?") ? 1 : 0));
+            if (punct.startsWith(".") && isAbbreviationOrDigit(cand)) break;
+          }
+
+          let rawPart = voiceSentenceBuffer.slice(0, bIdx).trim();
+          voiceSentenceBuffer = voiceSentenceBuffer.slice(bIdx + bLen);
+
+          if (punct.startsWith(".") || punct.startsWith("!") || punct.startsWith("?")) {
+            rawPart = rawPart + punct[0];
+          } else if (!/[.!?]$/.test(rawPart) && rawPart.length > 0) {
+            rawPart = rawPart + ".";
+          }
+
+          const sentenceToSpeak = cleanForSpeech(rawPart);
+          if (sentenceToSpeak && sentenceToSpeak.length > 2 && /[a-zA-Z]/.test(sentenceToSpeak)) {
+            if (!hasSentVoiceSentence) {
+              voiceSessionRef.current.prepareSentenceStreaming?.();
+              hasSentVoiceSentence = true;
+            }
+            voiceSessionRef.current.queueSentence?.(sentenceToSpeak, false);
+          }
+        }
+      };
+
+      const finishVoiceStreaming = () => {
+        if (!isVoiceModeOpen || !voiceSessionRef.current) return;
+
+        if (hasSentVoiceSentence) {
+          const remaining = cleanForSpeech(voiceSentenceBuffer);
+          if (remaining && remaining.length > 1 && /[a-zA-Z]/.test(remaining)) {
+            const formattedRemaining = /[.!?]$/.test(remaining) ? remaining : remaining + ".";
+            voiceSessionRef.current.queueSentence?.(formattedRemaining, true);
+          }
+          voiceSessionRef.current.finishSentences?.();
+        } else {
+          // Fallback: If response was sent in one single non-token chunk
+          const speakable = cleanForSpeech(assistantMsg.content || "");
+          if (speakable && /[a-zA-Z]/.test(speakable)) {
+            voiceSessionRef.current.speak(speakable);
+          } else {
+            voiceSessionRef.current.setState?.("LISTENING");
+          }
+        }
+        voiceSentenceBuffer = "";
+      };
 
       // Tracks the citation that should be appended once the current section's
       // content tokens finish streaming. Flushed when the next source_topic
@@ -839,10 +1083,19 @@ const ChatWindow = ({
               assistantMsg.isStreaming = true;
               if (chunk.token !== undefined) {
                 assistantMsg.content += chunk.token;
+                if (isVoiceModeOpen && voiceSessionRef.current) {
+                  pushVoiceTokens(chunk.token);
+                }
               } else if (chunk.content !== undefined) {
                 assistantMsg.content = chunk.content;
+                if (isVoiceModeOpen && voiceSessionRef.current) {
+                  pushVoiceTokens(chunk.content);
+                }
               } else if (chunk.text !== undefined) {
                 assistantMsg.content = chunk.text;
+                if (isVoiceModeOpen && voiceSessionRef.current) {
+                  pushVoiceTokens(chunk.text);
+                }
               }
 
               if (Array.isArray(chunk.sections) && chunk.sections.length > 0) {
@@ -1079,6 +1332,12 @@ const ChatWindow = ({
 
         assistantMsg.isThinking = false;
         assistantMsg.isStreaming = false;
+
+        // If Voice Mode is active, finalize sentence streaming through ElevenLabs TTS
+        if (isVoiceModeOpen && voiceSessionRef.current) {
+          finishVoiceStreaming();
+        }
+
         setmessages((prev = []) => {
           const nextMsgs = [...prev];
           const idx = nextMsgs.findLastIndex((m) => m.role === "assistant");
@@ -1106,6 +1365,9 @@ const ChatWindow = ({
           setCurrentSessionId?.(activeSessionId);
         }
       } catch (error) {
+        if (isVoiceModeOpen && voiceSessionRef.current) {
+          voiceSessionRef.current.setState("LISTENING");
+        }
         if (axios.isCancel(error) || error.name === "CanceledError" || error.message === "canceled" || error.name === "AbortError") {
           setmessages((prev = []) => prev.filter((m) => !m.isThinking && m.content !== ""));
         } else {
@@ -1126,6 +1388,7 @@ const ChatWindow = ({
       }
     }
   };
+  handleSendRef.current = handleSend;
 
   const handleFileUpload = async (event) => {
     const file = event.target.files?.[0];
@@ -1139,7 +1402,7 @@ const ChatWindow = ({
   };
 
   const showWelcome =
-    !isVoiceModeOpen && !currentSessionId && (!messages || messages.length === 0);
+    !currentSessionId && (!messages || messages.length === 0);
 
   return (
     <div className="bg-bg-light1 flex-1 min-w-0 w-full flex flex-col h-full overflow-hidden pt-2">
@@ -1256,17 +1519,6 @@ const ChatWindow = ({
                 />
               );
             })}
-
-            {/* Embedded In-Chat Voice Interaction Area */}
-            {isVoiceModeOpen && (
-              <VoiceModePanel
-                isActive={isVoiceModeOpen}
-                onClose={() => setIsVoiceModeOpen(false)}
-                sessionId={currentSessionId}
-                userId={userId}
-                onTurnComplete={handleVoiceTurnComplete}
-              />
-            )}
 
             <div ref={bottomRef} className="h-2 shrink-0" />
           </div>
@@ -1388,6 +1640,25 @@ const ChatWindow = ({
         </div>
       )}
 
+      {/* Voice Mode Compact Orb Dock above Input Bar */}
+      {isVoiceModeOpen && (
+        <VoiceModePanel
+          isActive={isVoiceModeOpen}
+          onClose={handleCloseVoice}
+          sessionId={currentSessionId}
+          userId={userId || localStorage.getItem("userId") || localStorage.getItem("user_id") || "guest"}
+          userData={userProfile || (() => { try { return JSON.parse(localStorage.getItem("userData") || "{}"); } catch { return {}; } })()}
+          onTranscript={handleVoiceTranscript}
+          onStatusChunk={handleVoiceStatusChunk}
+          onTokenChunk={handleVoiceTokenChunk}
+          onTurnComplete={handleVoiceTurnComplete}
+          onInterrupt={handleVoiceInterrupt}
+          isMuted={isVoiceMuted}
+          onMuteChange={setIsVoiceMuted}
+          voiceSessionRef={voiceSessionRef}
+        />
+      )}
+
       {/* Input Tray */}
       <div className="px-3 sm:px-6 md:px-10 lg:px-12 py-2 flex flex-col items-end shrink-0 w-full max-w-4xl mx-auto">
         {(selectedFile || isCaptainOrMaster) && (
@@ -1435,7 +1706,7 @@ const ChatWindow = ({
             ref={textareaRef}
             rows={1}
             disabled={disableNewChat}
-            placeholder="Message Dolphin AI"
+            placeholder={isVoiceModeOpen ? "Type..." : "Message Dolphin AI"}
             value={searchQuery}
             onChange={(e) => {
               if (disableNewChat) return;
@@ -1451,10 +1722,15 @@ const ChatWindow = ({
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 e.target.style.height = "auto";
+                if (isVoiceModeOpen) {
+                  handleCloseVoice();
+                }
                 handleSend();
               }
             }}
-            className={`w-full resize-none rounded-2xl py-3.5 sm:py-4 pl-16 sm:pl-20 pr-20 sm:pr-24 text-sm font-inherit bg-bg-paper text-text-primary border border-border-theme focus:outline-hidden focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-text-placeholder1 transition-all max-h-32 ${
+            className={`w-full resize-none rounded-2xl py-3.5 sm:py-4 pl-16 sm:pl-20 ${
+              isVoiceModeOpen ? "pr-24 sm:pr-28" : "pr-20 sm:pr-24"
+            } text-sm font-inherit bg-bg-paper text-text-primary border border-border-theme focus:outline-hidden focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-text-placeholder1 transition-all max-h-32 ${
               disableNewChat ? "opacity-60 cursor-not-allowed bg-bg-default/60" : ""
             }`}
           />
@@ -1478,43 +1754,76 @@ const ChatWindow = ({
             <Message size={18} color={mode === "dark" ? "#1cb0f6" : "#106BA3"} />
           </div>
 
-          {/* Voice Mode Toggle Button */}
-          <button
-            type="button"
-            disabled={disableNewChat}
-            onClick={handleStartVoice}
-            className={`absolute right-10 sm:right-12 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg flex items-center justify-center transition-all z-10 ${
-              isVoiceModeOpen
-                ? "bg-primary text-white shadow-[0_0_12px_rgba(2,132,199,0.5)] animate-pulse"
-                : "text-primary hover:bg-primary/10"
-            } ${
-              disableNewChat ? "opacity-40 cursor-not-allowed pointer-events-none" : "cursor-pointer"
-            }`}
-            title={isVoiceModeOpen ? "End Voice Mode" : "Start Voice Mode"}
-            aria-label={isVoiceModeOpen ? "End Voice Mode" : "Start Voice Mode"}
-          >
-            {isVoiceModeOpen ? <X size={18} /> : <Mic size={18} />}
-          </button>
+          {/* Right Action Controls */}
+          {isVoiceModeOpen ? (
+            <div className="absolute right-2.5 sm:right-3.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 z-10">
+              {/* Mic / Mute Toggle Button */}
+              <button
+                type="button"
+                onClick={handleToggleVoiceMute}
+                className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+                  isVoiceMuted
+                    ? "bg-rose-500/15 text-rose-500 hover:bg-rose-500/25 border border-rose-500/30"
+                    : "text-primary hover:bg-primary/10"
+                }`}
+                title={isVoiceMuted ? "Unmute Microphone" : "Mute Microphone"}
+                aria-label={isVoiceMuted ? "Unmute Microphone" : "Mute Microphone"}
+              >
+                {isVoiceMuted ? (
+                  <MicOff size={18} />
+                ) : (
+                  <VoiceWaveIcon size={19} color={mode === "dark" ? "#1989D0" : "#106BA3"} />
+                )}
+              </button>
 
-          {/* Stop / Send Button */}
-          {disableNewChat ? (
-            <button
-              type="button"
-              onClick={handleStop}
-              className="absolute right-2.5 sm:right-3.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center hover:bg-primary-hover transition-colors z-10"
-              aria-label="Stop response"
-            >
-              <StopIcon size={14} color="#ffffff" />
-            </button>
+              {/* End Voice (Compact Circular X) Button */}
+              <button
+                type="button"
+                onClick={handleCloseVoice}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-text-secondary hover:text-rose-500 hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                title="End Voice Mode (Esc)"
+                aria-label="End Voice Mode"
+              >
+                <X size={18} />
+              </button>
+            </div>
           ) : (
-            <button
-              type="button"
-              onClick={() => handleSend()}
-              className="absolute right-2.5 sm:right-3.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg flex items-center justify-center text-primary hover:bg-primary/10 transition-colors z-10"
-              aria-label="Send message"
-            >
-              <SendIcon size={18} color={mode === "dark" ? "#1989D0" : "#106BA3"} />
-            </button>
+            <>
+              {/* Start Voice Mode Button */}
+              <button
+                type="button"
+                disabled={disableNewChat}
+                onClick={handleStartVoice}
+                className={`absolute right-10 sm:right-12 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg flex items-center justify-center text-primary hover:bg-primary/10 transition-all z-10 ${
+                  disableNewChat ? "opacity-40 cursor-not-allowed pointer-events-none" : "cursor-pointer"
+                }`}
+                title="Start Voice Mode"
+                aria-label="Start Voice Mode"
+              >
+                <VoiceWaveIcon size={19} color={mode === "dark" ? "#1989D0" : "#106BA3"} />
+              </button>
+
+              {/* Stop / Send Button */}
+              {disableNewChat ? (
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  className="absolute right-2.5 sm:right-3.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center hover:bg-primary-hover transition-colors z-10 cursor-pointer"
+                  aria-label="Stop response"
+                >
+                  <StopIcon size={14} color="#ffffff" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleSend()}
+                  className="absolute right-2.5 sm:right-3.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg flex items-center justify-center text-primary hover:bg-primary/10 transition-colors z-10 cursor-pointer"
+                  aria-label="Send message"
+                >
+                  <SendIcon size={18} color={mode === "dark" ? "#1989D0" : "#106BA3"} />
+                </button>
+              )}
+            </>
           )}
         </div>
 

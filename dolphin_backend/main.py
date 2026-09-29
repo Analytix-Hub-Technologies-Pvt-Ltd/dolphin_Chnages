@@ -156,17 +156,20 @@ async def lifespan(app: FastAPI):
         logger.info("⏰ Scheduler started — daily FAISS rebuild at 03:00 AM")
 
         # -----------------------------
-        # Voice Models (Faster-Whisper & Piper TTS)
+        # Voice Mode Services (Deepgram STT & ElevenLabs TTS)
         # -----------------------------
         try:
-            from services.stt_service import FasterWhisperService
-            from services.tts_service import PiperTTSService
-            logger.info("🎙️ Initializing Faster-Whisper and Piper TTS models...")
-            FasterWhisperService.get_instance().load_model()
-            PiperTTSService.get_instance().load_model()
-            logger.success("✅ Voice models loaded successfully!")
+            from services.stt_service import DeepgramSTTService
+            from services.tts_service import ElevenLabsTTSService
+            logger.info("🎙️ Validating Deepgram STT and ElevenLabs TTS configuration...")
+            stt_ready = bool(settings.deepgram_api_key)
+            tts_ready = bool(settings.elevenlabs_api_key)
+            if stt_ready and tts_ready:
+                logger.success("✅ Deepgram STT and ElevenLabs TTS services configured and ready!")
+            else:
+                logger.info(f"ℹ️ Voice services configured: Deepgram={'Ready' if stt_ready else 'Awaiting API Key'}, ElevenLabs={'Ready' if tts_ready else 'Awaiting API Key'}")
         except Exception as ve:
-            logger.warning(f"⚠️ Voice models initialization warning (will load on demand): {ve}")
+            logger.warning(f"⚠️ Voice services initialization warning: {ve}")
 
         yield
 

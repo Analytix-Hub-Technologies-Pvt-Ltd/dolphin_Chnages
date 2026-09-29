@@ -374,4 +374,46 @@ describe("ChatWindow streaming", () => {
       expect(assistantMessage()).toHaveAttribute("data-courses", "1");
     });
   });
+
+  it("toggles Voice Mode in chat content area with compact controls and no top voice header", async () => {
+    render(<Harness />);
+    const startVoiceBtn = screen.getByTitle("Start Voice Mode");
+    expect(startVoiceBtn).toBeInTheDocument();
+
+    // Click to start Voice Mode
+    fireEvent.click(startVoiceBtn);
+
+    // Voice mode region should be visible in chat content area
+    await waitFor(() => {
+      expect(screen.getByRole("region", { name: "Active Voice Mode" })).toBeInTheDocument();
+    });
+
+    // Verify NO top horizontal Voice header / pill exists
+    expect(screen.queryByText("Dolphin Voice")).not.toBeInTheDocument();
+    expect(screen.queryByText("End Voice")).not.toBeInTheDocument();
+
+    // Bottom input placeholder updates to "Type..."
+    expect(screen.getByPlaceholderText("Type...")).toBeInTheDocument();
+
+    // Bottom input bar contains Mic Mute toggle and compact X button
+    const muteBtn = screen.getByTitle("Mute Microphone");
+    const endVoiceBtn = screen.getByTitle("End Voice Mode (Esc)");
+    expect(muteBtn).toBeInTheDocument();
+    expect(endVoiceBtn).toBeInTheDocument();
+
+    // Toggle mute
+    fireEvent.click(muteBtn);
+    expect(screen.getByTitle("Unmute Microphone")).toBeInTheDocument();
+
+    // End voice mode
+    fireEvent.click(endVoiceBtn);
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "Active Voice Mode" })).not.toBeInTheDocument();
+    });
+
+    // Restores normal chat input
+    expect(screen.getByPlaceholderText("Message Dolphin AI")).toBeInTheDocument();
+    expect(screen.getByTitle("Start Voice Mode")).toBeInTheDocument();
+  });
 });
+

@@ -24,15 +24,28 @@ async def greeting_node(state: Dict[str, Any]) -> Dict[str, Any]:
     user_name = decision.get("user_name") or user_profile.get("user_name") or user_profile.get("name")
 
     # 🔹 Content
-    greeting_body = (
-        "Welcome to Dolphin AI. Answers to your questions will be based exclusively on our internal knowledge library. "
-        "In addition, as your company has uploaded its SMS documents, responses will be tailored to align with your company's Safety Management System."
-    )
+    q_clean = (query or "").lower().strip().rstrip("?.!")
+    is_identity = any(p in q_clean for p in ["who are you", "what are you", "what can you do", "what is dolphin", "tell me about yourself", "introduce yourself", "who made you", "what do you do"])
 
-    if user_name:
-        content = f"Hello {user_name}!\n\n{greeting_body}"
+    if is_identity:
+        content = (
+            "I am **Dolphin AI**, an expert maritime education assistant and HSQE advisory co-pilot.\n\n"
+            "I can assist you with:\n"
+            "- **Maritime Technical Knowledge:** Engineering, deck operations, navigation, cargo handling, and seamanship.\n"
+            "- **International Regulations:** Standards under SOLAS, MARPOL, STCW, and the ISM Code.\n"
+            "- **Company Safety Management:** Step-by-step guidance tailored to your company's uploaded SMS and SOP manuals.\n\n"
+            "How can I help you today?"
+        )
     else:
-        content = greeting_body
+        greeting_body = (
+            "Welcome to Dolphin AI. Answers to your questions will be based exclusively on our internal knowledge library. "
+            "In addition, as your company has uploaded its SMS documents, responses will be tailored to align with your company's Safety Management System."
+        )
+
+        if user_name:
+            content = f"Hello {user_name}!\n\n{greeting_body}"
+        else:
+            content = greeting_body
 
     # 🔹 No suggestions (same logic)
     dynamic_suggestions = []

@@ -32,21 +32,25 @@ class GPTIntentService:
                         "content": (
                             "Classify the user message into EXACTLY one category.\n\n"
                             "Valid categories:\n"
-                            "GREETING – greetings like hi, hello, good morning, hey, introductions (I am X, my name is X, this is X)\n"
-                            "GOODBYE – bye, see you, log off, signing off\n"
-                            "THANK – thanking or appreciation messages\n"
-                            "WELL_WISH – how are you, hope you are well, how are you feeling\n"
+                            "GREETING – greetings like hi, hello, good morning, hey, user introductions (I am X, my name is X), and bot identity inquiries (who are you, what can you do, tell me about yourself, what is dolphin ai)\n"
+                            "GOODBYE – bye, see you, log off, signing off, farewell\n"
+                            "THANK – thanking or appreciation messages (thanks, thank you, appreciate it)\n"
+                            "WELL_WISH – well wishes and casual small-talk check-ins (how are you, are you doing, what are you doing, how are you doing, how is it going, how are things, hope you are well, how are you feeling, whats up)\n"
+                            "OUT_OF_SCOPE – completely non-marine / unrelated questions or requests (e.g. cooking/recipes, programming/code, sports, celebrities, general math/science, movies, jokes, weather in non-marine context, general trivia)\n"
                             "NEGATIVE – dissatisfaction, complaints, discouraging statements (NOT workplace safety questions - those are QUERY)\n"
                             "THREATENING – harsh, abusive, threatening, or aggressive commands\n"
-                            "QUERY – genuine questions or information-seeking messages about marine topics, workplace safety, crew management, harassment, bullying, intoxication, or operational procedures\n\n"
-                            "IMPORTANT: Messages like 'I am [name]', 'My name is [name]', 'This is [name]' are GREETING (user introductions).\n\n"
+                            "QUERY – genuine maritime domain questions or information-seeking messages about marine topics, ships, navigation, engines, cargo, seamanship, SOLAS, MARPOL, ISM, SMS, SOPs, checklists, workplace safety, crew management, or operational procedures\n\n"
+                            "IMPORTANT:\n"
+                            "- Messages like 'I am [name]', 'My name is [name]', 'who are you', 'what can you do' are GREETING.\n"
+                            "- Messages like 'are you doing', 'how are you doing', 'what are you doing' are WELL_WISH.\n"
+                            "- Completely non-marine questions like 'how to cook pasta', 'write python code', 'who is elon musk', 'tell me a joke' are OUT_OF_SCOPE.\n\n"
                             "Rules:\n"
                             "- Return ONLY the category name (one word)\n"
                             "- Do NOT explain or add anything else\n"
                             "- Choose the closest matching intent\n"
-                            "- When in doubt between GREETING and QUERY, choose GREETING if it's an introduction\n"
+                            "- When in doubt between GREETING/WELL_WISH and QUERY, choose GREETING/WELL_WISH if it's casual conversation\n"
                             "- Workplace safety questions (harassment, bullying, intoxication, crew incidents) are always QUERY, NOT NEGATIVE\n"
-                            "- Questions asking for advice or how to handle situations are QUERY\n"
+                            "- Questions asking for advice or how to handle situations in marine context are QUERY\n"
                         ),
                     },
                     {"role": "user", "content": message},
@@ -63,7 +67,7 @@ class GPTIntentService:
             # ✅ Validate classification
             valid_categories = {
                 "GREETING", "GOODBYE", "THANK", "WELL_WISH",
-                "NEGATIVE", "THREATENING", "QUERY"
+                "OUT_OF_SCOPE", "NEGATIVE", "THREATENING", "QUERY"
             }
 
             if classification not in valid_categories:

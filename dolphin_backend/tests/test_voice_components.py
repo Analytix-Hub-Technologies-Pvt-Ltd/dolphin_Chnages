@@ -46,3 +46,14 @@ def test_tts_normalizer_split_into_sentences():
     assert sentences[1].startswith("Atmospheric testing must be done")
     assert sentences[2].startswith("Is the ventilation active")
     assert sentences[3].startswith("Yes it is")
+
+
+def test_tts_normalizer_citations_and_acronyms():
+    text = "According to company SMS @@SOURCE_REF_1@@, check the SCBA and CO2 levels.\n\n*(AI Advisory Observation only - MoC is required)*"
+    normalized = TTSNormalizer.normalize_for_tts(text)
+    assert "@@SOURCE_REF_1@@" not in normalized
+    assert "@" not in normalized
+    assert "AI Advisory" not in normalized
+    assert "S-M-S" in normalized
+    assert "S-C-B-A" in normalized
+    assert "C-O-2" in normalized

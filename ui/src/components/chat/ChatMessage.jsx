@@ -361,12 +361,17 @@ const ChatMessage = ({
                 }}
               />
               {isTyping && (
-                <span className="inline-flex items-center ml-1.5 align-middle select-none">
+                <span className="inline-flex items-center gap-1.5 ml-1 align-middle select-none text-xs text-text-secondary dark:text-slate-400">
                   <img
                     src={mode === "dark" ? DolphinIconW : DolphinIconB}
                     alt="Dolphin"
-                    className="w-4 h-4 sm:w-4.5 sm:h-4.5 object-contain animate-dolphin-wave drop-shadow-xs"
+                    className="w-4 h-4 sm:w-4.5 sm:h-4.5 object-contain animate-dolphin-wave drop-shadow-xs shrink-0"
                   />
+                  {!displayedContent && (
+                    <span className="italic tracking-tight animate-pulse">
+                      {msg.statusText || "Dolphin is thinking..."}
+                    </span>
+                  )}
                 </span>
               )}
 

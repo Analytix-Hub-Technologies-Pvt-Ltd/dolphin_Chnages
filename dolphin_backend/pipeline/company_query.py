@@ -31,9 +31,9 @@ LAYER 1 — DOLPHIN COURSE LESSONS & MARITIME TECHNICAL KNOWLEDGE BASE:
 CRITICAL DYNAMIC RELEVANCE & EXHAUSTIVE SYNTHESIS INSTRUCTIONS:
 
 PRIMARY MANDATE — COMPANY DOCUMENT FIRST PRIORITY:
-1. Always give FIRST PRIORITY to Company SMS/QMS Documents whenever the company documentation contains policies, operational guidelines, safety precautions, hazard controls, equipment instructions, or procedures addressing the topic of the question (e.g. Snap-back zones & Mooring operations, Enclosed space entry, Emergency fire pump, Navigation, Cargo handling, Bunkering, Hot work, etc.).
-2. If the company documents contain specific guidelines, safety rules, deck markings, line handling procedures, or risk assessments covering the queried subject (such as snap-back hazard controls under mooring operations), they are HIGHLY RELEVANT. You MUST generate Section 1 with full procedural completeness.
-3. Fallback to NO_COMPANY_DATA ONLY when the company documents have ZERO procedural or contextual relation to the queried topic (e.g. asking about diesel engine overhaul when the only retrieved chunks are about chart corrections or medical supplies).
+1. Always give FIRST PRIORITY to Company SMS/QMS Documents in LAYER 2. If the provided company documents contain ANY relevant operational procedures, guidelines, safety rules, checklists, standing orders, equipment instructions, or documentation covering the query or its broader shipboard domain (e.g. Mooring, Enclosed space, Fire pump, Navigation, Bunkering, Hot work, Documentation, Bridge orders), you MUST generate Section 1 with full procedural completeness.
+2. Even if the retrieved company text covers the broader procedure (e.g. asking about mooring lines/winches when the document covers Mooring Operations SOP, or asking about pump starting when the document covers Emergency Procedures), treat it as HIGHLY RELEVANT. Extract and present all applicable requirements, safety rules, deck precautions, and checklists in Section 1.
+3. Output NO_COMPANY_DATA ONLY and strictly when the company documents have ZERO topical relation to the query (e.g. asking about diesel engine overhaul when the only retrieved chunks are about chart corrections or medical supplies). If relevant shipboard procedures exist, synthesize Section 1.
 
 TARGET EXHAUSTIVENESS & DEPTH (FULL PROCEDURAL COMPLETENESS — NEVER SUMMARIZE OR TRUNCATE):
 - You MUST synthesize an exhaustive, in-depth technical response with maximum procedural detail drawn from all provided company chunks.
@@ -49,7 +49,7 @@ TARGET EXHAUSTIVENESS & DEPTH (FULL PROCEDURAL COMPLETENESS — NEVER SUMMARIZE 
 
 - **FULL PROCEDURAL EXTRACTION & ELABORATION (DO NOT CONDENSE OR SHORTEN):**
   • **CRITICAL MANDATORY TABLE & CHECKLIST REPRODUCTION:**
-    - If ANY table, responsibility matrix, or checklist exists in the retrieved Company Documents (such as `| Activity | Responsibility |` or procedural action tables), you MUST ALWAYS output the COMPLETE, FULL Markdown Table at the very beginning of Section 1.
+    - If ANY table, responsibility matrix, or checklist exists in the retrieved Company Documents (preserve the exact columns from the source document, such as `| Activity | Description |` or `| Activity | Responsibility |` without inventing columns), you MUST ALWAYS output the COMPLETE, FULL Markdown Table at the very beginning of Section 1.
     - Include every single activity, parameter, and responsibility row present in the source text without omitting or summarizing any row.
     - If a multi-item checklist exists, break it down into clean, structured individual rows or distinct bullet points. Never compress multiple items into one cell.
   • **EXHAUSTIVE MULTI-PROCEDURAL BREAKDOWN:**
@@ -87,14 +87,14 @@ TARGET EXHAUSTIVENESS & DEPTH (FULL PROCEDURAL COMPLETENESS — NEVER SUMMARIZE 
   *(AI Advisory Observation only — any procedure update must be reviewed by Company HSQE and processed through formal Management of Change [MoC]).*
 
 RULES:
-- CRITICAL OVERRIDE: If the retrieved Company Documents in LAYER 2 do NOT contain relevant procedures, rules, or operational standards directly answering or regulating the USER QUESTION (e.g. general maritime concepts, EEDI/CII, engineering theory, or unrelated company procedures), output ONLY: NO_COMPANY_DATA without any markdown or greetings.
-- When relevant company procedures exist: Start directly on line 1 with "### 🏢 1. {company_name}'s Safety Management System (SMS / QMS)".
+- When company documents contain relevant or related shipboard procedures: Start directly on line 1 with "### 🏢 1. {company_name}'s Safety Management System (SMS / QMS)".
 - Output Document Title, SOP Name, and Section directly under the Section 1 header.
 - In Section 1, reproduce the complete multi-row table and exhaustively detail all sub-procedures based strictly on Company SMS.
 - MANDATORY TABLE FORMATTING: ALL tables, checklists, matrices, and tabular procedures MUST be formatted in standard GitHub Flavored Markdown (GFM) using pipe delimiters (`|`) and a mandatory header separator row (`| :--- | :--- |`). NEVER output raw tab-separated or space-separated columns without pipes.
 - Section 2 is STRICTLY and INDEPENDENTLY synthesized 100% from the internal Dolphin course lessons in LAYER 1 with complete depth and detail, completely uninfluenced by company SMS documents.
 - Section 3 provides the comparative gap analysis between Section 1 and Section 2.
 - Maintain clean Markdown formatting, bold headings, and professional maritime structure throughout.
+- Fallback to ONLY "NO_COMPANY_DATA" strictly when LAYER 2 is completely empty or completely irrelevant (zero relation to the subject). If relevant company procedures exist in LAYER 2, NEVER output NO_COMPANY_DATA.
 """
 
 
@@ -424,8 +424,8 @@ def is_company_query(query: str, company_name: str) -> bool:
 
     # 3. Check for possessives/pronouns combined with work/vessel terms
     possessive_patterns = [
-        r"\bmy\s+(company|sms|sop|checklist|procedure|policy|vessel|ship|boat|crew|captain|master|chief|officer)\b",
-        r"\bour\s+(company|sms|sop|checklist|procedure|policy|vessel|ship|boat|crew|captain|master|chief|officer)\b",
+        r"\bmy\s+(company|sms|sop|sops|checklist|checklists|procedure|procedures|policy|policies|manual|manuals|vessel|ship|boat|crew|captain|master|chief|officer)\b",
+        r"\bour\s+(company|sms|sop|sops|checklist|checklists|procedure|procedures|policy|policies|manual|manuals|vessel|ship|boat|crew|captain|master|chief|officer)\b",
         r"\bon\s+(my|our)\s+(vessel|ship|fleet)\b",
         r"\bonboard\s+(my|our)\s+(vessel|ship|fleet)\b"
     ]
@@ -555,6 +555,25 @@ async def company_query_node(
         if not has_overlap:
             logger.info(
                 f"[Company Query] Retrieved company_chunks have NO overlap with query distinctive terms {distinctive_terms}. "
+                f"Setting company_answer = None and keeping course answer."
+            )
+            state["company_answer"] = None
+            return state
+    else:
+        # If no distinctive terms, check whether substantive query words exist and overlap with chunks
+        q_clean = query.lower().strip()
+        non_stop_words = [
+            w for w in re.findall(r'\b[a-z0-9]+\b', q_clean)
+            if len(w) >= 3 and w not in {
+                "what", "why", "how", "when", "where", "which", "who", "are", "you", "doing",
+                "the", "this", "that", "for", "with", "from", "can", "tell", "explain", "give",
+                "show", "please", "about", "your", "mine", "some", "more", "help"
+            }
+        ]
+        has_overlap = any(is_term_or_compound_in_text(w, all_chunks_text) for w in non_stop_words) if non_stop_words else False
+        if not has_overlap:
+            logger.info(
+                f"[Company Query] Query '{query}' has no lexical or procedural overlap with retrieved company chunks. "
                 f"Setting company_answer = None and keeping course answer."
             )
             state["company_answer"] = None

@@ -102,8 +102,11 @@ class TTSNormalizer:
 
         content = text.strip()
 
+        # 0. Strip source ref citation badges (e.g. @@SOURCE_REF_1@@) and AI Advisory footers
+        content = re.sub(r"@@SOURCE_REF_\d+@@", "", content)
+        content = re.sub(r"[\(\*_]*\s*AI Advisory Observation only[\s\S]*?(?:Management of Change|\bMoC\b)[\s\S]*?[\)\*_]*", "", content, flags=re.IGNORECASE)
+
         # 1. Convert Markdown tables to spoken text
-        # Regex to capture markdown tables
         table_pattern = re.compile(
             r"(?:(?:^|\n)\|[^\n]+\|\r?\n(?:\|(?:\s*:?-+:?\s*\|)+\r?\n)(?:\|[^\n]+\|\r?\n?)+)",
             re.MULTILINE
@@ -134,16 +137,28 @@ class TTSNormalizer:
         content = re.sub(r"_([^_]+)_", r"\1", content)
         content = re.sub(r"~~([^~]+)~~", r"\1", content)
 
-        # 7. Clean bullet points and list markers (* , - , + , 1. ) -> Natural sentence breaks
+        # 7. Clean bullet points and list markers
+        # Convert numbered lists ('1. ', '2. ') to 'Point 1: ', 'Point 2: ' so TTS engine reads the point number clearly
+        content = re.sub(r"^\s*(\d+)\.\s+", r"Point \1: ", content, flags=re.MULTILINE)
         content = re.sub(r"^\s*[\*\-\+]\s+", "", content, flags=re.MULTILINE)
-        content = re.sub(r"^\s*\d+\.\s+", "", content, flags=re.MULTILINE)
 
         # 8. Clean HTML tags
         content = re.sub(r"<[^>]+>", "", content)
 
-        # 9. Clean special symbols & expand abbreviations for clear pronunciation
+        # 9. Clean abbreviations to spoken phrases before punctuation splitting
+        content = re.sub(r"(?i)\b(?:e\.g\.|e\.g\b)", "for example,", content)
+        content = re.sub(r"(?i)\b(?:i\.e\.|i\.e\b)", "that is,", content)
+        content = re.sub(r"(?i)\b(?:etc\.|etc\b)", "etcetera.", content)
+        content = re.sub(r"(?i)\b(?:vs\.|vs\b)", "versus", content)
+        content = re.sub(r"(?i)\b(?:approx\.|approx\b)", "approximately", content)
+        content = re.sub(r"(?i)\b(?:no\.)\s*(\d+)", r"number \1", content)
+        content = re.sub(r"(?i)\b(?:ch\.)\s*(\d+|[IVXLCDM]+)", r"Chapter \1", content)
+        content = re.sub(r"(?i)\b(?:sec\.)\s*(\d+)", r"Section \1", content)
+        content = re.sub(r"(?i)\b(?:para\.)\s*(\d+)", r"Paragraph \1", content)
+        content = re.sub(r"(?i)\b(?:reg\.)\s*(\d+)", r"Regulation \1", content)
+
+        # 10. Clean special symbols & units for clear pronunciation
         content = content.replace("&", " and ")
-        content = content.replace("@", " at ")
         content = content.replace("%", " percent ")
         content = content.replace("°C", " degrees Celsius ")
         content = content.replace("°F", " degrees Fahrenheit ")
@@ -154,15 +169,47 @@ class TTSNormalizer:
         content = content.replace("<", " less than ")
         content = content.replace("=", " equals ")
         content = content.replace("/", " / ")
+        content = content.replace("@", " at ")
 
-        # 10. Clean leftover markdown artifacts (pipes, excessive dashes, underscores)
+        # 11. Phonetic expansion for maritime acronyms to prevent distorted speech
+        acronym_map = {
+            r"\bSMS\b": "S-M-S",
+            r"\bSOLAS\b": "Solas",
+            r"\bMARPOL\b": "Marpol",
+            r"\bSTCW\b": "S-T-C-W",
+            r"\bECDIS\b": "Ekdis",
+            r"\bISM\b": "I-S-M",
+            r"\bISPS\b": "I-S-P-S",
+            r"\bPPE\b": "P-P-E",
+            r"\bEEBD\b": "E-E-B-D",
+            r"\bSCBA\b": "S-C-B-A",
+            r"\bLSA\b": "L-S-A",
+            r"\bFFA\b": "F-F-A",
+            r"\bCO2\b": "C-O-2",
+            r"\bO2\b": "oxygen",
+            r"\bH2S\b": "H-2-S",
+            r"\bLEL\b": "L-E-L",
+            r"\bUEL\b": "U-E-L",
+            r"\bPPM\b": "P-P-M",
+            r"\bMoC\b": "M-O-C",
+            r"\bETA\b": "E-T-A",
+            r"\bETD\b": "E-T-D",
+            r"\bVHF\b": "V-H-F",
+            r"\bAIS\b": "A-I-S",
+            r"\bGPS\b": "G-P-S",
+            r"\bGMDSS\b": "G-M-D-S-S",
+        }
+        for pattern, replacement in acronym_map.items():
+            content = re.sub(pattern, replacement, content)
+
+        # 12. Clean leftover markdown artifacts (pipes, excessive dashes, underscores)
         content = re.sub(r"[\|_~]", " ", content)
         content = re.sub(r"-{2,}", " ", content)
 
-        # 11. Normalize whitespace & line breaks
+        # 13. Normalize whitespace & line breaks
         content = re.sub(r"\s+", " ", content).strip()
 
-        # 12. Fix repetitive punctuation (e.g. "..", "!!", "??", ".,")
+        # 14. Fix repetitive punctuation (e.g. "..", "!!", "??", ".,")
         content = re.sub(r"\.+", ".", content)
         content = re.sub(r"\s+([.,!?:;])", r"\1", content)
 

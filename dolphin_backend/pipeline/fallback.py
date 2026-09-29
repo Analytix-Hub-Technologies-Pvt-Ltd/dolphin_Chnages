@@ -85,29 +85,40 @@ async def fallback_node(
     content = await generate_dynamic_fallback(query or combined_query, openai_service, is_social=is_social)
 
     category = decision.get("category") or "FALLBACK"
+    is_out_of_scope = category == "OUT_OF_SCOPE" or not is_social
 
     # 🔹 Suggestions (same logic)
-    dynamic_suggestions = suggestion_service.generate(
-        query=combined_query,
-        chunks=chunks,
-        history=messages,
-        short_topic=decision.get("short_topic", "marine topic"),
-        category=category,
-    )
+    if is_out_of_scope:
+        dynamic_suggestions = [
+            "What is anchor watch?",
+            "Explain COLREG Rule 15",
+            "What is boiler design?",
+        ]
+        used_chunks = []
+    else:
+        dynamic_suggestions = suggestion_service.generate(
+            query=combined_query,
+            chunks=chunks,
+            history=messages,
+            short_topic=decision.get("short_topic", "marine topic"),
+            category=category,
+        )
+        used_chunks = chunks
 
     # 🔹 Build response (same structure as BaseNode)
     state["node_response"] = {
         "type": "fallback",
         "content": content,
-        "chunks_used": chunks,
+        "chunks_used": used_chunks,
         "video_suggestions": [],
         "videos": [],
         "images": [],
         "pdfs": [],
         "question_suggestions": dynamic_suggestions,
         "metadata": {
+            "category": "OUT_OF_SCOPE" if is_out_of_scope else category,
             "short_topic": decision.get("short_topic", "marine"),
-            "routing_reason": decision.get("reason", "fallback"),
+            "routing_reason": decision.get("reason", "out_of_scope" if is_out_of_scope else "fallback"),
         },
     }
 
