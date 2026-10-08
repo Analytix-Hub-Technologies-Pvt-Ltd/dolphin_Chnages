@@ -9,7 +9,6 @@ class User(BaseModel):
     id: str
     name: str
     email: str | None = None
-
     role: str | None = None
     company_name: str | None = None
     user_type: str | None = None

@@ -148,6 +148,7 @@ MARINE_INDICATORS = [
     "rudder", "helm", "crossing situation", "head-on", "head on", "overtaking",
     "restricted visibility", "fog signal", "sound signal", "navigation light",
     "day shape", "pilot", "pilotage", "pilot ladder", "draft", "draught",
+    "ladder", "ladders", "winch", "winches",
     "under keel clearance", "ukc", "tide", "squat", "bank effect", "interaction",
     "sextant", "anemometer", "clinometer", "pelorus", "echo sounder", "speed log",
     "chart table", "heading repeater", "gyrocompass", "alidade", "chronometer",

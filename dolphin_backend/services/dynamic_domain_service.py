@@ -42,6 +42,7 @@ class DynamicDomainService:
     def __init__(self) -> None:
         self._exact_topics: Set[str] = set()
         self._topic_ngrams: Set[str] = set()
+        self._single_words: Set[str] = set()
         self._initialized: bool = False
         self._lock = asyncio.Lock()
 
@@ -102,6 +103,7 @@ class DynamicDomainService:
 
             exact_set: Set[str] = set()
             ngram_set: Set[str] = set()
+            single_set: Set[str] = set()
 
             for raw in all_titles:
                 if not raw:
@@ -111,6 +113,13 @@ class DynamicDomainService:
                 for clause in sub_clauses:
                     cl = self._clean_text(clause)
                     words = cl.split()
+
+                    # Harvest meaningful single equipment/topic words (len >= 3, not in STOP_WORDS)
+                    for w in words:
+                        if len(w) >= 3 and w not in STOP_WORDS and not w.isdigit():
+                            single_set.add(w)
+                            single_set.add(self._singularize(w))
+
                     while words and words[0] in STOP_WORDS:
                         words.pop(0)
                     while words and words[-1] in STOP_WORDS:
@@ -132,14 +141,15 @@ class DynamicDomainService:
 
             self._exact_topics = exact_set
             self._topic_ngrams = ngram_set
+            self._single_words = single_set
             self._initialized = True
 
             dur = time.perf_counter() - t0
             logger.success(
-                f"🌊 [Dynamic Domain] Harvested {len(self._exact_topics)} topics and "
-                f"{len(self._topic_ngrams)} n-grams from {len(all_titles)} titles in {dur:.2f}s"
+                f"🌊 [Dynamic Domain] Harvested {len(self._exact_topics)} topics, "
+                f"{len(self._topic_ngrams)} n-grams, and {len(self._single_words)} single terms from {len(all_titles)} titles in {dur:.2f}s"
             )
-            return len(self._exact_topics) + len(self._topic_ngrams)
+            return len(self._exact_topics) + len(self._topic_ngrams) + len(self._single_words)
 
     def is_db_domain_match(self, query: str) -> bool:
         """
@@ -154,6 +164,15 @@ class DynamicDomainService:
         words = q_clean.split()
         if not words:
             return False
+
+        # 0. Single-word equipment/topic check
+        if len(words) == 1:
+            w = words[0]
+            w_sing = self._singularize(w)
+            if w in self._single_words or w_sing in self._single_words:
+                from services.off_topic_detector import OFF_TOPIC_KEYWORDS
+                if w not in OFF_TOPIC_KEYWORDS and w_sing not in OFF_TOPIC_KEYWORDS:
+                    return True
 
         # 1. Full phrase check
         q_sing = self._singularize_phrase(q_clean)
@@ -203,6 +222,7 @@ class DynamicDomainService:
         """Reset harvested cache for hot reload."""
         self._exact_topics.clear()
         self._topic_ngrams.clear()
+        self._single_words.clear()
         self._initialized = False
 
 
