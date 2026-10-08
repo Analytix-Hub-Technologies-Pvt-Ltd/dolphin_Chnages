@@ -221,14 +221,26 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
     user_memory = safe_get(state, "user_memory", {}) or {}
 
     # 🚫 ZERO HALLUCINATION GUARD: Instant check if query is off-topic
-    if is_off_topic_query(query) or is_off_topic_query(standalone_query):
-        logger.info(f"🚫 [QUERY_NODE] Off-topic query detected: '{standalone_query}' (query='{query}')")
-        out_of_scope_text = (
-            "I am Marine Tutor AI, specialized exclusively in maritime education, navigation, "
-            "marine engineering, ship operations, safety regulations, and seafarer training.\n\n"
-            "This topic is outside the marine training curriculum. Please ask questions related to "
-            "maritime and shipboard operations (e.g., COLREGS, marine diesel engines, firefighting, navigation, or port state control)."
+    category = safe_get(state, "category", "") or decision.get("category", "")
+    from services.maritime_acronyms import find_acronyms_in_query
+    from services.off_topic_detector import is_marine_domain_query
+    is_marine = is_marine_domain_query(query) or is_marine_domain_query(standalone_query) or bool(find_acronyms_in_query(query)) or bool(find_acronyms_in_query(standalone_query))
+    if is_off_topic_query(query) or is_off_topic_query(standalone_query) or (category == "OFF_TOPIC" and not is_marine):
+        logger.info(f"🚫 [QUERY_NODE] Off-topic query detected: '{standalone_query}' (query='{query}', cat='{category}')")
+        from services.off_topic_detector import generate_dynamic_off_topic_response
+        out_of_scope_text, dynamic_suggestions = await generate_dynamic_off_topic_response(
+            standalone_query or query
         )
+        stream_callback = safe_get(state, "stream_callback")
+        if stream_callback:
+            try:
+                tokens = re.findall(r'\S+\s*|\n+', out_of_scope_text)
+                for tok in tokens:
+                    await stream_callback({"type": "content", "token": tok})
+                state["_streamed_live"] = True
+            except Exception as e:
+                logger.warning(f"Failed streaming off-topic in query_node: {e}")
+
         response = {
             "type": "query",
             "content": out_of_scope_text,
@@ -243,11 +255,7 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
             "videos": [],
             "images": [],
             "pdfs": [],
-            "question_suggestions": [
-                "What is anchor watch procedure?",
-                "How does COLREG Rule 15 handle a crossing situation?",
-                "What are the checks for marine auxiliary boiler?"
-            ],
+            "question_suggestions": dynamic_suggestions,
             "metadata": {
                 "short_topic": "marine",
                 "routing_reason": "off_topic",
@@ -271,13 +279,19 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
     chunks = filter_chunks(standalone_query, chunks)
 
     if not chunks:
-
-        out_of_scope_text = (
-            "I am Marine Tutor AI, specialized exclusively in maritime education, navigation, "
-            "marine engineering, ship operations, safety regulations, and seafarer training.\n\n"
-            "This topic is outside the marine training curriculum. Please ask questions related to "
-            "maritime and shipboard operations (e.g., COLREGS, marine diesel engines, firefighting, navigation, or port state control)."
+        from services.off_topic_detector import generate_dynamic_off_topic_response
+        out_of_scope_text, dynamic_suggestions = await generate_dynamic_off_topic_response(
+            standalone_query or query
         )
+        stream_callback = safe_get(state, "stream_callback")
+        if stream_callback:
+            try:
+                tokens = re.findall(r'\S+\s*|\n+', out_of_scope_text)
+                for tok in tokens:
+                    await stream_callback({"type": "content", "token": tok})
+                state["_streamed_live"] = True
+            except Exception as e:
+                logger.warning(f"Failed streaming off-topic for empty chunks: {e}")
 
         response = {
             "type": "query",
@@ -293,11 +307,7 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
             "videos": [],
             "images": [],
             "pdfs": [],
-            "question_suggestions": [
-                "What is anchor watch procedure?",
-                "How does COLREG Rule 15 handle a crossing situation?",
-                "What are the checks for marine auxiliary boiler?"
-            ],
+            "question_suggestions": dynamic_suggestions,
             "metadata": {
                 "short_topic": "marine",
                 "routing_reason": "off_topic",

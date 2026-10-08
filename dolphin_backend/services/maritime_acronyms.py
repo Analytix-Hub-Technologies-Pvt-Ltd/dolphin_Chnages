@@ -91,6 +91,7 @@ MARITIME_ACRONYMS_MAP: Dict[str, List[str]] = {
     "BBS": ["behavior based safety", "behaviour based safety", "safety observation", "safety"],
     "BOG": ["boil off gas", "boil-off gas", "cargo boil off", "cargo handling"],
     "BOB": ["bunker on board", "bunkering", "fuel oil remaining"],
+    "CPD": ["continuous professional development", "seafarer training", "stcw", "competence"],
 
     # Conventions, Codes & Organizations
     "SOLAS": ["safety of life at sea", "convention"],
@@ -132,7 +133,28 @@ def get_acronym_expansion(acronym: str) -> List[str]:
     """Get expansion keywords for a given acronym (case-insensitive)."""
     if not acronym:
         return []
-    return MARITIME_ACRONYMS_MAP.get(acronym.strip().upper(), [])
+    acr = acronym.strip().upper()
+    if acr in MARITIME_ACRONYMS_MAP:
+        return MARITIME_ACRONYMS_MAP[acr]
+    try:
+        from services.dynamic_acronym_service import dynamic_acronym_service
+        return dynamic_acronym_service.get_expansion_sync(acr)
+    except Exception:
+        return []
+
+
+def is_known_maritime_acronym(token: str) -> bool:
+    """Check if token is recognized as a maritime acronym in static or dynamic registry."""
+    if not token:
+        return False
+    t_clean = token.strip().upper()
+    if t_clean in KNOWN_ACRONYMS_SET:
+        return True
+    try:
+        from services.dynamic_acronym_service import dynamic_acronym_service
+        return dynamic_acronym_service.is_known_acronym(t_clean)
+    except Exception:
+        return False
 
 
 def find_acronyms_in_query(query: str) -> List[str]:
@@ -144,11 +166,17 @@ def find_acronyms_in_query(query: str) -> List[str]:
     found = []
     for w in words:
         w_clean = re.sub(r'[^a-zA-Z0-9]', '', w).upper()
-        if w_clean in KNOWN_ACRONYMS_SET:
+        if is_known_maritime_acronym(w_clean):
             # If it's a common English word like "me", require it to be uppercase in the input
             if w_clean in AMBIGUOUS_SHORT_WORDS and not w.isupper():
                 continue
             found.append(w_clean)
+        elif len(w_clean) >= 3 and w_clean.endswith('S') and is_known_maritime_acronym(w_clean[:-1]):
+            # Support plural acronyms (e.g. EEBDs -> EEBD, SCBAs -> SCBA, BOGs -> BOG, PLCs -> PLC)
+            sing_acr = w_clean[:-1]
+            if sing_acr in AMBIGUOUS_SHORT_WORDS and not w[:-1].isupper():
+                continue
+            found.append(sing_acr)
     return found
 
 

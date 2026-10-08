@@ -25,32 +25,31 @@ def safe_get(state: Any, key: str, default=None):
 
 
 # 🔹 Dynamic fallback generator
-async def generate_dynamic_fallback(query: str, openai_service=None) -> str:
-
-    default_msg = (
-        "I am Marine Tutor AI, specialized exclusively in maritime education, navigation, "
-        "marine engineering, ship operations, safety regulations, and seafarer training.\n\n"
-        "This topic is outside the marine training curriculum. Please ask questions related to "
-        "maritime and shipboard operations (e.g., COLREGS, marine diesel engines, firefighting, navigation, or port state control)."
-    )
-
-    if not openai_service:
-        return default_msg
+async def generate_dynamic_fallback(query: str, openai_service=None) -> tuple[str, list[str]]:
+    try:
+        from services.off_topic_detector import generate_dynamic_off_topic_response
+        text, suggs = await generate_dynamic_off_topic_response(query)
+        if text:
+            return text, suggs
+    except Exception as e:
+        logger.debug(f"[FALLBACK] Dynamic generator error: {e}")
 
     try:
-        prompt = FALLBACK_PROMPT.format(query=query)
-
-        response = await openai_service.chat(
-            [{"role": "user", "content": prompt}],
-            temperature=0.0,
-            category="FALLBACK",
+        from services.off_topic_detector import get_varied_off_topic_response
+        text, suggs = get_varied_off_topic_response(query)
+        return text, suggs
+    except Exception:
+        return (
+            "I am Marine Tutor AI, specialized exclusively in maritime education, navigation, "
+            "marine engineering, ship operations, safety regulations, and seafarer training.\n\n"
+            "This topic is outside the marine training curriculum. Please ask questions related to "
+            "maritime and shipboard operations (e.g., COLREGS, marine diesel engines, firefighting, navigation, or port state control).",
+            [
+                "What is anchor watch procedure?",
+                "Explain COLREG Rule 15 crossing situation",
+                "What are the checks for marine auxiliary boiler?"
+            ]
         )
-        res_text = response.strip()
-        return res_text if res_text else default_msg
-
-    except Exception as e:
-        logger.error(f"[FALLBACK] LLM failed: {e}")
-        return default_msg
 
 
 # 🔹 MAIN FUNCTION
@@ -67,15 +66,26 @@ async def fallback_node(
     combined_query = " ".join(q for q in [query] + previous_questions if q)
 
     # 🔹 Generate fallback response
-    content = await generate_dynamic_fallback(query or combined_query, openai_service)
+    content, dynamic_suggs = await generate_dynamic_fallback(query or combined_query, openai_service)
     import re
     content = re.sub(r'^(?:#{1,6}\s*)?(?:Out of Scope|Off Topic)[:\s]*\n*', '', content, flags=re.IGNORECASE).strip()
 
-    marine_suggestions = [
+    marine_suggestions = dynamic_suggs or [
         "What is anchor watch procedure?",
         "Explain COLREG Rule 15 crossing situation",
         "What are the checks for marine auxiliary boiler?"
     ]
+
+    # 🔹 Stream response if streaming is active
+    stream_callback = safe_get(state, "stream_callback")
+    if stream_callback:
+        try:
+            tokens = re.findall(r'\S+\s*|\n+', content)
+            for tok in tokens:
+                await stream_callback({"type": "content", "token": tok})
+            state["_streamed_live"] = True
+        except Exception as e:
+            logger.warning(f"Failed streaming fallback response: {e}")
 
     # 🔹 Clear any retrieval chunks and videos from state
     state["retrieval_chunks"] = []

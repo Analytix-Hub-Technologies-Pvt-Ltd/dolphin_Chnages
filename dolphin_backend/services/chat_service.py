@@ -2051,7 +2051,18 @@ class ChatService:
             return [], []
 
         try:
-            raw_chunks = await self.vector_store.search_with_embeddings(query, k=k)
+            # Acronym domain expansion for vector embedding & BM25 search
+            effective_search_query = query
+            try:
+                acrs = find_acronyms_in_query(query)
+                for acr in acrs:
+                    exps = get_acronym_expansion(acr)
+                    if exps:
+                        effective_search_query += " " + " ".join(exps[:3])
+            except Exception:
+                pass
+
+            raw_chunks = await self.vector_store.search_with_embeddings(effective_search_query, k=k)
 
             content_ids: List[int] = []
             for chunk in raw_chunks:
@@ -2106,15 +2117,20 @@ class ChatService:
                 )
                 retrieval_chunks.append(self._normalize_chunk(merged))
 
-            # Safety fallback: If filter dropped all chunks but raw_chunks exist, keep the top 2
+            # Safety fallback: If filter dropped all chunks but raw_chunks exist, keep the top 2 ONLY for marine queries/acronyms
             if not retrieval_chunks and raw_chunks:
-                logger.info("⚠️ Filter dropped all chunks; retaining top raw chunks as safety fallback")
-                for chunk in raw_chunks[:2]:
-                    cid = chunk.get("content_id") or chunk.get("id")
-                    merged = dict(chunk)
-                    if cid is not None and int(cid) in fetched_rows:
-                        merged = {**merged, **fetched_rows[int(cid)], "content_id": int(cid)}
-                    retrieval_chunks.append(self._normalize_chunk(merged))
+                from services.off_topic_detector import is_marine_domain_query, is_obvious_marine_query
+                from services.maritime_acronyms import find_acronyms_in_query
+                if is_marine_domain_query(query) or is_obvious_marine_query(query) or bool(find_acronyms_in_query(query)):
+                    logger.info("⚠️ Filter dropped all chunks; retaining top raw chunks as safety fallback for marine query")
+                    for chunk in raw_chunks[:2]:
+                        cid = chunk.get("content_id") or chunk.get("id")
+                        merged = dict(chunk)
+                        if cid is not None and int(cid) in fetched_rows:
+                            merged = {**merged, **fetched_rows[int(cid)], "content_id": int(cid)}
+                        retrieval_chunks.append(self._normalize_chunk(merged))
+                else:
+                    logger.info(f"🚫 Dropped low-relevance chunks for non-marine query '{query[:50]}'")
 
             # 🌟 IMMEDIATE APPROVED FEEDBACK MEMORY CHECK
             try:
@@ -2416,6 +2432,27 @@ Rules:
         is_user_greeting = is_greeting_query(current_query)
 
         # -----------------------------
+        # DYNAMIC JIT ACRONYM RESOLUTION (Only if not simple social greeting/goodbye)
+        # -----------------------------
+        if not simple_social:
+            words_raw = current_query.strip().split()
+            if 1 <= len(words_raw) <= 3:
+                for w in words_raw:
+                    w_token = re.sub(r'[^a-zA-Z0-9]', '', w).upper()
+                    if 2 <= len(w_token) <= 8:
+                        from services.maritime_acronyms import is_known_maritime_acronym, AMBIGUOUS_SHORT_WORDS
+                        if (
+                            not is_known_maritime_acronym(w_token)
+                            and not is_marine_domain_query(w_token)
+                            and w_token not in AMBIGUOUS_SHORT_WORDS
+                        ):
+                            try:
+                                from services.dynamic_acronym_service import dynamic_acronym_service
+                                await dynamic_acronym_service.resolve_acronym(w_token)
+                            except Exception as e:
+                                logger.debug(f"Dynamic acronym check error for '{w_token}': {e}")
+
+        # -----------------------------
         #  FAST-PATH DIRECT MARITIME QUERIES (Step 3)
         # -----------------------------
         q_lower = current_query.lower().strip()
@@ -2434,12 +2471,18 @@ Rules:
             "tell more", "explain more", "more details", "what else", "what next", "continue"
         ))
 
-        # Check if query looks like a technical term, acronym, machinery phrase, or domain query
+        # Check if query is a verified marine technical term, acronym, machinery phrase, or domain query
         is_tech_term = (
-            (len(words) == 1 and len(q_lower) >= 3 and q_lower.replace('-', '').replace('_', '').isalnum())
-            or (2 <= len(words) <= 3 and not any(w in ("how", "what", "why", "who", "when", "where", "can", "could", "tell") for w in words))
+            bool(find_acronyms_in_query(current_query))
+            or is_marine_domain_query(current_query)
             or any(w in q_lower for w in ("pump", "pumps", "valve", "valves", "bbs", "bog", "bob", "hazard", "hazards", "alarm", "alarms"))
         )
+        if not is_tech_term:
+            try:
+                from services.dynamic_acronym_service import dynamic_acronym_service
+                is_tech_term = any(dynamic_acronym_service.is_known_acronym(w) for w in words if 2 <= len(w) <= 10)
+            except Exception:
+                pass
 
         is_direct_marine = (
             not simple_social
@@ -2451,7 +2494,6 @@ Rules:
                 is_obvious_marine_query(current_query)
                 or is_marine_domain_query(current_query)
                 or is_tech_term
-                or (not previous_questions and len(words) >= 2)
             )
         )
 
@@ -2529,7 +2571,7 @@ Rules:
 
             # Guard: If router mistakenly classified a technical term / machinery query as social or off-topic, override to query
             if is_tech_term and not simple_social and not is_off_topic_query(current_query):
-                if node_type in ("goodbye", "greeting", "fallback", "negative"):
+                if node_type in ("goodbye", "greeting", "fallback", "negative", "off_topic") or router_decision.get("category") == "OFF_TOPIC":
                     logger.info(f"⚡ Overriding false router node_type '{node_type}' to 'query' for technical term: '{current_query}'")
                     node_type = "query"
                     user_category = "QUERY"
@@ -2698,16 +2740,32 @@ Rules:
 
             if node_type == "query":
 
-                if is_off_topic_query(current_query) or is_off_topic_query(standalone_query):
+                if (
+                    is_off_topic_query(current_query)
+                    or is_off_topic_query(standalone_query)
+                    or (
+                        (user_category == "OFF_TOPIC" or router_decision.get("category") == "OFF_TOPIC")
+                        and not is_tech_term
+                        and not is_marine_domain_query(current_query)
+                        and not is_marine_domain_query(standalone_query)
+                    )
+                ):
 
                     logger.info("🚫 OFF TOPIC QUESTION DETECTED")
 
-                    out_of_scope_text = (
-                        "I am Marine Tutor AI, specialized exclusively in maritime education, navigation, "
-                        "marine engineering, ship operations, safety regulations, and seafarer training.\n\n"
-                        "This topic is outside the marine training curriculum. Please ask questions related to "
-                        "maritime and shipboard operations (e.g., COLREGS, marine diesel engines, firefighting, navigation, or port state control)."
+                    from services.off_topic_detector import generate_dynamic_off_topic_response
+                    out_of_scope_text, dynamic_suggestions = await generate_dynamic_off_topic_response(
+                        current_query or standalone_query
                     )
+
+                    if stream_callback:
+                        try:
+                            tokens = re.findall(r'\S+\s*|\n+', out_of_scope_text)
+                            for tok in tokens:
+                                await stream_callback({"type": "content", "token": tok})
+                            state["_streamed_live"] = True
+                        except Exception as stream_err:
+                            logger.warning(f"Failed streaming off-topic response: {stream_err}")
 
                     state["node_response"] = {
                         "type": "query",
@@ -2723,11 +2781,7 @@ Rules:
                         "videos": [],
                         "images": [],
                         "pdfs": [],
-                        "question_suggestions": [
-                            "What is anchor watch procedure?",
-                            "How does COLREG Rule 15 handle a crossing situation?",
-                            "What are the checks for marine auxiliary boiler?"
-                        ],
+                        "question_suggestions": dynamic_suggestions,
                         "metadata": {
                             "routing_reason": "off_topic",
                             "out_of_scope": True,

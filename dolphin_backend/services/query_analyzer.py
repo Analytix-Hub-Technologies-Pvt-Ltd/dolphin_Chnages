@@ -114,6 +114,7 @@ def is_simple_social_intent(query: str) -> str | None:
         "bye", "goodbye", "good bye", "see you", "see ya", "see you later",
         "cya", "later", "catch you later", "talk to you later", "ttyl",
         "signing off", "log off", "logout", "gotta go", "gtg", "bye bye",
+        "bye dolphin", "goodbye dolphin", "bye bot", "goodbye bot",
         "have a good day", "have a nice day"
     }
     if cleaned in goodbye_patterns:
@@ -123,7 +124,8 @@ def is_simple_social_intent(query: str) -> str | None:
     thank_patterns = {
         "thanks", "thank you", "thank you so much", "thanks a lot",
         "appreciate it", "thx", "ty", "cheers", "much appreciated",
-        "thanks so much", "many thanks", "thank u"
+        "thanks so much", "many thanks", "thank u", "thank you very much",
+        "thanks very much"
     }
     if cleaned in thank_patterns:
         return "THANK"
@@ -255,27 +257,31 @@ class QueryAnalyzer:
 
     def _looks_like_technical_term(self, query: str) -> bool:
         """
-        Check if query looks like a technical term/acronym/machinery phrase that should skip GPT classification.
+        Check if query is verified maritime machinery, equipment, operations, or acronym.
+        Strictly requires verification against marine acronyms or domain indicators
+        to avoid false positives on general English words or capitalized sentences.
         """
         if not query or is_off_topic_query(query):
             return False
 
-        q = query.strip()
-        words = q.split()
-
-        # Single word that's 3+ chars and alphanumeric (e.g. BBS, BOG, BOB, pumps, valves, hazards)
-        if len(words) == 1 and len(q) >= 3 and q.replace('-', '').replace('_', '').isalnum():
+        # 1. Marine acronyms (BBS, BOG, BOB, EEBD, etc.)
+        if self._looks_like_marine_acronym(query):
             return True
 
-        # 2-3 words, likely a technical phrase (e.g. acurro pump, extension pump, relief valve)
-        if 2 <= len(words) <= 3 and not any(w.lower() in ("how", "what", "why", "who", "when", "where", "can", "could", "tell") for w in words):
+        # 2. Marine domain indicators & plurals (pumps, valves, boilers, hazards, alarms, etc.)
+        if is_marine_domain_query(query):
             return True
 
-        # Contains uppercase (likely acronym)
-        if any(c.isupper() for c in q):
-            return True
+        # 3. Dynamic acronym check from harvested database
+        try:
+            from services.dynamic_acronym_service import dynamic_acronym_service
+            tokens = re.findall(r'\b[a-zA-Z0-9_\-]{2,10}\b', query)
+            if any(dynamic_acronym_service.is_known_acronym(t) for t in tokens):
+                return True
+        except Exception:
+            pass
 
-        return self._looks_like_marine_acronym(query)
+        return False
 
     async def _generate_standalone_query(
         self, current_query: str, previous_questions: List[str]
@@ -323,8 +329,8 @@ class QueryAnalyzer:
         conversational_openings = r'^(hey|hi|hello|hey there|i need|i\'m asking|something happened|last shift|on my|during my)\s+'
         query_lower = re.sub(conversational_openings, '', query_lower, flags=re.IGNORECASE).strip()
         
-        # Pattern 1: Handle "can/could/would you explain/tell/describe/show"
-        conversational_prefix = r'^(can|could|would|will|should|may|please|kindly)?\s*(you|i|we)?\s*(please|kindly)?\s*(explain|explan|explai|tell|tel|describe|describ|show|give|provide|get|find|know|help|assist)\s*(me|us|with|about|on)?\s*'
+        # Pattern 1: Handle "can/could/would you explain/tell/describe/show/check"
+        conversational_prefix = r'^(can|could|would|will|should|may|please|kindly)?\s*(you|i|we)?\s*(please|kindly)?\s*(explain|explan|explai|tell|tel|describe|describ|show|give|provide|get|find|know|help|assist|check)\s*(me|us|with|about|on)?\s*'
         query_lower = re.sub(conversational_prefix, '', query_lower, flags=re.IGNORECASE).strip()
         
         # Pattern 2: Handle "what/where/when/why/how is/are/does/do" (must match whole auxiliary verb)
@@ -337,7 +343,7 @@ class QueryAnalyzer:
         query_lower = re.sub(procedural_pattern, '', query_lower, flags=re.IGNORECASE).strip()
         
         # Pattern 3: Remove standalone action verbs that might be left over
-        action_verbs_standalone = r'^(explain|explan|explai|tell|tel|describe|describ|show|about|advice|advise)\s+'
+        action_verbs_standalone = r'^(explain|explan|explai|tell|tel|describe|describ|show|about|advice|advise|check)\s+'
         query_lower = re.sub(action_verbs_standalone, '', query_lower, flags=re.IGNORECASE).strip()
         
         # Pattern 4: Remove remaining filler words from start

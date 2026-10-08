@@ -157,9 +157,25 @@ class BM25Store:
         if not query_tokens:
             return []
 
+        # Expand search terms to match bidirectional singular and plural variants seamlessly
+        search_terms: Dict[str, float] = {}  # term -> weight multiplier
+        for term in query_tokens:
+            search_terms[term] = 1.0
+            # Generate stemming variants (e.g. pumps <-> pump, boilers <-> boiler, etc.)
+            if len(term) >= 4:
+                if term.endswith("ies") and len(term) > 4:
+                    search_terms.setdefault(term[:-3] + "y", 0.90)
+                elif term.endswith("es") and len(term) > 4:
+                    search_terms.setdefault(term[:-2], 0.90)
+                    search_terms.setdefault(term[:-1], 0.90)
+                elif term.endswith("s") and len(term) > 3:
+                    search_terms.setdefault(term[:-1], 0.90)
+                else:
+                    search_terms.setdefault(term + "s", 0.90)
+
         scores: Dict[int, float] = defaultdict(float)
 
-        for term in query_tokens:
+        for term, weight in search_terms.items():
             if term not in self.inverted_index:
                 continue
 
@@ -170,7 +186,7 @@ class BM25Store:
                 doc_len = self.doc_lens[doc_idx]
                 numerator = tf * (self.k1 + 1.0)
                 denominator = tf + self.k1 * (1.0 - self.b + self.b * (doc_len / self.avg_doc_len))
-                term_score = idf_val * (numerator / denominator)
+                term_score = idf_val * (numerator / denominator) * weight
                 scores[doc_idx] += term_score
 
         if not scores:

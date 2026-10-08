@@ -457,6 +457,16 @@ async def rebuild_faiss_index(
             checkpoint_file.unlink()
             logger.info("Checkpoint file cleaned up")
 
+        try:
+            from services.dynamic_domain_service import dynamic_domain_service
+            from services.dynamic_acronym_service import dynamic_acronym_service
+            dynamic_domain_service.clear_cache()
+            await dynamic_domain_service.harvest_course_topics()
+            await dynamic_acronym_service.harvest_course_acronyms()
+            logger.info("Dynamic domain & acronym cache refreshed after FAISS rebuild")
+        except Exception as refresh_err:
+            logger.warning(f"Post-rebuild dynamic refresh warning: {refresh_err}")
+
     except Exception as e:
         logger.error(f"FAISS rebuild FAILED: {str(e)}")
         logger.exception(e)

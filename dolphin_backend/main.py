@@ -145,6 +145,20 @@ async def lifespan(app: FastAPI):
         except Exception as app_mem_err:
             logger.warning(f"Approved memory warmup warning: {app_mem_err}")
 
+        try:
+            from services.dynamic_acronym_service import dynamic_acronym_service
+            db_pool = await get_pool()
+            await dynamic_acronym_service.harvest_course_acronyms(db_pool)
+        except Exception as acr_err:
+            logger.warning(f"Dynamic acronym harvest warning: {acr_err}")
+
+        try:
+            from services.dynamic_domain_service import dynamic_domain_service
+            db_pool = await get_pool()
+            await dynamic_domain_service.harvest_course_topics(db_pool)
+        except Exception as dom_err:
+            logger.warning(f"Dynamic domain harvest warning: {dom_err}")
+
         logger.success("🎉 Singletons pre-warmed and ready in memory!")
 
         scheduler = AsyncIOScheduler()

@@ -193,6 +193,19 @@ async def retrieval_node(
     search_query = standalone_query
 
     # -----------------------------
+    # ACRONYM DOMAIN EXPANSION
+    # -----------------------------
+    try:
+        from services.maritime_acronyms import find_acronyms_in_query, get_acronym_expansion
+        acrs = find_acronyms_in_query(search_query)
+        for acr in acrs:
+            exps = get_acronym_expansion(acr)
+            if exps:
+                search_query += " " + " ".join(exps[:3])
+    except Exception:
+        pass
+
+    # -----------------------------
     # QUERY EXPANSION
     # -----------------------------
     if query_expansion_service:
@@ -266,10 +279,15 @@ async def retrieval_node(
         normalized.append(normalize_chunk(merged))
 
     if not normalized and chunks:
-        logger.info("⚠️ Filter dropped all chunks in retrieval_node; retaining top raw chunks as safety fallback")
-        for c in chunks[:2]:
-            db = db_rows.get(c.get("content_id"))
-            normalized.append(normalize_chunk({**c, **(db or {})}))
+        from services.off_topic_detector import is_marine_domain_query, is_obvious_marine_query
+        from services.maritime_acronyms import find_acronyms_in_query
+        if is_marine_domain_query(search_query) or is_obvious_marine_query(search_query) or bool(find_acronyms_in_query(search_query)):
+            logger.info("⚠️ Filter dropped all chunks in retrieval_node; retaining top raw chunks as safety fallback for marine query")
+            for c in chunks[:2]:
+                db = db_rows.get(c.get("content_id"))
+                normalized.append(normalize_chunk({**c, **(db or {})}))
+        else:
+            logger.info(f"🚫 Dropped low-relevance chunks for non-marine query in retrieval_node: '{search_query[:50]}'")
 
     final_chunks = list(normalized or existing_chunks)
 
