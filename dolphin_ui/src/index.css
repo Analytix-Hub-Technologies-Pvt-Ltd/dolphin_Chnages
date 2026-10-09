@@ -1,6 +1,6 @@
 :root {
   --marine-blue: #0c3b5d;
-  --marine-blue2: #106ba3;
+  --marine-blue2:#106BA3;
   --marine-deep: #062842;
   --marine-light: #cde6ff;
   --sand: #f4f0ea;
@@ -10,30 +10,26 @@
   --text: #0f1c2e;
   --muted: #5c7080;
   --border: #d8e2ec;
-  --placeholder: #a4a4a4;
+  --placeholder:#A4A4A4;
   --shadow: 0 14px 40px rgba(0, 40, 73, 0.18);
 }
-
 * {
   box-sizing: border-box;
+  
 }
+
 
 body {
   margin: 0;
   font-family: 'Poppins', sans-serif;
 }
 
-h1, h2, h4, h5, h6 {
-  margin: 0.6rem 0 0.3rem 0;
+h1, h2, h4 ,h5,h6{
+  margin: 0;
   padding: 0;
-  font-weight: 600;
-  line-height: 1.35;
 }
-
-h3 {
-  margin: 0.7rem 0 0.35rem 0;
-  font-weight: 600;
-  line-height: 1.35;
+h3{
+  margin: 0.4rem 0;
 }
 
 img {
@@ -41,82 +37,27 @@ img {
   user-select: none;
 }
 
-ul, ol {
-  margin: 0.4rem 0;
-  padding-left: 1.5rem;
-  line-height: 1.6;
+ul,ol{
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  margin-block-start: 0;
+  margin-block-end: 0;
 }
 
-li {
-  margin-bottom: 0.3rem;
-}
 
-ol > li > ul,
-ul > li > ul,
-ul > li > ol,
-ol > li > ol {
-  margin: 0.25rem 0;
-  padding-left: 1.25rem;
+ol > li > ul {
+  /* display: flex;
+  flex-direction: column; */
+ padding-block-end: 0;
 }
 
 p {
-  margin: 0.5rem 0;
+  margin: 0.4rem 0;
   padding: 0;
-  text-align: left;
-  line-height: 1.6;
-}
-
-/* Markdown Tables */
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1rem 0;
-  font-size: 0.92rem;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-}
-
-thead {
-  background-color: rgba(16, 107, 163, 0.12);
-}
-
-th {
-  padding: 10px 12px;
-  text-align: left;
-  font-weight: 600;
-  border-bottom: 2px solid var(--border);
-  border-right: 1px solid var(--border);
-}
-
-th:last-child {
-  border-right: none;
-}
-
-td {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  border-right: 1px solid var(--border);
-  text-align: left;
-  vertical-align: top;
-}
-
-td:last-child {
-  border-right: none;
-}
-
-tr:nth-child(even) {
-  background-color: rgba(0, 0, 0, 0.025);
-}
-
-tr:hover {
-  background-color: rgba(28, 176, 246, 0.05);
-}
-
-.table-wrapper {
-  width: 100%;
-  overflow-x: auto;
-  margin: 0.75rem 0;
+  text-align: justify;
 }
 
 .message {
@@ -159,14 +100,6 @@ tr:hover {
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
-  background-color: rgba(0, 0, 0, 0.06);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 0.88em;
-}
-
-pre code {
-  background: transparent;
-  padding: 0;
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
 }

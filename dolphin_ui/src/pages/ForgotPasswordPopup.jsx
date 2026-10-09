@@ -13,8 +13,8 @@ import axios from "axios";
 import dolphinBlack from "../assets/images/dolphin_b.png";
 import DolphinWhite from "../assets/images/dolphin_w.png";
 import { useThemeMode } from "../context/ThemeModeContext";
+import { APP_URL } from "../api/config";
 
-const APP_URL = process.env.REACT_APP_BASE_URL || "http://localhost:8000";
 
 export default function ForgotPasswordPopup({ open, handleClose }) {
   const [email, setEmail] = useState("");

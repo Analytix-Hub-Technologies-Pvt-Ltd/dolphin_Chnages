@@ -9,13 +9,14 @@ import "react-pdf/dist/Page/TextLayer.css";
 
 import { pdfjs } from "react-pdf";
 
-pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`;
+pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 const BLOCKED_KEYS = ["Escape", "F12", "PrintScreen"];
 
-const MediaPreviewModal = ({ open, onClose, type, src }) => {
+const MediaPreviewModal = ({ open, onClose, type, src, title }) => {
   const videoRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const isPdf = type === "pdf";
 
   /* 🔐 Security handlers */
   useEffect(() => {
@@ -53,11 +54,14 @@ const MediaPreviewModal = ({ open, onClose, type, src }) => {
     };
   }, [open, onClose]);
 
-  /* ⏹ Stop video on close */
+  /* ⏹ Stop video & reset fullscreen on close */
   useEffect(() => {
-    if (!open && videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.currentTime = 0;
+    if (!open) {
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.currentTime = 0;
+      }
+      setIsFullscreen(false);
     }
   }, [open]);
 
@@ -68,37 +72,72 @@ const MediaPreviewModal = ({ open, onClose, type, src }) => {
       open={open}
       onClose={onClose}
       fullScreen={isFullscreen}
-      maxWidth="md"
+      maxWidth={isFullscreen ? false : "md"}
       fullWidth
       PaperProps={{
         sx: {
           backgroundColor: "black",
           userSelect: "none",
           overflow: "hidden", // 🚫 no scroll in modal
+          position: "relative",
+          ...(isFullscreen && {
+            width: "100vw",
+            height: "100vh",
+            maxWidth: "100vw",
+            maxHeight: "100vh",
+            m: 0,
+            borderRadius: 0,
+          }),
         },
       }}
     >
       {/* Top Right Controls */}
       <Stack
         direction="row"
-        spacing={1}
+        spacing={1.5}
+        alignItems="center"
         sx={{
           position: "absolute",
-          top: 8,
-          right: 8,
-          zIndex: 10,
+          top: 12,
+          right: 16,
+          zIndex: 1400,
         }}
       >
-        {(type === "image" || type === "pdf") && (
+        {title && (
+          <Box
+            sx={{
+              color: "rgba(255,255,255,0.9)",
+              backgroundColor: "rgba(0,0,0,0.65)",
+              backdropFilter: "blur(6px)",
+              px: 1.5,
+              py: 0.6,
+              borderRadius: "6px",
+              maxWidth: { xs: "40vw", sm: "50vw" },
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              fontSize: "0.85rem",
+              fontWeight: 500,
+              border: "1px solid rgba(255,255,255,0.15)",
+            }}
+            title={title}
+          >
+            {title}
+          </Box>
+        )}
+
+        {(type === "image" || type === "pdf" || type === "video") && (
           <IconButton
             onClick={toggleFullscreen}
             sx={{
-              bgcolor: "black",
+              bgcolor: "rgba(0,0,0,0.65)",
               color: "white",
               "&:hover": {
                 bgcolor: "black",
               },
+              boxShadow: "0 2px 8px rgba(0,0,0,0.5)",
             }}
+            title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
           >
             {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
           </IconButton>
@@ -107,12 +146,14 @@ const MediaPreviewModal = ({ open, onClose, type, src }) => {
         <IconButton
           onClick={onClose}
           sx={{
-            bgcolor: "black",
+            bgcolor: "rgba(0,0,0,0.65)",
             color: "white",
             "&:hover": {
               bgcolor: "black",
             },
+            boxShadow: "0 2px 8px rgba(0,0,0,0.5)",
           }}
+          title="Close"
         >
           <CloseIcon />
         </IconButton>
@@ -121,11 +162,16 @@ const MediaPreviewModal = ({ open, onClose, type, src }) => {
       <DialogContent
         sx={{
           p: 0,
-          height: isFullscreen ? "100vh" : 500,
+          height: isFullscreen ? "100vh" : { xs: 450, sm: 550 },
+          width: "100%",
           overflow:
-            isFullscreen && (type === "pdf" || type === "image")
+            isPdf
+              ? "hidden"
+              : isFullscreen && type === "image"
               ? "auto"
               : "hidden",
+          display: "flex",
+          flexDirection: "column",
         }}
       >
         {/* 🎥 VIDEO */}

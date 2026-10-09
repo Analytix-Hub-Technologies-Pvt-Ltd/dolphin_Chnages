@@ -6,6 +6,7 @@ import {
   TextField,
   Typography,
   InputAdornment,
+  
 } from "@mui/material";
 import { useState } from "react";
 import { loginApi } from "../api/apiAuth";
@@ -19,12 +20,17 @@ import HttpsIcon from "@mui/icons-material/Https";
 import raindropImg from "../assets/images/Rain_drop.png";
 import { useThemeMode } from "../context/ThemeModeContext";
 import ForgotPasswordPopup from "./ForgotPasswordPopup";
+import Visibility from "@mui/icons-material/Visibility";
+import VisibilityOff from "@mui/icons-material/VisibilityOff";
+import packageJson from "../../package.json";
 
 export default function Login({ onLoginSuccess }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState({});
   const [openForgot, setOpenForgot] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const { mode } = useThemeMode();
 
@@ -45,13 +51,17 @@ export default function Login({ onLoginSuccess }) {
     e.preventDefault();
     if (!validate()) return;
 
+    setLoading(true);
     try {
       const userId = await loginApi(email, password);
+      localStorage.setItem("user_id", userId);
       onLoginSuccess(userId);
     } catch (error) {
       setErrors({
         form: error.message || "Something went wrong",
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -312,7 +322,7 @@ export default function Login({ onLoginSuccess }) {
                 </Typography>
                 <TextField
                   placeholder="Enter your password"
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   fullWidth
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -338,13 +348,30 @@ export default function Login({ onLoginSuccess }) {
                           <HttpsIcon sx={{ color: "text.placeholder1" }} />
                         </InputAdornment>
                       ),
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <Box
+                            component="span"
+                            onClick={() => setShowPassword((prev) => !prev)}
+                            sx={{ cursor: "pointer", display: "flex" }}
+                          >
+                            {showPassword ? (
+                              <Visibility
+                                sx={{ color: "text.placeholder1" }}
+                              />
+                            ) : (
+                              <VisibilityOff sx={{ color: "text.placeholder1" }} />
+                            )}
+                          </Box>
+                        </InputAdornment>
+                      ),
                     },
                   }}
                 />
               </Box>
             </Stack>
 
-            <Box textAlign="right" my={1}>
+            {/* <Box textAlign="right" my={1}>
               <Typography
                 variant="h6"
                 onClick={() => setOpenForgot(true)}
@@ -359,7 +386,7 @@ export default function Login({ onLoginSuccess }) {
               >
                 Forgot Password ?
               </Typography>
-            </Box>
+            </Box> */}
 
             {errors.form && (
               <Typography color="error" textAlign="center">
@@ -374,13 +401,14 @@ export default function Login({ onLoginSuccess }) {
               size="small"
               sx={{
                 bgcolor: "text.main",
-                py: 0.5,
+                py: 1,
                 borderRadius: 2,
                 mb: 1,
+                mt: 2,
                 color: "text.white",
               }}
             >
-              SIGN IN
+              {loading ? "Signing..." : "SIGN IN"}
             </Button>
 
             <Typography
@@ -388,9 +416,23 @@ export default function Login({ onLoginSuccess }) {
               sx={{
                 color: "text.smallheading",
                 textAlign: "center",
+                mb: 1,
+                mt: 2,
               }}
             >
               © 2025 Mariner Skills , LLC. All rights reserved
+            </Typography>
+
+            <Typography
+              variant="caption"
+              sx={{
+                color: "text.smallheading",
+                textAlign: "center",
+                mb: 2,
+                mt: 1,
+              }}
+            >
+              Version {packageJson.version}
             </Typography>
           </Box>
         </Paper>

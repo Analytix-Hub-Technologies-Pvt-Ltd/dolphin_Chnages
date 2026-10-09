@@ -22,6 +22,7 @@ export const ThemeModeProvider = ({ children }) => {
 
   useEffect(() => {
     localStorage.setItem("themeMode", mode);
+    document.documentElement.setAttribute("data-feedback-theme", mode);
   }, [mode]);
 
   useEffect(() => {
