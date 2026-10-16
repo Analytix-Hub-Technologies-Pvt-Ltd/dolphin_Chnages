@@ -27,6 +27,7 @@ from services.openai_service import OpenAIService
 from services.session_service import SessionService
 from retrieval.faiss_store import FAISSStore
 from core.redis_client import redis_service
+from services.suggestion_service import SuggestionService
 from models.database import get_pool
 from services.query_analyzer import is_simple_social_intent, is_greeting_query
 
@@ -38,6 +39,9 @@ class ChatMessage(BaseModel):
     category: Optional[str] = None
     session_id: Optional[str] = None
     user_id: Optional[str] = None
+    # Set by the UI when the user clicks a "Did you mean...?" option so the
+    # (already specific) query is answered instead of being clarified again.
+    skip_clarification: bool = False
 
 
 class TestChatMessage(BaseModel):
@@ -46,6 +50,7 @@ class TestChatMessage(BaseModel):
     category: Optional[str] = None
     session_id: Optional[str] = None
     user_id: Optional[str] = None
+    skip_clarification: bool = False
 
     # directly pass from frontend / login api
     name: Optional[str] = ""
@@ -143,7 +148,8 @@ async def chat(
         db_messages=messages,
         current_query=user_content,
         category=payload.category,
-        user_details=user_details
+        user_details=user_details,
+        skip_clarification=payload.skip_clarification,
     )
 
     logger.info(f"Updated messages count: {len(updated_messages)}")
@@ -180,6 +186,11 @@ async def chat(
     print("=" * 68 + "\n")
 
     logger.info("Chat success")
+
+    if node_response and getattr(node_response, "question_suggestions", None):
+        node_response.question_suggestions = [
+            SuggestionService.to_suggestion_pair(item) for item in node_response.question_suggestions
+        ]
 
     return node_response
 
@@ -349,6 +360,7 @@ async def chat1(
                     user_details=user_details,
                     status_callback=status_callback,
                     stream_callback=stream_event_callback,
+                    skip_clarification=payload.skip_clarification,
                 )
             )
 
@@ -412,6 +424,11 @@ async def chat1(
            
             sections = node_response.sections or []
 
+            clarification_payload = (node_response.metadata or {}).get("clarification")
+            is_clarification = bool(clarification_payload)
+            # clarification questions and "general overview" answers carry no course media
+            suppress_extras = is_clarification or (node_response.metadata or {}).get("general_overview") is True
+
             is_stream_out_of_scope = (
                 (node_response.metadata or {}).get("out_of_scope") is True
                 or getattr(node_response, "category", "") in ("FALLBACK", "OFF_TOPIC")
@@ -472,17 +489,27 @@ async def chat1(
                         yield f"data: {json.dumps(content_data)}\n\n"
                         await asyncio.sleep(0)
 
-            # suggestions
+            # suggestions (structured pairs of 2-3 word label and full query)
+            raw_suggestions = node_response.question_suggestions or []
+            paired_suggestions = [
+                SuggestionService.to_suggestion_pair(item) for item in raw_suggestions
+            ]
             suggestions_payload = {
                 "type": "suggestions",
-                "question_suggestions": (
-                    node_response.question_suggestions
-                )
+                "question_suggestions": paired_suggestions,
             }
 
             yield (
                 f"data: {json.dumps(suggestions_payload)}\n\n"
             )
+
+            # "Did you mean...?" - structured options so the UI can render chips
+            if is_clarification and isinstance(clarification_payload, dict):
+                yield (
+                    "data: "
+                    + json.dumps({"type": "clarification", **clarification_payload})
+                    + "\n\n"
+                )
 
             is_resp_social = (
                 is_social_query
@@ -491,7 +518,7 @@ async def chat1(
                 or getattr(node_response, "category", "") in ("GREETING", "GOODBYE", "THANK", "WELL_WISH")
             )
 
-            if is_stream_out_of_scope or is_resp_social:
+            if is_stream_out_of_scope or is_resp_social or suppress_extras:
                 media_videos = []
                 media_images = []
                 media_pdfs = []
@@ -502,7 +529,7 @@ async def chat1(
                 media_pdfs = media.get("pdfs", []) or getattr(node_response, "pdfs", []) or []
                 media_topic_codes = media.get("topic_codes", [])
 
-            if not is_stream_out_of_scope and not is_resp_social:
+            if not is_stream_out_of_scope and not is_resp_social and not suppress_extras:
                 media_payload = {
                     "type": "media",
                     "videos": media_videos[:5],
@@ -515,7 +542,7 @@ async def chat1(
                     f"data: {json.dumps(media_payload)}\n\n"
                 )
 
-            company_answer = None if (is_stream_out_of_scope or is_resp_social) else media.get("company_answer")
+            company_answer = None if (is_stream_out_of_scope or is_resp_social or suppress_extras) else media.get("company_answer")
 
             if company_answer:
                 yield (
@@ -532,7 +559,9 @@ async def chat1(
             # -----------------------------
             # TRANSCRIPT RESULT
             # -----------------------------
-            if is_stream_out_of_scope or is_resp_social or transcript_task is None:
+            if is_stream_out_of_scope or is_resp_social or suppress_extras or transcript_task is None:
+                if transcript_task is not None and not transcript_task.done():
+                    transcript_task.cancel()
                 transcript_chunks = []
             else:
                 transcript_chunks = await transcript_task
@@ -582,7 +611,7 @@ async def chat1(
                 if len(unique_chunks) >= 5:
                     break
 
-            if not is_stream_out_of_scope and not is_resp_social and unique_chunks:
+            if not is_stream_out_of_scope and not is_resp_social and not suppress_extras and unique_chunks:
                 yield (
                     "data: "
                     + json.dumps(

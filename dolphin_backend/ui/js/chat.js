@@ -24,6 +24,8 @@ const newSessionButton = document.getElementById('new-session-button');
 const sessionListEl = document.getElementById('session-list');
 const sessionSearchInput = document.getElementById('session-search');
 
+if (messageInput) messageInput.dataset.defaultPlaceholder = messageInput.placeholder;
+
 let currentSessionId = null;
 let sessionCache = [];
 let lastUserPrompt = '';
@@ -271,6 +273,44 @@ const renderSuggestions = (suggestions = []) => {
 
 const renderQuestionSuggestions = (questions = []) => {
   renderSuggestions(questions);
+};
+
+// "Did you mean...?" - clickable options under the bot's clarifying question
+const removeClarification = () => {
+  document.querySelectorAll('.clarification-options').forEach((el) => el.remove());
+};
+
+const renderClarification = (clarification) => {
+  removeClarification();
+  const options = clarification && Array.isArray(clarification.options) ? clarification.options : [];
+  if (options.length === 0) return;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'clarification-options';
+
+  options.forEach((opt) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `clarification-chip clarification-${opt.kind || 'topic'}`;
+    btn.textContent = opt.label;
+    if (opt.hint) btn.title = opt.hint;
+    btn.addEventListener('click', () => {
+      if (opt.kind === 'other' || !opt.query) {
+        // Let the user type their own refinement
+        removeClarification();
+        messageInput.placeholder = `Tell me more about "${clarification.term}"...`;
+        messageInput.focus();
+        return;
+      }
+      removeClarification();
+      messageInput.value = '';
+      sendMessage(opt.query, { skipClarification: true, displayText: opt.kind === 'general' ? opt.label : undefined });
+    });
+    wrap.appendChild(btn);
+  });
+
+  chatWindow.appendChild(wrap);
+  scrollToBottom();
 };
 
 const clearSuggestions = () => {
@@ -629,6 +669,13 @@ const renderHistory = (messages = []) => {
       }
     });
   applyLatestSuggestions(messages);
+
+  // Restore pending "Did you mean...?" options if the last message asked one
+  const lastMsg = messages[messages.length - 1];
+  if (lastMsg && lastMsg.role === 'assistant' && lastMsg.clarification) {
+    clearSuggestions();
+    renderClarification(lastMsg.clarification);
+  }
 };
 
 const sessionPreview = (session) => {
@@ -742,11 +789,13 @@ const ensureSession = async () => {
   return session.session_id;
 };
 
-const sendMessage = async (messageText) => {
+const sendMessage = async (messageText, { skipClarification = false, displayText } = {}) => {
   removeWelcomeCard();
+  removeClarification();
+  messageInput.placeholder = messageInput.dataset.defaultPlaceholder || messageInput.placeholder;
   lastUserPrompt = messageText;
   const sessionId = await ensureSession();
-  createMessage('user', messageText, new Date().toLocaleTimeString());
+  createMessage('user', displayText || messageText, new Date().toLocaleTimeString());
   toggleLoading(true);
 
   try {
@@ -754,7 +803,11 @@ const sendMessage = async (messageText) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ content: messageText, session_id: sessionId }),
+      body: JSON.stringify({
+        content: messageText,
+        session_id: sessionId,
+        skip_clarification: skipClarification,
+      }),
     });
 
     if (!response.ok) {
@@ -794,7 +847,15 @@ const sendMessage = async (messageText) => {
     renderVideoSuggestions(videos);
     renderImageSuggestions(images);
     renderPdfSuggestions(pdfs);
-    renderQuestionSuggestions(nodeResponse.question_suggestions || []);
+
+    const clarification = nodeResponse.metadata?.clarification;
+    if (clarification) {
+      // chips live under the message; avoid duplicating them in the sidebar
+      renderQuestionSuggestions([]);
+      renderClarification(clarification);
+    } else {
+      renderQuestionSuggestions(nodeResponse.question_suggestions || []);
+    }
 
     // FIXED: safely refresh sessions without breaking loader
     try {

@@ -192,8 +192,9 @@ class QueryAnalyzer:
                 category = "QUERY"
             else:
                 # Ambiguous or non-obvious query: evaluate with GPT Intent Service
-                logger.info(f"[ANALYZER] Evaluating intent via GPT for '{standalone}'...")
-                gpt_intent = await self.intent_service.classify_intent(standalone)
+                query_to_evaluate = current_query if current_query else standalone
+                logger.info(f"[ANALYZER] Evaluating intent via GPT for '{query_to_evaluate}' (standalone='{standalone}')...")
+                gpt_intent = await self.intent_service.classify_intent(query_to_evaluate)
 
                 if gpt_intent in ("GOODBYE", "GREETING", "OFF_TOPIC") and self._looks_like_technical_term(standalone):
                     logger.info(f"[ANALYZER] Overriding false GPT intent '{gpt_intent}' to QUERY for technical term: '{standalone}'")

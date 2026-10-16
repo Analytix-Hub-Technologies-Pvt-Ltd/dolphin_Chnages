@@ -380,6 +380,7 @@ async def get_topic_content(
 class SessionListResponse(BaseModel):
     id: str | None = None
     username: str | None = None
+    email: str | None = None
     chat_title: str | None = None
     time: datetime | None = None
     session_id: str
@@ -396,14 +397,6 @@ async def get_all_sessions(
 
     return await session_service.get_all_sessions()
 
-
-class SessionListResponse(BaseModel):
-    id: str
-    username: str
-    chat_title: str | None = None
-    time: datetime | None = None
-    session_id: str
-    chat_count: int | None = None
 
 class PaginatedSessionResponse(BaseModel):
     total: int

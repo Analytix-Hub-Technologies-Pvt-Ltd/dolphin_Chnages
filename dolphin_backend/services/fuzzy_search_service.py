@@ -231,3 +231,154 @@ class FuzzySearchService:
             "suggestions": formatted_suggestions,
             "message": message
         }
+
+    @staticmethod
+    def _clean_topic_label(name: str) -> str:
+        n = (name or "").strip()
+        n = re.sub(r"^\s*\d+\s*[\.\)]\s*", "", n)
+        n = re.sub(r"^(?:[A-Z]{2,6}-\d{2,6}-)+", "", n)
+        n = re.sub(r"^\d+\.\s*", "", n)
+        n = re.sub(r"\s+", " ", n).strip(" -:")
+        return n
+
+    COMMON_NON_MARITIME_WORDS = {
+        "weather", "tokyo", "paris", "london", "india", "computer", "phone", "apple", "google",
+        "today", "yesterday", "tomorrow", "time", "date", "year", "month", "week", "money",
+        "food", "drink", "hotel", "flight", "car", "train", "bus", "movie", "music", "song",
+        "game", "sport", "football", "cricket", "basketball", "tennis", "politics", "president",
+        "minister", "doctor", "hospital", "medicine", "health", "school", "college", "university",
+        "hello", "thanks", "goodbye", "please", "photo", "photosynthesis", "picture", "movie",
+        "about", "would", "could", "should", "there", "their", "where", "which"
+    }
+
+    def _get_vocab(self, all_topic_names: Optional[List[str]] = None) -> set:
+        topics = all_topic_names or self.database_topics
+        if not topics and self.vector_store:
+            try:
+                topics = self.vector_store.get_all_topic_names()
+            except Exception:
+                topics = []
+        if not topics:
+            topics = list(self.fallback_topics.keys())
+        
+        vocab = set()
+        for t in topics:
+            cleaned = self._clean_topic_label(t)
+            for word in re.findall(r'[A-Za-z0-9]{3,}', cleaned.lower()):
+                vocab.add(word)
+        for term in self.fallback_topics:
+            vocab.add(term.lower())
+        return vocab
+
+    def detect_misspelled_query(
+        self,
+        query: str,
+        all_topic_names: Optional[List[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Detect if the user query contains a misspelled maritime term.
+        If a typo is found, returns a dictionary with:
+        - misspelled_word: str
+        - corrected_term: str
+        - related_topics: List[str] (up to 4 topics containing the corrected term)
+        - message: str (friendly Did you mean... question)
+        """
+        if not query or not isinstance(query, str):
+            return None
+
+        q = query.strip()
+        # Clean question prefixes
+        q_clean = re.sub(r"^(?:what is|what are|tell me about|explain|meaning of|definition of|can you explain|how does|how do)\s+", "", q.lower()).strip()
+        q_clean = re.sub(r"[^\w\s]", " ", q_clean).strip()
+        tokens = [w for w in q_clean.split() if w and w not in {"the", "a", "an", "is", "are", "of", "in", "on", "for", "to", "and", "with"}]
+
+        # Only evaluate concise queries (1 to 4 focus words) to prevent false positives on long paragraphs
+        if not tokens or len(tokens) > 4:
+            return None
+
+        topics = all_topic_names or self.database_topics
+        if not topics and self.vector_store:
+            try:
+                topics = self.vector_store.get_all_topic_names()
+            except Exception:
+                topics = []
+
+        vocab = self._get_vocab(topics)
+
+        # Skip if any token is already a known acronym or marine word
+        for token in tokens:
+            if token in vocab or token in self.COMMON_NON_MARITIME_WORDS or len(token) < 3:
+                continue
+
+            # Candidate misspelled word! Find best match in vocab
+            best_match = None
+            best_score = 0.0
+
+            for v in vocab:
+                if v in {"the", "and", "for", "with", "from", "some", "your", "what", "this", "that"}:
+                    continue
+                dist = self.levenshtein_distance(token, v)
+                max_allowed = 1 if len(token) <= 6 else 2
+                if dist <= max_allowed:
+                    score = self.similarity_score(token, v)
+                    if score > best_score and score >= 0.75:
+                        best_score = score
+                        best_match = v
+
+            if best_match:
+                # Find related topics in the curriculum that contain this corrected term
+                related_topics = []
+                seen_labels = set()
+                term_lower = best_match.lower()
+
+                for t in topics or self.database_topics:
+                    cl = self._clean_topic_label(t)
+                    if not cl or cl.lower() in seen_labels:
+                        continue
+                    if re.search(r'\b' + re.escape(term_lower) + r'\b', cl.lower()):
+                        seen_labels.add(cl.lower())
+                        related_topics.append(cl)
+
+                # Fallback if no exact word boundary match in titles: substring search
+                if not related_topics:
+                    for t in topics or self.database_topics:
+                        cl = self._clean_topic_label(t)
+                        if not cl or cl.lower() in seen_labels:
+                            continue
+                        if term_lower in cl.lower():
+                            seen_labels.add(cl.lower())
+                            related_topics.append(cl)
+
+                # Fallback if database had no direct title hits: use fallback description
+                if not related_topics:
+                    desc = self.fallback_topics.get(best_match.upper(), "")
+                    if desc:
+                        related_topics.append(f"{best_match.upper()} - {desc}")
+                    else:
+                        related_topics.append(f"Explain {best_match.title()} in maritime operations")
+
+                # Format suggestions as natural, clickable questions
+                suggestion_queries = []
+                for rt in related_topics[:4]:
+                    suggestion_queries.append(rt)
+
+                formatted_term = best_match.upper() if len(best_match) <= 4 and best_match.upper() in self.fallback_topics else best_match.title()
+
+                message = (
+                    f"It looks like **\"{token}\"** might be a typo. "
+                    f"Did you mean **{formatted_term}**?\n\n"
+                    f"Here are related topics you can explore:"
+                )
+
+                logger.info(f"[FUZZY] Detected typo '{token}' -> '{formatted_term}' in '{query}' (score={best_score:.2f})")
+
+                return {
+                    "is_misspelled": True,
+                    "misspelled_word": token,
+                    "corrected_term": formatted_term,
+                    "related_topics": suggestion_queries,
+                    "message": message,
+                }
+
+        return None
+

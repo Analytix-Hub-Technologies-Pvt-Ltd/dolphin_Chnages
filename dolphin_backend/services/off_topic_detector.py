@@ -69,11 +69,12 @@ OFF_TOPIC_REGEX_PATTERNS = [
     r"\b(dinosaurs?|photosynthesis|human\s*anatomy|dna\s*replication|black\s*holes?|solar\s*system)\b",
     r"\b(airplanes?|aeroplanes?|aircrafts?|helicopters?|boeing\s*\d+|airbus\s*\d+|commercial\s*flight|aerodynamics\s*of\s*flight)\b",
     r"\b(space\s*exploration|mars\s*rover|james\s*webb|hubble\s*telescope|astronauts?|milky\s*way|andromeda|quantum\s*mechanics|quantum\s*physics)\b",
-    r"\b(lions?|tigers?|elephants?|giraffes?|leopards?|cheetahs?|bears?|wolf|wolves|monkeys?|gorillas?|chimpanzees?|can\s+dogs\s+eat|dog\s*breeds?|cat\s*breeds?)\b",
+    r"\b(lions?|tigers?|elephants?|giraffes?|leopards?|cheetahs?|bears?|wolf|wolves|monkeys?|gorillas?|chimpanzees?|can\s+dogs\s+eat|dog\s*breeds?|cat\s*breeds?|snakes?|serpents?|vipers?|cobras?|pythons?|reptiles?)\b",
     r"\b(how\s+to\s+play\s+(?:guitar|piano|violin|flute|drums)|guitar\s*chords?|piano\s*notes?|acoustic\s*guitar|electric\s*guitar)\b",
-    r"\b(symptoms?\s*of\s*(?:flu|fever|diabetes|covid|cancer|malaria|dengue|migraine)|how\s+to\s+cure\s+(?:headache|cough|cold|fever)|weight\s*loss\s*tips|workout\s*plan|gym\s*workout|diet\s*plan)\b",
+    r"\b(symptoms?\s*of\s*(?:flu|fever|diabetes|covid|cancer|malaria|dengue|migraine)|how\s+to\s+cure\s+(?:headache|cough|cold|fever)|weight\s*loss\s*tips|workout\s*plan|gym\s*workout|diet\s*plan|barbells?|dumbbells?|bench\s*press|bicep\s*curls?|pushups?|deadlifts?)\b",
     r"\b(how\s+to\s+drive\s+a\s+car|fix\s+a\s+(?:bicycle|bike|flat\s*tire)|electric\s*cars?|tesla\s*model)\b",
     r"\b(world\s*war\s*[12i]+|french\s*revolution|american\s*civil\s*war|roman\s*empire|ancient\s*egypt|ancient\s*greece)\b",
+    r"\b(idioms?|proverbs?|etymology|english\s+idioms?|origin\s+of\s+(?:the\s+)?(?:idiom|phrase|saying)|meaning\s+of\s+(?:the\s+)?(?:idiom|phrase|saying))\b",
 ]
 
 COMPILED_OFF_TOPIC = [
@@ -111,6 +112,7 @@ OFF_TOPIC_KEYWORDS = [
     "photosynthesis", "dinosaur", "dinosaurs", "airplane", "aeroplane", "helicopter",
     "guitar", "piano", "violin", "flute", "drums", "astronomy", "quantum physics",
     "diabetes", "weight loss", "gym workout", "tesla",
+    "snake", "snakes", "barbell", "barbells", "dumbbell", "dumbbells",
 ]
 
 
@@ -339,6 +341,18 @@ def is_obvious_marine_query(query: str) -> bool:
 
     q = query.lower().strip()
 
+    # Guard against polysemous dual-meaning words bypassing intent classification
+    POLYSEMOUS_MARINE_WORDS = {"squat", "draft", "draught", "bridge", "tank", "ships", "ship", "watch"}
+    matched_marine = [term for term in MARINE_INDICATORS if re.search(r"\b" + re.escape(term) + r"\b", q)]
+    if matched_marine and all(m in POLYSEMOUS_MARINE_WORDS for m in matched_marine):
+        # Only fast-path if explicitly accompanied by distinct maritime operational terms
+        has_maritime_context = bool(re.search(
+            r"\b(ship\s+squat|ship\s+draft|ship\s+draught|vessel|vessels|shipboard|navigation|shallow\s*water|under\s*keel|ukc|hydrodynamic|cargo|engine|deck|ballast|seafarer|seafarers|moor|mooring|anchor|anchoring|colreg|colregs|solas|marpol)\b",
+            q,
+        ))
+        if not has_maritime_context:
+            return False
+
     # Question structure check
     if q.endswith("?") and len(q.split()) >= 2:
         return True
@@ -353,7 +367,7 @@ def is_obvious_marine_query(query: str) -> bool:
     if any(q.startswith(starter) for starter in question_starters):
         return True
 
-    # Phrase containing marine indicators with 2+ words
+    # Phrase containing unambiguous marine indicators with 2+ words
     return len(q.split()) >= 2
 
 

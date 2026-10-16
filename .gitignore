@@ -59,3 +59,12 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Test files and test suites
+tests/
+**/tests/
+test_*.py
+*_test.py
+*.test.js
+*.test.jsx
+setupTests.js

@@ -36,6 +36,6 @@ class NodeResponse(BaseModel):
     videos: List[dict] = Field(default_factory=list)
     images: List[dict] = Field(default_factory=list)
     pdfs: List[dict] = Field(default_factory=list)
-    question_suggestions: List[str]
+    question_suggestions: List[Any] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     metadata: dict[str, Any] = Field(default_factory=dict)

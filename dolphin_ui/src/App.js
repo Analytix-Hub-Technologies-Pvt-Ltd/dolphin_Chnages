@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import Members from "./pages/admin/Members.jsx";
 import Login from "./pages/LoginSignup";
@@ -88,18 +88,99 @@ function App() {
     }
   };
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     clearChatHistoryCache();
     await logout();
     localStorage.removeItem("userId");
     localStorage.removeItem("user_id");
     localStorage.removeItem("userData");
     localStorage.removeItem("active_session_id");
+    localStorage.removeItem("dolphin_last_activity");
     setUserId(null);
     setUserRole(null);
     setUserEmail("");
     window.history.replaceState(null, "", process.env.PUBLIC_URL || "/");
-  };
+  }, []);
+
+  // ── 30-Minute Inactivity Auto-Logout ──
+  useEffect(() => {
+    if (!userId) return;
+
+    const INACTIVITY_LIMIT_MS = 30 * 60 * 1000; // 30 minutes
+    let timeoutId = null;
+
+    const performAutoLogout = () => {
+      console.warn("User inactive for 30 minutes. Auto-logging out...");
+      handleLogout();
+    };
+
+    const resetTimer = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(performAutoLogout, INACTIVITY_LIMIT_MS);
+    };
+
+    // Events signaling active user interaction
+    const activityEvents = [
+      "mousemove",
+      "mousedown",
+      "keydown",
+      "touchstart",
+      "scroll",
+      "wheel",
+    ];
+
+    let lastActivityTime = Date.now();
+    localStorage.setItem("dolphin_last_activity", String(lastActivityTime));
+
+    const handleUserActivity = () => {
+      const now = Date.now();
+      // Throttle activity updates to once per second for performance
+      if (now - lastActivityTime > 1000) {
+        lastActivityTime = now;
+        localStorage.setItem("dolphin_last_activity", String(now));
+        resetTimer();
+      }
+    };
+
+    // Check if the user exceeded 30 mins while screen was locked or tab in background
+    const checkInactiveOnWake = () => {
+      const savedTime = parseInt(localStorage.getItem("dolphin_last_activity") || "0", 10);
+      const elapsed = Date.now() - (savedTime || lastActivityTime);
+      if (elapsed >= INACTIVITY_LIMIT_MS) {
+        performAutoLogout();
+      } else {
+        resetTimer();
+      }
+    };
+
+    // Sync across multiple browser tabs
+    const handleStorageChange = (e) => {
+      if (e.key === "dolphin_last_activity" && e.newValue) {
+        lastActivityTime = parseInt(e.newValue, 10);
+        resetTimer();
+      }
+    };
+
+    activityEvents.forEach((event) => {
+      window.addEventListener(event, handleUserActivity, { passive: true });
+    });
+    window.addEventListener("focus", checkInactiveOnWake);
+    document.addEventListener("visibilitychange", checkInactiveOnWake);
+    window.addEventListener("storage", handleStorageChange);
+
+    // Initial timer start
+    resetTimer();
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      activityEvents.forEach((event) => {
+        window.removeEventListener(event, handleUserActivity);
+      });
+      window.removeEventListener("focus", checkInactiveOnWake);
+      document.removeEventListener("visibilitychange", checkInactiveOnWake);
+      window.removeEventListener("storage", handleStorageChange);
+    };
+  }, [userId, handleLogout]);
 
   if (authLoading) {
     return null;

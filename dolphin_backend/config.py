@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     enable_query_expansion: bool = Field(True, alias="ENABLE_QUERY_EXPANSION")
     query_expansion_use_llm: bool = Field(True, alias="QUERY_EXPANSION_USE_LLM")
 
+    # "Did you mean...?" clarification for vague one/two-word queries
+    enable_clarification: bool = Field(True, alias="ENABLE_CLARIFICATION")
+    clarification_use_llm: bool = Field(True, alias="CLARIFICATION_USE_LLM")
+    clarification_max_options: int = Field(5, alias="CLARIFICATION_MAX_OPTIONS")
+
+    # Answer harmless general-knowledge questions ("what is temperature") in a few words
+    # and bridge to course topics, instead of the flat "outside my scope" refusal.
+    enable_general_brief: bool = Field(True, alias="ENABLE_GENERAL_BRIEF")
+
    #parth
     external_api_key: str = Field("", alias="EXTERNAL_API_KEY")
     external_api_base_url: str = Field("https://ai.marinerskills.com/aidata", alias="EXTERNAL_API_BASE_URL")

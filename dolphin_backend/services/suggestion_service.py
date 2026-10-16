@@ -2,11 +2,56 @@ from __future__ import annotations
 
 import random
 import re
-from typing import Dict, List
+from typing import Any, Dict, List
 
 
 class SuggestionService:
     """Generate context-aware follow-up suggestions for the chat UI."""
+
+    @staticmethod
+    def extract_short_topic(question: str) -> str:
+        """Extract a clean 2–3 word topic title from a full question string."""
+        if not question:
+            return "Maritime Topic"
+        cleaned = re.sub(r"^(\d+[.)]|[-*•])\s*", "", str(question)).strip(" ?.,!")
+        # If it's not a question sentence, it's already a title or permit name: keep fully intact
+        is_question = bool(
+            re.search(r"^(what|how|why|can you|explain|describe|tell me|where|when|is|are|do|does)\b", cleaned, re.IGNORECASE)
+            or str(question).strip().endswith("?")
+        )
+
+        if not is_question:
+            return cleaned.title()
+
+        cleaned = re.sub(
+            r"^(what are the\s*(key|main|standard|vital|critical|emergency)?\s*(actions (for|during)\s*)?|procedure (for|of)\s*|how (do you|does|is|to|are)\s*|why is\s*|can you (explain|describe|tell me about)\s*|explain (the\s*)?|describe (the\s*)?|tell me about\s*|what is (the\s*)?|what keeps\s*|learn about\s*|explore\s*|review\s*|practice\s*|study\s*)",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        ).strip()
+        cleaned = re.sub(
+            r"\s+(aid navigation|safe at sea|vital onboard|used afloat|underway|rules|tips|steps|basics)\??$",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        ).strip()
+        return cleaned.title() if cleaned else "Maritime Topic"
+
+    @classmethod
+    def to_suggestion_pair(cls, item: Any) -> Dict[str, str]:
+        """Convert any suggestion item (string or dict) into a structured {label, query} pair."""
+        if isinstance(item, dict):
+            query = str(item.get("query") or item.get("question") or "").strip()
+            label = str(item.get("label") or item.get("topic") or "").strip()
+            if not label and query:
+                label = cls.extract_short_topic(query)
+            if not query and label:
+                query = label
+            return {"label": label or "Maritime Topic", "query": query or label}
+
+        q_str = str(item or "").strip()
+        label = cls.extract_short_topic(q_str)
+        return {"label": label, "query": q_str}
 
     _STOPWORDS = {
         "the",

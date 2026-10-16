@@ -340,6 +340,7 @@ class SessionService:
                 SELECT
                     u.id AS id,
                     u.name AS username,
+                    u.email AS email,
                     cs.title AS chat_title,
                     cs.updated_at AS time,
                     cs.session_id AS session_id,
@@ -413,6 +414,7 @@ class SessionService:
                 SELECT
                     u.id AS id,
                     u.name AS username,
+                    u.email AS email,
                     cs.title AS chat_title,
                     cs.updated_at AS time,
                     cs.session_id AS session_id,

@@ -221,11 +221,12 @@ const Members = () => {
         minHeight: "100%",
         width: "100%",
         minWidth: 0,
+        overflowX: "hidden",
         bgcolor: theme.palette.background.default,
         py: 3,
       }}
     >
-      <Container maxWidth="lg">
+      <Container maxWidth={false}>
         <Typography variant="h4" sx={{ mb: 3, fontWeight: 700, color: "text.primary" }}>
           Members Management
         </Typography>
@@ -295,9 +296,29 @@ const Members = () => {
               tabIndex={0}
               role="region"
               aria-label="Members table"
-              sx={{ maxWidth: "100%", overflowX: "auto" }}
+              sx={{
+                width: "100%",
+                minWidth: 0,
+                maxWidth: "100%",
+                maxHeight: "calc(90vh - 280px)",
+                overflow: "auto",
+              }}
             >
-              <Table sx={{ minWidth: 1200 }}>
+              <Table sx={{
+                width: 1600,
+                tableLayout: "fixed",
+                "& .MuiTableCell-head": {
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 1,
+                  backgroundColor:
+                    theme.palette.mode === "dark"
+                      ? theme.palette.background.light
+                      : theme.palette.background.lightblue1,
+                },
+                "& .MuiTableCell-root": { overflowWrap: "anywhere", verticalAlign: "top" },
+                "& .MuiTableSortLabel-icon": { flexShrink: 0, mx: 0 },
+              }}>
                 <TableHead>
                   <TableRow
                     sx={{
@@ -389,7 +410,7 @@ const Members = () => {
                             size="small"
                             disabled={!canChangeRoles || user.id === currentUserId}
                             onChange={(e) => handleRoleChange(user.id, e.target.value)}
-                            sx={{ minWidth: 120, textAlign: "left" }}
+                            sx={{ width: "100%", maxWidth: 180, minWidth: 0, textAlign: "left" }}
                           >
                             <MenuItem value={1}>USER</MenuItem>
                             <MenuItem value={2}>ADMIN</MenuItem>

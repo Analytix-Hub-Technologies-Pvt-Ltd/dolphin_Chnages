@@ -295,10 +295,19 @@ const ChatHistoryAdmin = () => {
                       Student Name
                     </TableCell>
                     <TableCell sx={{ fontWeight: 600, color: theme.palette.text.primary }}>
+                      Email
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 600, color: theme.palette.text.primary }}>
                       Date
                     </TableCell>
                     <TableCell sx={{ fontWeight: 600, color: theme.palette.text.primary }}>
                       Chat Title
+                    </TableCell>
+                    <TableCell
+                      align="right"
+                      sx={{ fontWeight: 600, color: theme.palette.text.primary }}
+                    >
+                      Chat Count
                     </TableCell>
                     <TableCell
                       align="center"
@@ -331,6 +340,9 @@ const ChatHistoryAdmin = () => {
                           {row.username}
                         </TableCell>
                         <TableCell sx={{ color: theme.palette.text.secondary }}>
+                          {row.email || "-"}
+                        </TableCell>
+                        <TableCell sx={{ color: theme.palette.text.secondary }}>
                           {row.time ? new Date(row.time).toLocaleDateString("en-US", {
                             year: "numeric",
                             month: "short",
@@ -339,6 +351,9 @@ const ChatHistoryAdmin = () => {
                         </TableCell>
                         <TableCell sx={{ color: theme.palette.text.primary }}>
                           {row.chat_title || "-"}
+                        </TableCell>
+                        <TableCell align="right" sx={{ color: theme.palette.text.primary }}>
+                          {row.chat_count ?? "-"}
                         </TableCell>
                         <TableCell align="center">
                           <IconButton
@@ -359,7 +374,7 @@ const ChatHistoryAdmin = () => {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={4} align="center" sx={{ py: 4 }}>
+                      <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
                         <Typography variant="body2" color="text.secondary">
                           No chat history found
                         </Typography>
