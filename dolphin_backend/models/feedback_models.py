@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # ---------------------------------------------------------------------------
 # REQUEST MODELS
 # ---------------------------------------------------------------------------
 class FeedbackCreateRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     user_id: Optional[str] = "anonymous"
     user_name: Optional[str] = None
     session_id: Optional[str] = None
@@ -74,6 +75,7 @@ class FeedbackRegenerateRequest(BaseModel):
 # ITEM RESPONSE MODELS
 # ---------------------------------------------------------------------------
 class FeedbackItem(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     feedback_id: int
     user_id: Optional[str] = None
     user_name: Optional[str] = None

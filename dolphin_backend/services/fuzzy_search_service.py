@@ -25,7 +25,38 @@ class FuzzySearchService:
     - Automatic sync with database content
     - No hardcoded terms needed
     """
-    
+
+    # Standard everyday English words that must NEVER be flagged as typos
+    COMMON_ENGLISH_WORDS = {
+        "the", "and", "for", "with", "from", "some", "your", "what", "this", "that",
+        "man", "men", "actions", "action", "principles", "principle", "fail", "fails",
+        "operation", "operations", "operational", "during", "working", "work", "system",
+        "systems", "used", "when", "where", "how", "does", "can", "could", "will", "would",
+        "should", "emergency", "emergencies", "prevent", "prevents", "cause", "causes",
+        "check", "checks", "explain", "describe", "tell", "give", "show", "help", "need",
+        "routine", "safety", "standard", "standards", "rule", "rules", "guidelines", "fire", "fires",
+        "thank", "thanks", "start", "starting", "next", "life", "rise", "risk", "home", "play", "make", "york",
+        "inspect", "inspected", "inspecting", "inspection", "safely", "safe", "affect", "effect", "procedure",
+        "procedures", "drill", "drills", "seawater", "injection", "cavitation", "explosion", "explosions",
+        "foaming", "operating", "machinery", "grounding", "compliance", "inspectors", "governs", "sharing",
+        "lubricator", "lubricating", "protection", "fitted", "donkey", "reading", "standing", "sailing",
+        "applicable", "detected", "stopping", "leaking", "cleaning", "generate", "learning", "valve", "valves",
+        "engage", "engages", "engaging", "roller", "rollers", "lead", "leads", "watchkeeper", "watchkeepers",
+        "solitary", "purpose", "protect", "protects",
+        # Common conversational, comparative & question vocabulary
+        "compare", "compared", "comparing", "comparison", "difference", "differ", "different",
+        "weather", "severe", "heavy", "greater", "greatest", "earlier", "previous", "latter", "former",
+        "second", "third", "first", "point", "section", "chapter", "detail", "details", "detailed",
+        "step", "steps", "continue", "ignore", "abnormal", "warning", "mention", "mentioned",
+        "online", "offline", "senior", "junior", "career", "salary", "education", "scoring", "score",
+        "radiation", "shadow", "building", "meaning", "boarding", "conscription", "company", "message",
+        "sending", "roaming", "indicator", "passing", "production", "gaming", "connection", "generative",
+        "dollars", "solar", "common", "generation", "switches", "switch", "migration", "conservation",
+        "eligibility", "overhauling", "abnormal", "causing", "rebalance", "recording", "cellular",
+        "regular", "normal", "general", "overview", "basics", "simple", "complex", "primary", "secondary",
+        "shipping", "shipment", "maritime", "vessel", "vessels", "seafarer", "seafarers"
+    }
+
     def __init__(self, vector_store=None):
         """
         Initialize with optional vector store.
@@ -268,6 +299,13 @@ class FuzzySearchService:
                 vocab.add(word)
         for term in self.fallback_topics:
             vocab.add(term.lower())
+        try:
+            from services.off_topic_detector import MARINE_INDICATORS
+            for m in MARINE_INDICATORS:
+                for word in re.findall(r'[A-Za-z0-9]{6,}', m.lower()):
+                    vocab.add(word)
+        except Exception:
+            pass
         return vocab
 
     def detect_misspelled_query(
@@ -292,9 +330,20 @@ class FuzzySearchService:
         q_clean = re.sub(r"[^\w\s]", " ", q_clean).strip()
         tokens = [w for w in q_clean.split() if w and w not in {"the", "a", "an", "is", "are", "of", "in", "on", "for", "to", "and", "with"}]
 
-        # Only evaluate concise queries (1 to 4 focus words) to prevent false positives on long paragraphs
-        if not tokens or len(tokens) > 4:
+        # Only evaluate concise to moderate queries to prevent false positives on massive paragraphs
+        if not tokens or len(tokens) > 16:
             return None
+
+        # If the query is an articulate technical sentence (>= 7 tokens) that already has
+        # strong maritime indicators or acronyms, skip aggressive typo matching
+        if len(tokens) >= 7:
+            try:
+                from services.off_topic_detector import has_strong_marine_signal, is_marine_domain_query
+                from services.maritime_acronyms import find_acronyms_in_query
+                if find_acronyms_in_query(query) or (has_strong_marine_signal(query) and is_marine_domain_query(query)):
+                    return None
+            except Exception:
+                pass
 
         topics = all_topic_names or self.database_topics
         if not topics and self.vector_store:
@@ -305,10 +354,61 @@ class FuzzySearchService:
 
         vocab = self._get_vocab(topics)
 
-        # Skip if any token is already a known acronym or marine word
+        # Skip if any token is already a known acronym, marine word, or standard English word
         for token in tokens:
-            if token in vocab or token in self.COMMON_NON_MARITIME_WORDS or len(token) < 3:
+            token_lower = token.lower()
+            if (
+                token in vocab
+                or token_lower in vocab
+                or token_lower in self.COMMON_ENGLISH_WORDS
+                or len(token) <= 4
+            ):
                 continue
+
+            # Grammatical inflection match: if token is formed by adding standard English suffixes
+            # to a vocabulary root (e.g. operational vs operation, operations vs operation),
+            # it is a valid morphological derivation, NOT a typo!
+            VALID_DERIVATIONAL_SUFFIXES = {
+                "s", "es", "ed", "ing", "al", "ally", "able", "ive", "tion", "tions",
+                "ic", "ical", "ment", "ments", "ness", "less", "ful", "ly", "ity",
+                "ize", "ise", "ized", "ised", "er", "ers", "est"
+            }
+            is_valid_inflection = False
+            for v in vocab:
+                vl = v.lower()
+                if token_lower.startswith(vl) and token_lower[len(vl):] in VALID_DERIVATIONAL_SUFFIXES:
+                    is_valid_inflection = True
+                    break
+                if vl.startswith(token_lower) and vl[len(token_lower):] in {"s", "es", "ed", "ing", "d"}:
+                    is_valid_inflection = True
+                    break
+            if is_valid_inflection:
+                continue
+
+            # Check if token and any vocab item share the same stem/root
+            # (e.g. watchkeeper vs watchkeeping, operator vs operating)
+            def _stem_root(w: str) -> str:
+                for sfx in ("keeper", "keeping", "ation", "tions", "tion", "ment", "ments", "ally", "able", "ness", "ing", "ers", "ed", "er", "es", "al", "ly", "s", "d"):
+                    if w.endswith(sfx) and len(w) - len(sfx) >= 4:
+                        return w[:-len(sfx)]
+                return w
+
+            token_root = _stem_root(token_lower)
+            is_root_match = False
+            for v in vocab:
+                if token_root == _stem_root(v.lower()):
+                    is_root_match = True
+                    break
+            if is_root_match:
+                continue
+
+            try:
+                from services.maritime_acronyms import is_known_maritime_acronym
+                from services.off_topic_detector import is_marine_domain_query
+                if is_known_maritime_acronym(token.upper()) or is_marine_domain_query(token):
+                    continue
+            except Exception:
+                pass
 
             # Candidate misspelled word! Find best match in vocab
             best_match = None
@@ -317,11 +417,24 @@ class FuzzySearchService:
             for v in vocab:
                 if v in {"the", "and", "for", "with", "from", "some", "your", "what", "this", "that"}:
                     continue
+                # 1. Typos virtually always preserve the first character
+                if token_lower[0] != v.lower()[0]:
+                    continue
+
                 dist = self.levenshtein_distance(token, v)
-                max_allowed = 1 if len(token) <= 6 else 2
+                if len(token) <= 5:
+                    max_allowed = 1
+                    min_score = 0.80
+                elif len(token) <= 8:
+                    max_allowed = 2
+                    min_score = 0.75
+                else:
+                    max_allowed = 2
+                    min_score = 0.75
+
                 if dist <= max_allowed:
                     score = self.similarity_score(token, v)
-                    if score > best_score and score >= 0.75:
+                    if score >= min_score and score > best_score:
                         best_score = score
                         best_match = v
 
@@ -365,9 +478,7 @@ class FuzzySearchService:
                 formatted_term = best_match.upper() if len(best_match) <= 4 and best_match.upper() in self.fallback_topics else best_match.title()
 
                 message = (
-                    f"It looks like **\"{token}\"** might be a typo. "
-                    f"Did you mean **{formatted_term}**?\n\n"
-                    f"Here are related topics you can explore:"
+                    f"Here are some topics related to **{formatted_term}** you can explore:"
                 )
 
                 logger.info(f"[FUZZY] Detected typo '{token}' -> '{formatted_term}' in '{query}' (score={best_score:.2f})")
@@ -381,4 +492,31 @@ class FuzzySearchService:
                 }
 
         return None
+
+    def correct_query_typos(
+        self,
+        query: str,
+        all_topic_names: Optional[List[str]] = None,
+    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """
+        Detect and seamlessly correct any misspelled maritime terms in user query.
+        Returns:
+            (corrected_query, typo_match_dict_or_None)
+        """
+        if not query or not isinstance(query, str):
+            return query, None
+
+        match = self.detect_misspelled_query(query, all_topic_names)
+        if not match:
+            return query, None
+
+        misspelled = match["misspelled_word"]
+        corrected = match["corrected_term"]
+
+        # Safely replace only the exact misspelled word token (case-insensitive)
+        pattern = re.compile(r'\b' + re.escape(misspelled) + r'\b', re.IGNORECASE)
+        corrected_query = pattern.sub(corrected, query)
+
+        return corrected_query, match
+
 

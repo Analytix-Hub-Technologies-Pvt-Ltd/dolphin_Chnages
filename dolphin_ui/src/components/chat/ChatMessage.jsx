@@ -178,6 +178,8 @@ export const prepareClickableSubtopics = (rawContent, candidates) => {
   let processed = rawContent;
 
   // 1. Match against known candidates (from suggestions / clarification options)
+  // Strictly match ONLY bulleted or numbered list items.
+  // Never turn bold words in opening paragraphs, sentences, or prose into links.
   if (candidates && candidates.length) {
     for (const candidate of candidates) {
       const lbl = (candidate.label || "").trim();
@@ -185,19 +187,31 @@ export const prepareClickableSubtopics = (rawContent, candidates) => {
       if (!lbl) continue;
 
       const encodedTarget = `#ask:${encodeURIComponent(q)}`;
-      const boldRegex = new RegExp(`(?<!\\[)\\*\\*(\\d+[.)]\\s+)?(${escapeRegex(lbl)})(:?)\\*\\*(?!\\()`, "gi");
-      processed = processed.replace(boldRegex, `**$1[$2](${encodedTarget})**$3`);
+      const escapedLbl = escapeRegex(lbl);
+
+      // Match list item formats:
+      // a) "- **Title**", "* **Title**", "• **Title**", "1. **Title**", "1) **Title**"
+      const listBoldRegex = new RegExp(
+        `(^|\\n)([ \\t]*(?:[-*•]|\\d+[.)])[ \\t]+)\\*\\*(${escapedLbl})(:?)\\*\\*(?![\\(\\]])`,
+        "gi"
+      );
+      processed = processed.replace(listBoldRegex, `$1$2**[$3](${encodedTarget})**$4`);
+
+      // b) "**1. Title**" or "**1) Title**"
+      const numInsideBoldRegex = new RegExp(
+        `(^|\\n)([ \\t]*)\\*\\*(\\d+[.)][ \\t]+)(${escapedLbl})(:?)\\*\\*(?![\\(\\]])`,
+        "gi"
+      );
+      processed = processed.replace(numInsideBoldRegex, `$1$2**$3[$4](${encodedTarget})**$5`);
     }
   }
 
-  // 2. Auto-link any numbered list bold items: "1. **Title**" that are not yet links
-  // This ensures catalog lists (like SMS permits, checklists, and option lists)
-  // are all clickable even if candidates were capped or sliced.
-  const isListOrCatalog =
-    /(?:available permits|sms template|checklist|did you mean|options|choose one|tap any)/i.test(processed) ||
-    /^\s*\d+[.)]\s+\*\*/m.test(processed);
+  // 2. Auto-link intentional catalog / choices lists (like SMS permits, checklists, and option lists)
+  // Only link if the content explicitly indicates an option/catalog context
+  const isCatalogContext =
+    /(?:available permits|sms template|checklist|checklist items|permits to work|did you mean|which of these|choose (?:one|an option|any)|tap any|select (?:one|any)|following options)/i.test(processed);
 
-  if (isListOrCatalog) {
+  if (isCatalogContext) {
     processed = processed.replace(
       /(^|\n)(\s*\d+[.)]\s+)\*\*([^\n*\[\]]+?)\*\*(?![\(\]])/g,
       (match, prefix, numPrefix, title) => {
@@ -339,6 +353,40 @@ export const markdownContainerSx = {
       opacity: 0.8,
       textDecoration: "underline",
     },
+  },
+
+  // Tables
+  "& table": {
+    width: "100%",
+    borderCollapse: "collapse",
+    my: "1em",
+    fontSize: "0.9em",
+    overflowX: "auto",
+    display: "table",
+  },
+  "& th, & td": {
+    border: "1px solid",
+    borderColor: "divider",
+    p: "8px 12px",
+    textAlign: "left",
+    verticalAlign: "middle",
+  },
+  "& th": {
+    backgroundColor: "action.hover",
+    fontWeight: 600,
+  },
+  "& tr:nth-of-type(even)": {
+    backgroundColor: "action.selected",
+  },
+
+  // Task list checkboxes
+  "& input[type='checkbox']": {
+    mr: "8px",
+    verticalAlign: "middle",
+    accentColor: "primary.main",
+    width: "16px",
+    height: "16px",
+    cursor: "default",
   },
 };
 

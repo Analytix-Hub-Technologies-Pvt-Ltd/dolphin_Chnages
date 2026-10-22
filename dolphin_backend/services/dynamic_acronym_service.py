@@ -27,7 +27,7 @@ COMMON_NON_ACRONYMS: Set[str] = {
     "YOU", "YOUR", "OUR", "WHO", "WHOM", "WHICH", "THAT", "THIS", "THESE", "THOSE",
     "YES", "PLEASE", "TELL", "GIVE", "SHOW", "LIST", "VIEW", "TEST", "USER", "ROLE",
     "II", "III", "IV", "VI", "VII", "VIII", "IX", "XI", "XII",
-    "OF", "BY", "AT", "IN", "ON", "TO", "UP", "DO", "NO", "SO", "IS", "IT", "AS", "AN", "AM", "HE", "WE", "OR", "IF",
+    "OF", "BY", "AT", "IN", "ON", "TO", "UP", "DO", "NO", "SO", "IS", "IT", "AS", "AN", "AM", "HE", "WE", "OR", "IF", "GA",
     "PDF", "DOC", "TXT", "URL", "PPT", "HTML", "HTTP", "HTTPS",
     "MANUAL", "KEY", "STEP", "MAIN", "SAFE", "FIRE", "RISK", "LIFE", "ZERO", "GOOD",
     "BEST", "TRUE", "FREE", "CODE", "COST", "WORK", "DUTY", "REST", "TEAM", "CARE",
@@ -199,7 +199,7 @@ class DynamicAcronymService:
             return None
 
         token_clean = token.strip().upper()
-        if len(token_clean) < 2 or len(token_clean) > 8:
+        if len(token_clean) < 2 or len(token_clean) > 12:
             return None
         if token_clean in COMMON_NON_ACRONYMS:
             return None
@@ -234,10 +234,11 @@ class DynamicAcronymService:
         try:
             client = self._get_openai_client()
             system_prompt = (
-                "You are a naval architect, chief marine engineer, and maritime training specialist.\n"
+                "You are an expert maritime training specialist, ship master, naval architect, and maritime legal/labour advisor.\n"
                 "Determine if the given abbreviation or code is a recognized, specialized maritime, shipping, "
-                "cargo handling, marine safety (e.g. BBS = Behavior-Based Safety), marine engineering, navigation, "
-                "or IMO regulatory abbreviation/term.\n"
+                "seafarer employment / MLC 2006 / crew management (e.g. CBA = Collective Bargaining Agreement, SEA = Seafarers Employment Agreement), "
+                "vessel operations, port state control, cargo handling, marine safety (e.g. BBS = Behavior-Based Safety), "
+                "marine engineering, bridge navigation, or IMO / ILO regulatory abbreviation or term.\n"
                 "CRITICAL: Common everyday English acronyms or internet slang (e.g., ASAP, FYI, LOL, BRB, OMG, ETC) "
                 "are NOT specialized maritime terms and must return is_maritime: false.\n"
                 "Respond ONLY in valid JSON format:\n"

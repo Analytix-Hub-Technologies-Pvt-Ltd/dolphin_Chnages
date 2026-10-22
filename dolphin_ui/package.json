@@ -50,6 +50,7 @@
     ]
   },
   "devDependencies": {
+    "electron": "^44.9.1",
     "tsx": "^4.23.1"
   }
 }

@@ -190,7 +190,10 @@ export const sanitizeMarkdown = (content, skipFormatting = false) => {
     breaks: true,
   });
 
-  return DOMPurify.sanitize(html);
+  return DOMPurify.sanitize(html, {
+    ADD_TAGS: ["input"],
+    ADD_ATTR: ["type", "checked", "disabled"],
+  });
 };
 
 // ─── Normalisers ──

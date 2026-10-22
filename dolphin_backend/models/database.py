@@ -34,13 +34,20 @@ async def get_pool() -> Pool:
     """
     global _pool
 
+    # Known hostname-to-IPv4 fallbacks for resilient connection when Windows DNS glitches
+    HOSTNAME_FALLBACKS = {
+        "db.analytixhub.ai": "187.127.190.101"
+    }
+
     async def _create_resilient_pool(min_s: int = 1, max_s: int = 5) -> Pool:
         import asyncio
         last_err = None
-        for attempt in range(1, 4):
+        target_host = settings.db_host
+
+        for attempt in range(1, 6):
             try:
                 return await asyncpg.create_pool(
-                    host=settings.db_host,
+                    host=target_host,
                     port=settings.db_port,
                     user=settings.db_user,
                     password=settings.db_password,
@@ -53,8 +60,18 @@ async def get_pool() -> Pool:
                 )
             except (asyncpg.TooManyConnectionsError, OSError) as e:
                 last_err = e
-                logger.warning(f"⚠️ DB connection attempt {attempt}/3 failed ({e}). Retrying with smaller pool in 1.5s...")
-                await asyncio.sleep(1.5)
+                # If DNS resolution failed on hostname, switch to direct IPv4 fallback
+                if isinstance(e, OSError) and target_host in HOSTNAME_FALLBACKS:
+                    fallback_ip = HOSTNAME_FALLBACKS[target_host]
+                    logger.warning(
+                        f"⚠️ DB connection to {target_host} failed ({e}). "
+                        f"Switching to direct IPv4 fallback {fallback_ip}..."
+                    )
+                    target_host = fallback_ip
+                    continue
+
+                logger.warning(f"⚠️ DB connection attempt {attempt}/5 failed ({e}). Retrying in 2.0s...")
+                await asyncio.sleep(2.0)
                 min_s = 1
                 max_s = max(2, max_s - 2)
         raise last_err

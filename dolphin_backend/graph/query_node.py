@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import asyncio
@@ -94,6 +95,7 @@ CRITICAL GROUNDING RULES:
    - DO NOT use any knowledge from training data, general knowledge, or external sources.
    - DO NOT infer, assume, or make up information even if it seems logical or common knowledge.
    - For conversational queries (e.g., "Hey, I need advice about..."), extract the core topic and answer ONLY from COURSE CONTEXT.
+   - **Maritime Acronym & Abbreviation Expansion**: When a recognized maritime abbreviation, acronym, or code (e.g., SECP, EEBD, OWS, SCR, MEPC) appears in the COURSE CONTEXT, you ARE permitted and expected to provide its standard full technical expansion (e.g., SECP = Scrubber Emission Control Plan) and explain its operational context, purpose, and rules from the provided COURSE CONTEXT.
 
 2. **EMPTY CONTEXT HANDLING**: 
    - If the "COURSE CONTEXT" section is empty or contains no relevant information, you MUST refuse to answer.
@@ -114,6 +116,13 @@ CRITICAL GROUNDING RULES:
    - Expand fully on technical principles, step-by-step procedures, operating parameters, safety measures, regulatory frameworks (SOLAS, MARPOL, STCW, COLREGS, ISM), alarms, and emergency actions.
    - Use clear markdown headings (###), bold terminology, numbered operational lists, and bullet points for structured clarity.
    - Synthesize all provided context chunks to deliver an extensive, tutorial-quality answer.
+
+   - **SPECIFIC SUB-TERM, COMPONENT & ACRONYM DIRECT FOCUS**:
+     If the user's query is a specific term, acronym, abbreviation, machinery component, parameter, or sub-point (e.g., "SECP", "15 ppm", "Scheme A", "HRU", "P/V valve") that appears inside a broader parent topic chunk (e.g., "EGC System Approval", "Oily Water Separator", "Life-Saving Appliances"):
+     * Immediately focus and anchor your response directly on that specific term/concept.
+     * Title the response with the term in context: `### [Term] in [Parent Topic]` (e.g., `### SECP in EGC System Approval`).
+     * Clearly define the term first (giving its full technical title and purpose), then thoroughly explain its exact role, operating requirements, and regulations within that topic from the COURSE CONTEXT.
+     * Do NOT simply dump a top-down summary of the entire parent module from the top unless the user explicitly requested an overview of the whole parent module (e.g., "Explain EGC System Approval").
 
 5. **MEDIA-ONLY TOPICS**:
    - If the COURSE CONTEXT contains minimal text BUT media (videos/images/PDFs) are provided:
@@ -844,6 +853,12 @@ class QueryNode(BaseNode):
             classification, reason = await self._classify_query_relevance(query)
             logger.info(f"[QUERY] ⚡ Skipped personal info extraction (memory exists, no intro detected)")
         
+        is_confirmed = bool(safe_get(state, "is_confirmed_clarification", False))
+        if is_confirmed:
+            classification = "IN_SCOPE"
+            reason = "confirmed_clarification"
+            logger.info(f"[QUERY] User confirmed clarification -> forcing IN_SCOPE")
+        
         logger.info(f"[QUERY] Classification: {classification} | Reason: {reason}")
         
         # GENERIC FIX: Trust retrieval over classification
@@ -972,7 +987,7 @@ class QueryNode(BaseNode):
             }
 
         # --- 1. STRICT GUARD: CHECK FOR EMPTY CHUNKS OR OUT-OF-SCOPE ---
-        if not chunks or classification in ["UNRELATED", "TANGENTIALLY_RELATED"]:
+        if not is_confirmed and (not chunks or classification in ["UNRELATED", "TANGENTIALLY_RELATED"]):
             logger.warning(f"[QUERY NODE] No chunks or out-of-scope query ({classification}). Using intelligent fallback.")
             
             # Build user context for personalization
@@ -1328,6 +1343,42 @@ VARIATION REQUIREMENTS:
             # ====== END SINGLE LLM CALL ======
 
         media_payload = media_bundle if include_media else {"videos": [], "images": [], "pdfs": []}
+
+        # Multi-chapter cross-reference links (when a subtopic is mentioned across multiple course chapters)
+        distinct_course_chapters = []
+        if include_media and chunks and len(chunks) > 1:
+            primary_topic_name = str(chunks[0].get("topic_name") or chunks[0].get("title") or "").strip()
+            primary_clean = re.sub(r'^\s*[\d\.\-\s]+', '', primary_topic_name).strip()
+            primary_norm = re.sub(r'[^\w\s]', '', primary_clean.lower()).strip()
+            seen_topics = {primary_norm}
+
+            for chk in chunks[1:]:
+                tname = str(chk.get("topic_name") or chk.get("title") or "").strip()
+                if not tname or len(tname) < 4:
+                    continue
+                clean_t = re.sub(r'^\s*[\d\.\-\s]+', '', tname).strip()
+                norm_t = re.sub(r'[^\w\s]', '', clean_t.lower()).strip()
+                if norm_t and norm_t not in seen_topics and len(norm_t) >= 4:
+                    if norm_t not in primary_norm and primary_norm not in norm_t:
+                        seen_topics.add(norm_t)
+                        distinct_course_chapters.append(clean_t)
+                        if len(distinct_course_chapters) >= 3:
+                            break
+
+        if distinct_course_chapters:
+            import urllib.parse
+            for dcc in distinct_course_chapters:
+                if dcc not in dynamic_suggestions:
+                    dynamic_suggestions.append(dcc)
+
+            links_md = "\n".join([f"- **[{ch}](#ask:{urllib.parse.quote(ch)})**" for ch in distinct_course_chapters])
+            chapter_block = f"**Also covered in course chapters:**\n{links_md}"
+            if chapter_block not in answer:
+                answer = (answer.rstrip() + "\n\n" + chapter_block).strip()
+
+        typo_prompt = safe_get(state, "typo_prompt") or safe_get(state, "typo_banner")
+        if typo_prompt and typo_prompt.strip() not in answer:
+            answer = (answer.rstrip() + "\n\n" + typo_prompt.strip()).strip()
 
         response = self._build_response(
             content=answer,

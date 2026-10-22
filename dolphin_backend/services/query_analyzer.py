@@ -56,7 +56,8 @@ def is_greeting_query(query: str) -> bool:
         "good", "morning", "afternoon", "evening", "day", "night",
         "there", "dolphin", "assistant", "ai", "bot", "buddy", "friend",
         "sir", "maam", "team", "all", "everyone", "marine", "tutor",
-        "i", "am", "im", "my", "name", "is", "this", "welcome", "dear"
+        "i", "am", "im", "my", "name", "is", "this", "welcome", "dear",
+        "captain", "officer", "chief", "mate", "master", "today", "help", "see", "you", "tomorrow"
     }
 
     # If all words in the input belong to greeting vocabulary (up to 7 words)
@@ -68,7 +69,8 @@ def is_greeting_query(query: str) -> bool:
         "hi", "hello", "hey", "good morning", "good afternoon", "good evening",
         "good day", "greetings", "howdy", "hola", "yo", "hi there", "hello there",
         "hey there", "hello dolphin", "hi dolphin", "hey dolphin", "hello assistant",
-        "hi assistant", "hello bot", "hi bot", "morning", "afternoon", "evening"
+        "hi assistant", "hello bot", "hi bot", "morning", "afternoon", "evening",
+        "good afternoon officer", "good evening captain", "good morning captain", "goodbye captain"
     }
     if cleaned in EXACT_GREETINGS:
         return True
@@ -104,7 +106,8 @@ def is_simple_social_intent(query: str) -> str | None:
         "how do you do", "hope you are well", "hope youre well",
         "how are you feeling", "how have you been", "how you doing",
         "hows it going", "what's up", "whats up", "sup", "wassup",
-        "how is it going", "how are things"
+        "how is it going", "how are things", "how are you today",
+        "how are you doing today", "how are you feeling today"
     }
     if cleaned in wellwish_patterns:
         return "WELL_WISH"
@@ -115,7 +118,8 @@ def is_simple_social_intent(query: str) -> str | None:
         "cya", "later", "catch you later", "talk to you later", "ttyl",
         "signing off", "log off", "logout", "gotta go", "gtg", "bye bye",
         "bye dolphin", "goodbye dolphin", "bye bot", "goodbye bot",
-        "have a good day", "have a nice day"
+        "have a good day", "have a nice day", "goodbye captain", "bye captain",
+        "bye dolphin see you tomorrow", "goodbye dolphin see you tomorrow", "see you tomorrow"
     }
     if cleaned in goodbye_patterns:
         return "GOODBYE"
@@ -125,10 +129,20 @@ def is_simple_social_intent(query: str) -> str | None:
         "thanks", "thank you", "thank you so much", "thanks a lot",
         "appreciate it", "thx", "ty", "cheers", "much appreciated",
         "thanks so much", "many thanks", "thank u", "thank you very much",
-        "thanks very much"
+        "thanks very much", "thank you for your help", "thanks for your help",
+        "thank you for the help", "thanks for the help", "thanks a lot dolphin",
+        "thank you dolphin", "thank you captain", "thanks captain"
     }
     if cleaned in thank_patterns:
         return "THANK"
+
+    # Identity / Bot introduction patterns
+    identity_patterns = {
+        "who are you", "who r you", "who r u", "what are you", "tell me about yourself",
+        "what is your name", "whats your name", "who made you", "who created you"
+    }
+    if cleaned in identity_patterns:
+        return "GREETING"
 
     return None
 

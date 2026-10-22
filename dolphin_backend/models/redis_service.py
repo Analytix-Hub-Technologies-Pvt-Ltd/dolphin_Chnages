@@ -19,7 +19,9 @@ class RedisService:
 
             self.redis = redis.from_url(
                 self.redis_url,
-                decode_responses=True
+                decode_responses=True,
+                socket_timeout=1.5,
+                socket_connect_timeout=1.5,
             )
 
             result = self.redis.ping()

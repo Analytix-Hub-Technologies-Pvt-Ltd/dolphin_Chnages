@@ -291,6 +291,33 @@ async def retrieval_node(
 
     final_chunks = list(normalized or existing_chunks)
 
+    # Content-aware temporal & regulatory re-ranking
+    q_lower_reg = search_query.lower()
+    temporal_regulatory_matches = re.findall(
+        r'\b(202[3-9]|203\d|jan(?:uary)?|effective|amendment|amendments|regulation|regulations|rule|rules|mepc(?:\.\d+)?|seemp|force|dcs)\b',
+        q_lower_reg
+    )
+    if temporal_regulatory_matches and len(final_chunks) > 1:
+        query_constraints = set(temporal_regulatory_matches)
+        has_year = any(re.match(r'^(202[3-9]|203\d)$', t) for t in query_constraints)
+
+        def _constraint_score(c):
+            full_text = f"{c.get('topic_name', '')} {str(c.get('topic_content', ''))[:4000]}".lower()
+            matches = sum(1 for term in query_constraints if re.search(r'\b' + re.escape(term) + r'\b', full_text))
+            year_match = 3 if has_year and any(re.search(r'\b' + re.escape(y) + r'\b', full_text) for y in query_constraints if re.match(r'^(202[3-9]|203\d)$', y)) else 0
+            return matches + year_match
+
+        max_matches = max(_constraint_score(c) for c in final_chunks)
+        if max_matches >= 2:
+            final_chunks.sort(key=lambda c: _constraint_score(c), reverse=True)
+            if has_year and any(_constraint_score(c) >= 3 for c in final_chunks):
+                matched_chunks = [c for c in final_chunks if _constraint_score(c) > 0]
+                if matched_chunks:
+                    final_chunks = matched_chunks
+            for r_idx, c in enumerate(final_chunks):
+                c["_rank"] = r_idx
+            logger.info(f"⚡ [Temporal/Regulatory Rerank] Boosted chunks matching {query_constraints} in retrieval_node to rank 0 (count={len(final_chunks)})")
+
     # -----------------------------
     # 🌟 IMMEDIATE APPROVED FEEDBACK MEMORY CHECK
     # -----------------------------

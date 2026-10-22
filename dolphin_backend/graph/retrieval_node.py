@@ -600,7 +600,26 @@ class RetrievalNode(BaseNode):
             # If query has 3+ words and all are found in topic (even fuzzy), it's very relevant
             if len(query_terms) >= 3 and match_ratio >= 0.8:
                 boost += 0.15  # Extra boost for phrase match
-            
+
+            # Content-aware temporal & regulatory constraint boost
+            # When user query asks for specific year/date/regulatory mandates, reward chunks matching those in body content
+            temporal_regulatory_matches = re.findall(
+                r'\b(202[3-9]|203\d|jan(?:uary)?|effective|amendment|amendments|regulation|regulations|rule|rules|mepc(?:\.\d+)?|seemp|force|dcs)\b',
+                query_lower
+            )
+            if temporal_regulatory_matches:
+                topic_content = str(chunk.get("topic_content", "") or chunk.get("content", "")).lower()
+                c_matches = sum(1 for term in set(temporal_regulatory_matches) if re.search(r'\b' + re.escape(term) + r'\b', topic_content))
+                has_year = any(re.match(r'^(202[3-9]|203\d)$', t) for t in temporal_regulatory_matches)
+                year_in_chunk = any(re.search(r'\b' + re.escape(y) + r'\b', topic_content) for y in temporal_regulatory_matches if re.match(r'^(202[3-9]|203\d)$', y))
+                if has_year:
+                    if year_in_chunk:
+                        boost += 0.85  # Strong boost for chunks matching the requested year
+                    else:
+                        boost -= 0.35  # Demote chunks that do not mention the requested year
+                elif c_matches > 0:
+                    boost += (c_matches / len(set(temporal_regulatory_matches))) * 0.45
+
             # Apply boost: lower score is better (FAISS distance), so subtract boost
             # Ensure score doesn't go negative (FAISS distances are always positive)
             new_score = max(0.0, original_score - boost)
@@ -818,8 +837,31 @@ class RetrievalNode(BaseNode):
                     retrieved_chunks = self._get_fallback_content()
                 else:
                     # ========== QUERY EXPANSION ==========
+                    # Canonicalize single-concept queries (e.g. 'cow' or 'crude oil washing' -> 'Crude Oil Washing (COW)')
+                    canonical_search_query = search_query
+                    try:
+                        from services.maritime_acronyms import find_acronyms_in_query, get_strict_acronym_expansions, get_acronym_expansion
+                        acrs = find_acronyms_in_query(search_query)
+                        for acr in acrs:
+                            exps = get_strict_acronym_expansions(acr) or get_acronym_expansion(acr)
+                            primary_exp = exps[0] if exps else ""
+                            words_clean = set(re.sub(r's$', '', w) for w in re.findall(r'\b[a-zA-Z]{3,}\b', search_query.lower()))
+                            primary_words = set(re.sub(r's$', '', w) for w in re.findall(r'\b[a-zA-Z]{3,}\b', primary_exp.lower())) if primary_exp else set()
+                            is_canonical_match = (
+                                search_query.strip().upper() == acr
+                                or (primary_words and words_clean == primary_words)
+                            )
+                            if is_canonical_match and primary_exp:
+                                canonical_base = f"{primary_exp.title()} ({acr})"
+                                extra_kws = [e for e in exps[1:4] if e.lower() not in canonical_base.lower()]
+                                canonical_search_query = f"{canonical_base} {' '.join(extra_kws)}" if extra_kws else canonical_base
+                                logger.info(f"⚡ [Graph Canonical Search] Unified '{search_query}' -> '{canonical_search_query}'")
+                                break
+                    except Exception:
+                        pass
+
                     # Expand the query with maritime context before search
-                    expanded_query = search_query
+                    expanded_query = canonical_search_query
                     if self.query_expansion_service:
                         try:
                             # Get chat history for context

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
 import urllib.parse
 from dataclasses import dataclass, field, asdict
@@ -206,6 +207,7 @@ class Clarification:
     question: str
     options: List[ClarificationOption] = field(default_factory=list)
     intro: str = ""                     # comprehensive 4-6 line "what is X" description
+    closing: str = ""                   # dynamic interactive final line (LLM-generated or varied)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -213,11 +215,25 @@ class Clarification:
             "original_query": self.original_query,
             "intro": self.intro,
             "question": self.question,
+            "closing": self.closing,
             "options": [o.to_dict() for o in self.options],
         }
 
+    @staticmethod
+    def _dynamic_fallback_closing(term: str) -> str:
+        """Varied, professional maritime closing prompts when LLM closing is not provided."""
+        t = term or "this topic"
+        variations = [
+            f"Select any topic above to explore detailed operational procedures for {t}, or describe your exact vessel scenario.",
+            f"Which aspect of {t} would you like to review? Click any focus area above, or ask me about your onboard setup.",
+            f"Choose the relevant module above to check standard guidelines, or let me know your specific machinery arrangement.",
+            f"Select one of the operational areas above to inspect step-by-step procedures, or specify your vessel's requirements.",
+            f"Pick any focus area above to dive into regulatory and maintenance checks, or type your exact question directly.",
+        ]
+        return random.choice(variations)
+
     def render_text(self) -> str:
-        """Plain-markdown rendering with rich overview and 3-4 line subtopic descriptions."""
+        """Plain-markdown rendering with rich overview, 3-4 line subtopic descriptions, and dynamic interactive closing."""
         lines = ([self.intro, ""] if self.intro else []) + [self.question, ""]
         n = 0
         for opt in self.options:
@@ -231,7 +247,11 @@ class Clarification:
             if opt.description:
                 lines.append(f"   {opt.description}")
             lines.append("")
-        lines.append("Tap one of the options, or just tell me what you're after and I'll find it.")
+        
+        closing_line = (self.closing or "").strip()
+        if not closing_line:
+            closing_line = self._dynamic_fallback_closing(self.term)
+        lines.append(closing_line)
         return "\n".join(lines)
 
     def suggestion_queries(self) -> List[str]:
@@ -271,6 +291,7 @@ class ClarificationService:
         self.llm_timeout = llm_timeout
         self.max_focus_terms = max_focus_terms
         self.max_query_words = max_query_words
+        self._clarification_cache: Dict[str, Clarification] = {}
 
     # ------------------------------------------------------------------
     # 1. Is the query a bare term?
@@ -289,13 +310,39 @@ class ClarificationService:
             if not is_known_maritime_acronym(term):
                 return []
             out = []
+            generic_single_stems = {
+                "scheme", "plan", "system", "rule", "code", "guide", "manual",
+                "procedur", "oper", "check", "control", "inspect", "standard",
+            }
             for phrase in get_acronym_expansion(term) or []:
-                stems = [_stem(t) for t in _tokens(str(phrase)) if len(t) > 2]
-                if len(stems) >= 1:
+                raw_toks = _tokens(str(phrase))
+                if len(raw_toks) >= 2:
+                    stems = [_stem(t) for t in raw_toks if len(t) >= 1]
+                else:
+                    stems = [_stem(t) for t in raw_toks if len(t) > 2]
+                if len(stems) == 1 and stems[0] in generic_single_stems:
+                    continue
+                if stems and stems not in out:
                     out.append(stems)
             return out
         except Exception:
             return []
+
+    GENERIC_CATEGORY_STEMS = {
+        # Shipboard equipment / machinery categories that have multiple distinct types
+        "ladder", "pump", "valv", "tank", "alarm", "drill", "inspect", "sensor",
+        "meter", "filter", "cooler", "purifi", "compress", "boiler", "generat",
+        "gaug", "indicat", "switch", "strainer", "pipe", "pip", "heater",
+        # Physical measurements / properties across multiple ship systems
+        "temperat", "pressur", "level", "flow", "densit", "viscosit",
+    }
+
+    @classmethod
+    def _is_generic_category(cls, term: str) -> bool:
+        if not term:
+            return False
+        w = _stem(term.lower().strip())
+        return any(w.startswith(s) or s.startswith(w) for s in cls.GENERIC_CATEGORY_STEMS if len(s) >= 4)
 
     @staticmethod
     def _is_acronym(term: str) -> bool:
@@ -306,18 +353,37 @@ class ClarificationService:
             return False
 
     def is_underspecified(self, query: str) -> bool:
-        q_lower = (query or "").lower()
+        q_lower = (query or "").lower().strip()
         # SMS templates, forms, checklists, and permits are handled by the template engine
         if any(w in q_lower for w in ["template", "permit", "checklist", "ptw", "form"]):
             return False
 
         focus = self.extract_focus_terms(query)
-        if not focus or len(focus) > self.max_focus_terms:
+        if not focus:
             return False
+
         # Digits / codes (e.g. "SOLAS II-2", "regulation 19") are specific enough.
         if any(ch.isdigit() for ch in query):
             return False
-        return all(len(t) >= 3 or self._is_acronym(t) for t in focus)
+
+        # 1. Recognized maritime technical acronyms (ECDIS, EGCS, BWMS, SCR, SECP, OMM, VLSFO, etc.)
+        # are specific technical systems; user expects the substantive overview, not a bare clarification question.
+        if any(self._is_acronym(t) for t in focus):
+            return False
+
+        # 2. Multi-word qualified terms (e.g. "combination ladder", "pilot ladder", "centrifugal pump")
+        # have specific qualifiers; user wants the direct content of that specific topic.
+        if len(focus) >= 2:
+            return False
+
+        # 3. Single focus term: only clarify if it is a genuinely vague category noun
+        # (e.g. "ladders", "pumps", "valves", "temperature", "pressure", "tanks").
+        single_term = focus[0]
+        if self._is_generic_category(single_term):
+            return True
+
+        # If not an acronym, not a qualified multi-word phrase, and not a generic category, do not clarify
+        return False
 
     # ------------------------------------------------------------------
     # 2. Candidate topics
@@ -415,6 +481,20 @@ class ClarificationService:
 
         focus = self.extract_focus_terms(query)
         term = " ".join(focus)
+
+        # Normalize maritime acronyms so casing (secp vs SECP) is 100% deterministic
+        from services.maritime_acronyms import is_known_maritime_acronym
+        is_acronym = len(focus) == 1 and is_known_maritime_acronym(focus[0])
+        if is_acronym:
+            term = focus[0].upper()
+            focus = [focus[0].lower()]
+
+        cache_key = _norm(term)
+        if cache_key in self._clarification_cache:
+            cached_clar = self._clarification_cache[cache_key]
+            logger.info(f"[CLARIFY] Serving cached clarification for '{term}' ({len(cached_clar.options)} options)")
+            return cached_clar
+
         term_stems = [_stem(t) for t in focus]
         topic_names = list(all_topic_names or [])
         alts: List[List[str]] = []
@@ -448,25 +528,41 @@ class ClarificationService:
             return None
 
         pool = self._rank(pool)
-        lead_in, intro, options = await self._build_options(term, query, pool)
+        expansion = self._full_name(term, chunks, topic_names) if alts else ""
+        lead_in, intro, options, closing = await self._build_options(term, query, pool, expansion=expansion)
         if len(options) < 2:
             logger.info("[CLARIFY] -> no usable options built")
             return None
         if not intro and self.use_llm:
-            intro = await self.quick_intro(term)
-        display = " ".join(w for w in re.findall(r"[A-Za-z0-9\-]+", query) if w.lower() not in _FILLER_WORDS) or term
-        return self._finalize(display, query, lead_in, options, intro=intro, expansion=self._full_name(term, chunks, topic_names) if alts else "")
+            intro = await self.quick_intro(term, expansion=expansion)
+        if not closing and self.use_llm:
+            closing = await self.quick_closing(term, expansion=expansion)
+        display = term if is_acronym else (" ".join(w for w in re.findall(r"[A-Za-z0-9\-]+", query) if w.lower() not in _FILLER_WORDS) or term)
+        res = self._finalize(display, query, lead_in, options, intro=intro, closing=closing, expansion=expansion)
+        if res:
+            self._clarification_cache[cache_key] = res
+        return res
 
     @staticmethod
     def _full_name(term: str, chunks: Sequence[Dict[str, Any]], topic_names: Sequence[str]) -> str:
         """Prefer the spelled-out name used in the course, e.g. 'Safety Management System'."""
-        pat = re.compile(r"([A-Z][A-Za-z&/\-]+(?:\s+(?:of|and|for|the|[A-Z][A-Za-z&/\-]+)){1,5})\s*\(\s*" + re.escape(term.upper()) + r"\s*\)")
+        term_clean = term.strip().upper()
+        # Pattern 1: Full Name (ACR) e.g. "Onboard Monitoring Manual (OMM)"
+        pat1 = re.compile(r"([A-Z][A-Za-z&/\-]+(?:\s+(?:of|and|for|the|[A-Z][A-Za-z&/\-]+)){1,5})\s*\(\s*" + re.escape(term_clean) + r"\s*\)")
+        # Pattern 2: ACR - Full Name or ACR: Full Name e.g. "OMM- On board Monitoring Manual"
+        pat2 = re.compile(r"\b" + re.escape(term_clean) + r"\s*[-:\(]\s*([A-Za-z\s\-]{4,45})\b")
+
         texts = list(topic_names) + [str(c.get("topic_name") or "") for c in (chunks or []) if isinstance(c, dict)]
-        texts += [str(c.get("topic_content") or "")[:600] for c in (chunks or []) if isinstance(c, dict)]
+        texts += [str(c.get("topic_content") or "")[:4000] for c in (chunks or []) if isinstance(c, dict)]
         for t in texts:
-            m = pat.search(t)
-            if m:
-                return m.group(1).strip()
+            m1 = pat1.search(t)
+            if m1:
+                return m1.group(1).strip()
+            m2 = pat2.search(t)
+            if m2:
+                candidate = m2.group(1).strip()
+                if len(candidate) > len(term_clean):
+                    return " ".join(w.capitalize() for w in candidate.split())
         try:
             from services.maritime_acronyms import get_acronym_expansion
             exp = get_acronym_expansion(term) or []
@@ -518,7 +614,7 @@ class ClarificationService:
                 home["tokens"] |= toks
         return [cl["members"] for cl in clusters]
 
-    async def _build_options(self, term: str, query: str, pool: List[_Candidate]):
+    async def _build_options(self, term: str, query: str, pool: List[_Candidate], expansion: str = ""):
         """
         Returns ``(lead_in_or_None, intro_or_empty, [options])``. ``lead_in`` is the question
         sentence and ``intro`` the short "what is X" answer, both written by the LLM when available.
@@ -532,11 +628,11 @@ class ClarificationService:
         if self.use_llm and len(reps) >= 2:
             try:
                 llm_opts = await asyncio.wait_for(
-                    self._llm_group(term, reps[:24], sizes[:24]), timeout=self.llm_timeout
+                    self._llm_group(term, reps[:24], sizes[:24], expansion=expansion), timeout=self.llm_timeout
                 )
                 if llm_opts:
-                    lead, opts, intro = llm_opts
-                    return lead, intro, opts[:limit]
+                    lead, opts, intro, closing = llm_opts
+                    return lead, intro, opts[:limit], closing
             except Exception as exc:  # timeout, bad JSON, API error ...
                 logger.info(f"[CLARIFY] LLM grouping skipped ({type(exc).__name__}: {exc}); using deterministic options")
 
@@ -561,15 +657,16 @@ class ClarificationService:
                     description=desc,
                 )
             )
-        return None, "", opts
+        return None, "", opts, ""
 
-    async def quick_intro(self, term: str) -> str:
+    async def quick_intro(self, term: str, expansion: str = "") -> str:
         """Comprehensive 4-to-6 line explanation saying what ``term`` is from a maritime perspective."""
         if not self.openai_service:
             return ""
+        term_subject = f'"{term}" ({expansion})' if expansion else f'"{term}"'
         prompt = (
             "You are Dolphin, an expert maritime training tutor. A learner asked about: "
-            f"\"{term}\".\nProvide a comprehensive, high-quality maritime explanation of 4 to 6 lines (approx. 70-110 words) describing what it is in practical marine engineering or nautical terms, where and how it is used/rigged onboard, and any key SOLAS, MARPOL, STCW, or maritime safety standards associated with it. "
+            f"{term_subject}.\nProvide a comprehensive, high-quality maritime explanation of 4 to 6 lines (approx. 70-110 words) describing what {term_subject} is in practical marine engineering or nautical terms, where and how it is used/rigged onboard, and any key SOLAS, MARPOL, STCW, or maritime safety standards associated with it. "
             "Write in clean prose without headings, bullet points, questions, or sources."
         )
         try:
@@ -587,7 +684,33 @@ class ClarificationService:
             logger.info(f"[CLARIFY] intro skipped ({type(exc).__name__}: {exc})")
         return ""
 
-    async def _llm_group(self, term: str, pool: List[_Candidate], sizes: Sequence[int] = ()):
+    async def quick_closing(self, term: str, expansion: str = "") -> str:
+        """Dynamic interactive 1-sentence call to action written by the LLM."""
+        if not self.openai_service:
+            return ""
+        term_subject = f"'{term}' ({expansion})" if expansion else f"'{term}'"
+        prompt = (
+            f"You are Dolphin, an expert maritime training tutor. A learner asked about: {term_subject}. "
+            "Write exactly ONE engaging, dynamic interactive final sentence (max 20 words) "
+            "inviting the learner to select one of the suggested topics above or ask about a specific onboard scenario or machinery setup. "
+            "Do NOT use repetitive boilerplate like 'Tap one of the options'. Make it professional, natural, engaging, and maritime-tailored."
+        )
+        try:
+            text = await asyncio.wait_for(
+                self.openai_service.chat(
+                    [{"role": "user", "content": prompt}],
+                    temperature=0.7, category="CLARIFICATION_CLOSING", max_tokens=60,
+                ),
+                timeout=self.llm_timeout,
+            )
+            text = (text or "").strip().strip('"\'')
+            if text and not text.startswith("I apologize"):
+                return text
+        except Exception as exc:
+            logger.debug(f"[CLARIFY] quick_closing skipped ({type(exc).__name__}: {exc})")
+        return ""
+
+    async def _llm_group(self, term: str, pool: List[_Candidate], sizes: Sequence[int] = (), expansion: str = ""):
         numbered = "\n".join(
             f"{i + 1}. {_clean_label(c.topic_name)}"
             + (f" (+{sizes[i] - 1} similar topics)" if i < len(sizes) and sizes[i] > 1 else "")
@@ -595,21 +718,37 @@ class ClarificationService:
             for i, c in enumerate(pool)
         )
         n_opts = max(2, self.max_options - 1)
-        prompt = f"""You are Dolphin, an expert maritime training tutor. A learner asked about: "{term}".
+        target_count = min(n_opts, len(pool))
+
+        expansions_hint = ""
+        try:
+            from services.maritime_acronyms import get_acronym_expansion
+            exps = get_acronym_expansion(term)
+            if exps:
+                expansions_hint = f"\nKnown maritime expansions/variations for \"{term.upper()}\": {', '.join(exps)}"
+        except Exception:
+            pass
+
+        term_subject = f'"{term}" ({expansion})' if expansion else f'"{term}"'
+        prompt = f"""You are Dolphin, an expert maritime training tutor. A learner asked about: {term_subject}.
 This topic or equipment has multiple distinct applications, chapters, or operational aspects in the maritime curriculum:
 {numbered}
+{expansions_hint}
 
 Provide a comprehensive introductory explanation and distinct subtopic choices for the learner.
 
 Requirements:
-1. "intro": A comprehensive, high-quality maritime explanation of 4 to 6 lines (approx. 70-110 words) describing what "{term}" is in practical marine engineering or nautical terms, where and how it is used/rigged onboard, and any key SOLAS, MARPOL, STCW, or maritime safety standards associated with it. Do NOT use headings, bullet points, or questions in the intro.
-2. "question": ONE short natural sentence (max 20 words) asking which specific aspect or operational area they want to explore.
-3. "options": Pick at most {n_opts} DISTINCT options from the numbered course topics above.
+1. "intro": A comprehensive, high-quality maritime explanation of 4 to 6 lines (approx. 70-110 words) describing what {term_subject} is in practical marine engineering or nautical terms, where and how it is used/rigged onboard, and any key SOLAS, MARPOL, STCW, or maritime safety standards associated with it. Do NOT use headings, bullet points, or questions in the intro.
+2. "question": ONE short natural sentence (max 20 words) asking which specific variation or operational area they want to explore.
+3. "options": Pick exactly {target_count} (minimum 2) DISTINCT options strictly relevant to {term_subject} from the numbered course topics above. Do NOT select topics from unrelated acronyms, systems, or different management plans.
 For each option provide:
-- "label": Short, clean topic title (<=6 words, plain English, no course codes).
-- "query": A complete standalone question of 5+ words that includes "{term}".
+- "label": Clear title (plain English, no course codes).
+  * CRITICAL FOR ACRONYMS & ABBREVIATIONS (such as SECP, CBA, SMS, OWS, COW):
+    Every option MUST be a direct subtopic, variation, or operational procedure of "{term.upper()}". The label MUST explicitly include the full spelled-out name/variation followed by the parent context in parentheses, e.g. "Scrubber Emission Control Plan (EGC System Approval)" or "Sulfur Emission Control Plan (SOx Regulations)". Do NOT select or display unrelated acronyms or different management plans (e.g. do not show SEEMP or PSC under SECP).
+- "query": A complete standalone question of 5+ words that includes the full term and topic.
 - "description": A clear, informative 3 to 4 line description (approx. 35-55 words) explaining the specific scope of this subtopic (the procedures, regulations, equipment, or onboard duties involved) in the context of "{term}".
 - "topic_ids": List of the matching topic number(s) from the list above.
+4. "closing": A dynamic, fresh, and interactive concluding line (1 sentence, max 25 words) encouraging the learner to interact—such as inviting them to select an operational focus area above or specify their particular vessel machinery arrangement. Do NOT use repetitive boilerplate like "Tap one of the options, or just tell me what you're after". Make it lively, unique, and tailored to "{term}".
 
 Return ONLY valid JSON in this exact structure:
 {{"ambiguous": true,
@@ -622,7 +761,8 @@ Return ONLY valid JSON in this exact structure:
       "topic_ids": [1],
       "query": "Tell me about..."
     }}
-  ]
+  ],
+  "closing": "Dynamic interactive final line tailored to this topic..."
 }}
 Rules: Use only the numbered course topics; never invent topics; set 'ambiguous' to false only if every topic is essentially identical."""
         raw = await self.openai_service.chat(
@@ -660,7 +800,8 @@ Rules: Use only the numbered course topics; never invent topics; set 'ambiguous'
             return None
         lead = str(data.get("question") or "").strip() or None
         intro = str(data.get("intro") or "").strip()[:1500]
-        return lead, out, intro
+        closing = str(data.get("closing") or data.get("closing_line") or "").strip()[:300]
+        return lead, out, intro, closing
 
     def _finalize(
         self,
@@ -670,6 +811,7 @@ Rules: Use only the numbered course topics; never invent topics; set 'ambiguous'
         topic_options: List[ClarificationOption],
         expansion: str = "",
         intro: str = "",
+        closing: str = "",
     ) -> Optional[Clarification]:
         if len(topic_options) < 2:
             return None
@@ -694,7 +836,7 @@ Rules: Use only the numbered course topics; never invent topics; set 'ambiguous'
             ]
             question = variants[sum(ord(ch) for ch in term) % len(variants)]
         return Clarification(
-            term=term, original_query=original_query, question=question, options=options, intro=intro
+            term=term, original_query=original_query, question=question, options=options, intro=intro, closing=closing
         )
 
     # ------------------------------------------------------------------
@@ -708,6 +850,8 @@ Rules: Use only the numbered course topics; never invent topics; set 'ambiguous'
         last = messages[-1]
         if isinstance(last, dict) and last.get("role") == "assistant":
             clar = last.get("clarification")
+            if not clar and isinstance(last.get("metadata"), dict):
+                clar = last["metadata"].get("clarification")
             if isinstance(clar, dict) and clar.get("options"):
                 return clar
         return None
@@ -724,14 +868,27 @@ Rules: Use only the numbered course topics; never invent topics; set 'ambiguous'
             return None
 
         norm = _norm(reply)
+        if not norm:
+            return None
+
+        # Exact or substring label / query match (user clicked option link or pasted title)
+        # Check this BEFORE token count limits, as option titles can be long (> 6 tokens).
+        for opt in options:
+            opt_lbl = _norm(opt.get("label", ""))
+            opt_q = _norm(opt.get("query", ""))
+            opt_tn = _norm(opt.get("topic_name", ""))
+            if norm in (opt_lbl, opt_q, opt_tn):
+                return opt
+            if opt_lbl and len(opt_lbl) >= 4 and (norm in opt_lbl or opt_lbl in norm):
+                return opt
+            if opt_q and len(opt_q) >= 4 and (norm in opt_q or opt_q in norm):
+                return opt
+            if opt_tn and len(opt_tn) >= 4 and (norm in opt_tn or opt_tn in norm):
+                return opt
+
         toks = norm.split()
         if not toks or len(toks) > 6:
             return None
-
-        # Exact label / query match (user pasted or clicked-by-text)
-        for opt in options:
-            if norm in (_norm(opt.get("label", "")), _norm(opt.get("query", ""))):
-                return opt
 
         # Affirmative replies ("yes", "sure", "proceed", "1")
         if any(t in _AFFIRMATIVE_WORDS for t in toks) and not any(t in _NEGATIVE_WORDS for t in toks):

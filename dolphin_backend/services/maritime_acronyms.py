@@ -13,7 +13,40 @@ import re
 # mapped to their full descriptive terms and domain keywords
 MARITIME_ACRONYMS_MAP: Dict[str, List[str]] = {
     # Environmental & Emission Regulations (MARPOL Annex VI / BWM)
-    "EGCS": ["exhaust gas cleaning system", "scrubber", "scrubbers", "sox scrubber", "wash water"],
+    "EGCS": ["exhaust gas cleaning system", "exhaust gas cleaning systems", "scrubber", "scrubbers", "sox scrubber", "wash water"],
+    "SECP": [
+        "scrubber emission control plan",
+        "sulfur emission control plan",
+        "ship emissions control plan",
+        "egc system approval",
+        "egcs",
+        "scheme a",
+        "scheme b",
+    ],
+    "OMM": [
+        "onboard monitoring manual",
+        "scrubber",
+        "egcs",
+        "egc system guidelines",
+        "emissions monitoring",
+        "scrubber documentation",
+    ],
+    "CEMS": [
+        "continuous emission monitoring system",
+        "continuous emissions monitoring system",
+        "continuous emission monitoring",
+        "emissions monitoring",
+        "exhaust gas cleaning",
+        "scrubber",
+        "egcs",
+    ],
+    "ETM": [
+        "egc technical manual",
+        "exhaust gas cleaning technical manual",
+        "scheme a",
+        "scheme b",
+        "scrubber manual",
+    ],
     "SCR": ["selective catalytic reduction", "nox", "catalytic reduction", "urea"],
     "BWMS": ["ballast water management system", "ballast water", "bwm", "treatment"],
     "VLSFO": ["very low sulphur fuel oil", "fuel oil", "sulphur cap", "bunker"],
@@ -98,6 +131,7 @@ MARITIME_ACRONYMS_MAP: Dict[str, List[str]] = {
     "MARPOL": ["marine pollution", "annex"],
     "STCW": ["standards of training certification and watchkeeping", "seafarer"],
     "ISM": ["international safety management", "safety management", "sms"],
+    "SMS": ["safety management system", "shipboard management system", "ism code", "company procedures", "safety management"],
     "ISPS": ["international ship and port facility security"],
     "MLC": ["maritime labour convention", "seafarer rights"],
     "IMDG": ["international maritime dangerous goods", "dangerous cargo"],
@@ -109,6 +143,12 @@ MARITIME_ACRONYMS_MAP: Dict[str, List[str]] = {
     "IMO": ["international maritime organization"],
     "ILO": ["international labour organization"],
     "IACS": ["international association of classification societies"],
+    "CBA": ["collective bargaining agreement", "itf", "mlc", "seafarer agreement", "employment agreement"],
+    "SEA": ["seafarers employment agreement", "seafarer employment agreement", "mlc 2006", "crew contract"],
+    "ITF": ["international transport workers federation", "seafarer union", "collective agreement"],
+    "DPA": ["designated person ashore", "ism code", "safety management system"],
+    "CSO": ["company security officer", "isps code", "ship security"],
+    "SSO": ["ship security officer", "isps code", "security assessment"],
 }
 
 # Pre-computed uppercase set for fast O(1) membership test
@@ -117,7 +157,7 @@ KNOWN_ACRONYMS_SET: Set[str] = set(MARITIME_ACRONYMS_MAP.keys())
 
 # Ambiguous short words that are common English words; only count as acronyms if written in ALL CAPS
 AMBIGUOUS_SHORT_WORDS: Set[str] = {
-    "ME", "TO", "IN", "ON", "SO", "NO", "DO", "AT", "BY", "IS", "IT", "AN", "AS", "AM", "HE", "WE", "OR", "IF"
+    "ME", "TO", "IN", "ON", "SO", "NO", "DO", "AT", "BY", "IS", "IT", "AN", "AS", "AM", "HE", "WE", "OR", "IF", "SEA"
 }
 
 # Generic maritime terms that must NOT be used alone to qualify an image/video as relevant
@@ -143,6 +183,26 @@ def get_acronym_expansion(acronym: str) -> List[str]:
         return []
 
 
+def get_strict_acronym_expansions(acronym: str) -> List[str]:
+    """
+    Get only the strict full-form expansions and multi-word phrases for an acronym,
+    excluding broad single-word parent systems or generic categories (e.g., 'scrubber' or 'egcs' from 'OMM').
+    Used for high-precision media filtering (images/videos) and conflict checks without affecting
+    retrieval, vector search, or clarification service.
+    """
+    all_exps = get_acronym_expansion(acronym)
+    if not all_exps:
+        return []
+    # Always include the canonical primary expansion (index 0)
+    strict = [all_exps[0]]
+    for exp in all_exps[1:]:
+        clean = exp.strip().lower()
+        words = clean.split()
+        if len(words) >= 2 and clean not in GENERIC_MARITIME_WORDS:
+            strict.append(exp)
+    return strict
+
+
 def is_known_maritime_acronym(token: str) -> bool:
     """Check if token is recognized as a maritime acronym in static or dynamic registry."""
     if not token:
@@ -155,6 +215,38 @@ def is_known_maritime_acronym(token: str) -> bool:
         return dynamic_acronym_service.is_known_acronym(t_clean)
     except Exception:
         return False
+
+
+NON_MARITIME_ACRONYM_CONFLICTS: Dict[str, re.Pattern] = {
+    "PV": re.compile(r'\b(solar|photovoltaic|rooftop|sunlight|silicon|monocrystalline|polycrystalline)\b', re.IGNORECASE),
+    "BA": re.compile(r'\b(bachelor|degree|liberal\s*arts|college|university|tuition|humanities)\b', re.IGNORECASE),
+    "CPP": re.compile(r'\b(c\+\+|preprocessor|compiler|source\s*file|macros?|header\s*guard|include)\b', re.IGNORECASE),
+    "FPP": re.compile(r'\b(first\s*person|perspective|tpp|shooting\s*game|field\s*of\s*view|fov)\b', re.IGNORECASE),
+    "CPA": re.compile(r'\b(accountant|accounting|exam|tax\s*return|forensic|audit\s*firm|salary|licensed)\b', re.IGNORECASE),
+    "COW": re.compile(r'\b(milk|dairy|farm|pasture|livestock|calf|calves|bovine|jersey|holstein)\b', re.IGNORECASE),
+    "BOG": re.compile(r'\b(peat|wetland|moss|cranberr|swamp|muddy|archaeological)\b', re.IGNORECASE),
+    "CBA": re.compile(r'\b(basketball|chinese\s*basketball|commercial\s*bank\s*of\s*australia|bank\s*of\s*australia|commonwealth\s*bank)\b', re.IGNORECASE),
+}
+
+
+# Multi-word phrase to acronym reverse mapping
+# e.g. "onboard monitoring manual" -> "OMM", "oily water separator" -> "OWS", "exhaust gas cleaning systems" -> "EGCS"
+PHRASE_TO_ACRONYM_MAP: Dict[str, str] = {}
+for _acr, _exps in MARITIME_ACRONYMS_MAP.items():
+    for _exp in _exps:
+        _clean = _exp.lower().strip()
+        if len(_clean.split()) >= 2:
+            # Prefer specific system acronym over auxiliary monitors (e.g. EGCS over CEMS for exhaust gas cleaning)
+            if _clean not in PHRASE_TO_ACRONYM_MAP or (_acr == "EGCS" and "exhaust gas cleaning" in _clean):
+                PHRASE_TO_ACRONYM_MAP[_clean] = _acr
+            if not _clean.endswith("s"):
+                plural_variant = _clean + "s"
+                if plural_variant not in PHRASE_TO_ACRONYM_MAP or (_acr == "EGCS" and "exhaust gas cleaning" in plural_variant):
+                    PHRASE_TO_ACRONYM_MAP[plural_variant] = _acr
+            elif _clean.endswith("s"):
+                sing_variant = _clean[:-1]
+                if sing_variant not in PHRASE_TO_ACRONYM_MAP or (_acr == "EGCS" and "exhaust gas cleaning" in sing_variant):
+                    PHRASE_TO_ACRONYM_MAP[sing_variant] = _acr
 
 
 def find_acronyms_in_query(query: str) -> List[str]:
@@ -170,13 +262,33 @@ def find_acronyms_in_query(query: str) -> List[str]:
             # If it's a common English word like "me", require it to be uppercase in the input
             if w_clean in AMBIGUOUS_SHORT_WORDS and not w.isupper():
                 continue
+            # Contextual suppression: If query contains explicit non-maritime cues for this acronym, ignore it
+            conflict_pat = NON_MARITIME_ACRONYM_CONFLICTS.get(w_clean)
+            if conflict_pat and conflict_pat.search(query):
+                continue
             found.append(w_clean)
         elif len(w_clean) >= 3 and w_clean.endswith('S') and is_known_maritime_acronym(w_clean[:-1]):
             # Support plural acronyms (e.g. EEBDs -> EEBD, SCBAs -> SCBA, BOGs -> BOG, PLCs -> PLC)
             sing_acr = w_clean[:-1]
             if sing_acr in AMBIGUOUS_SHORT_WORDS and not w[:-1].isupper():
                 continue
+            conflict_pat = NON_MARITIME_ACRONYM_CONFLICTS.get(sing_acr)
+            if conflict_pat and conflict_pat.search(query):
+                continue
             found.append(sing_acr)
+
+    # Check multi-word phrases for reverse acronym mapping (e.g. "onboard monitoring manual" -> "OMM", "exhaust gas cleaning systems" -> "EGCS")
+    q_lower = query.lower()
+    matched_spans = []
+    for phrase, acr in sorted(PHRASE_TO_ACRONYM_MAP.items(), key=lambda x: len(x[0]), reverse=True):
+        for m in re.finditer(r'\b' + re.escape(phrase) + r'\b', q_lower):
+            start, end = m.span()
+            if any(s <= start and end <= e for s, e in matched_spans):
+                continue
+            matched_spans.append((start, end))
+            if acr not in found:
+                found.append(acr)
+
     return found
 
 
@@ -205,7 +317,7 @@ def has_conflicting_acronym(query_text: str, candidate_text: str) -> bool:
     for q_acr in query_acronyms:
         if q_acr.lower() in candidate_lower:
             return False
-        for exp in get_acronym_expansion(q_acr):
+        for exp in get_strict_acronym_expansions(q_acr):
             if len(exp) >= 4 and exp.lower() in candidate_lower:
                 return False
 
@@ -222,7 +334,7 @@ def has_conflicting_acronym(query_text: str, candidate_text: str) -> bool:
         # Check if this acronym is an expansion synonym of the queried acronym
         is_synonym = False
         for q_acr in query_acronyms:
-            expansions = [exp.upper() for exp in get_acronym_expansion(q_acr)]
+            expansions = [exp.upper() for exp in get_strict_acronym_expansions(q_acr)]
             if c_acr in expansions or any(c_acr in exp for exp in expansions):
                 is_synonym = True
                 break
@@ -275,7 +387,7 @@ def expand_query_terms_for_media(query: str, chunks: List[dict] = None) -> Set[s
     detected_acronyms = find_acronyms_in_query(query)
     for acr in detected_acronyms:
         effective_words.add(acr.lower())
-        expansions = get_acronym_expansion(acr)
+        expansions = get_strict_acronym_expansions(acr)
         for exp in expansions:
             for w in re.findall(r'\b[a-zA-Z]{3,}\b', exp.lower()):
                 if w not in COMMON_ENGLISH_STOPWORDS and w not in GENERIC_MARITIME_WORDS:

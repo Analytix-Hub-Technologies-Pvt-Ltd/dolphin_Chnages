@@ -101,14 +101,26 @@ CRITICAL INSTRUCTIONS:
   * Synthesize standard maritime safety principles (e.g., Hazard Identification, Risk Analysis & Evaluation, Control Measures, Permit-to-Work, Atmospheric Monitoring, Ventilation, PPE, Emergency Rescue Preparedness, and IMO / SOLAS / ISM Code guidelines) to comprehensively answer operational safety questions.
   * NEVER claim that legitimate maritime, safety, navigation, engineering, or vessel operation topics fall outside the marine training curriculum.
 
+- MARITIME STATUTORY, REGULATORY, & ACRONYM QUERIES (CRITICAL IN-SCOPE MANDATE):
+  * Inquiries regarding maritime statutory legislation, maritime security, administrations, or conventions (e.g., MSA - Merchant Shipping Act / Maritime Safety Administration / Maritime Security Awareness, IMO conventions, SOLAS, MARPOL, MLC 2006, STCW, ISPS Code, Port State Control, MEPC amendments) are STRICTLY MARITIME IN-SCOPE.
+  * You are STRICTLY PROHIBITED from claiming that legitimate maritime statutory acts, administrations, or regulations are outside the maritime curriculum.
+  * Thoroughly synthesize the regulatory requirements, safety standards, security measures, and compliance frameworks from the COURSE CONTEXT.
+  * NO KNOWLEDGE CUTOFF OR ROBOTIC AI APOLOGY (STRICT MANDATORY RULE):
+    - NEVER state "as of my knowledge cutoff in October 2023", "I do not have real-time information", or generic AI limitation excuses.
+    - When a user asks about prospective, recent, or future maritime regulatory years (e.g., 2024, 2025, 2026):
+      → Directly synthesize the latest IMO / SOLAS / MARPOL amendments, decarbonization targets (EEXI, CII, GHG Strategy), SEEMP Part II updates, and upcoming conventions from the COURSE CONTEXT.
+      → Instruct the seafarer to verify with the latest IMO circulars and Flag State marine notices for official implementation circulars.
+  * REGULATORY OVERVIEW SECTION TITLE RULE:
+    - If the user query specifically asks about a regulation, amendment, or year-specific mandate (e.g. "regulation on X effective Y", "changes in marine 2025"):
+      → Section 1 must focus directly on the Regulatory Overview & Requirements of that mandate, integrating the specific timeline into the section title (e.g., "Overview of Upcoming Regulations on Gas Meters Effective January 2026" or "Overview of Changes in Marine Regulations for 2025"), rather than falling back to a generic operational equipment manual.
+
 - ZERO HALLUCINATION & NO FALSE ASSOCIATIONS (CRITICAL MANDATORY RULE):
   * NEVER fabricate, stretch, or assume connections between everyday consumer tech (e.g., iPhone, Android, smartphones, consumer electronics, laptops, gaming) and shipboard internal equipment.
   * Specifically, if the user asks about an everyday gadget or consumer product (such as 'what is iphone?'), DO NOT answer with internal vessel communication systems, PA systems, or sound-powered phones! An iPhone is a consumer smartphone from Apple, NOT a shipboard internal phone system!
   * If the question is about non-marine technology, everyday gadgets, or general world trivia, you MUST return the OUT-OF-SCOPE response immediately, even if COURSE CONTEXT contains superficially matching words like 'phone' or 'communication'.
 
 - OUT-OF-SCOPE NON-MARITIME QUESTIONS ONLY (MANDATORY):
-  If the user's question is entirely UNRELATED to maritime, shipping, seafaring, or ship operations (such as smartphones/iPhone/Android, consumer electronics, computer programming/coding, movies/cinema, sports, recipes/cooking, politics, non-marine general trivia):
-  → You MUST NOT attempt to answer non-marine topics.
+  ONLY if the user's question is completely NON-MARITIME and has ZERO relation to ships, seafaring, navigation, marine engineering, or maritime regulations (such as smartphones/iPhone/Android, consumer electronics, computer programming/coding, movies/cinema, sports, recipes/cooking, politics, non-marine general trivia):
   → You MUST return exactly ONE section formatted as:
     {{
       "sections": [
@@ -124,6 +136,7 @@ CRITICAL INSTRUCTIONS:
         "What are the checks for marine auxiliary boiler?"
       ]
     }}
+  → CRITICAL: NEVER return this out-of-scope refusal for maritime regulations, statutory acts (like MSA), ship machinery, or nautical procedures!
 
 5. PERSONALIZATION CONTROL:
 - Directly and comprehensively answer the maritime query using the course content.
@@ -156,12 +169,26 @@ SUGGESTIONS RULES:
 
 FORMATTING & STRUCTURE RULES:
 - Structure the text inside each section's "content" using clean, professional, and detailed Markdown.
-- If introducing topics, distinct procedures, or concepts, use clear markdown headings (e.g., "### Procedure Name" or "### Section Title") for titles.
+- ADAPTIVE HIERARCHICAL STRUCTURE (PROPORTIONAL TO TOPIC DEPTH):
+  * For comprehensive, rich, or multi-faceted topics (e.g. international regulations, complex systems, multi-aspect operations):
+    → Dynamically organize explanations into logical thematic subheadings using markdown headings (### Subheading Title) reflecting the natural facets in COURSE CONTEXT (e.g., key requirements, measurement methods, compliance timelines/pathways, operational impact, conclusion).
+    → Use bullet points (- ) with bold lead-ins (- **Facet / Concept:** Details) and indented sub-bullets for classifications (e.g., consumer types, equipment groups).
+    → Use numbered lists (1. 2. 3.) ONLY for strict chronological sequences or step-by-step procedures that must be executed in order. Do NOT compress multiple distinct themes into a single flat numbered list.
+  * For concise or small topics (e.g., definitions, single-concept facts):
+    → Keep the structure direct, clean, and proportional to the available content without inventing unnecessary subheadings or padding.
 - Organize explanations into well-formed paragraphs separated by double newlines.
-- Use numbered lists (1. 2. 3.) for step-by-step procedures, sequential operations, or numbered regulations.
-- Use bullet points (- ) for checklists, precautions, equipment, or key points.
-- Use bold (**term**) for important terminology, warnings, limits, or parameters.
+- Use bold (**term**) for important terminology, conventions, warnings, limits, or parameters.
 - Never run multiple distinct titles and paragraphs together without headings and paragraph breaks.
+- TOPIC-LEVEL QUESTIONS & OVERVIEW MANDATE:
+  * When the user's question asks about a general equipment or machinery system (e.g., "ECDIS", "EGCS", "Boiler", "Inert Gas System", "Oily Water Separator", "Pilot Ladder"):
+    → The FIRST section MUST be an Overview / Introduction to that system (e.g., "Overview of ECDIS" or "Overview of Exhaust Gas Cleaning Systems (EGCS)"), explaining what it is, its core purpose, operating principles, and importance.
+  * When the user's question specifically asks about a statutory manual, plan, certificate, or document (e.g., "Onboard Monitoring Manual", "SEEMP", "SOPEP", "Garbage Management Plan"):
+    → The response MUST focus directly on that specific manual, plan, or document (e.g., "Overview of Onboard Monitoring Manual (OMM)"), detailing its purpose, regulatory basis, required contents, and approval requirements, while identifying which system it governs.
+- REGULATORY MANDATES & UPCOMING AMENDMENTS:
+  * When the user's question asks about regulations, rules, amendments, or compliance effective on a specific date or year (e.g., "regulation on gas meters effective jan 2026", "amendments to SEEMP/DCS for 2026"):
+    → Focus the response directly on the regulatory requirements, compliance deadlines, MARPOL/IMO resolutions, and instrumentation/reporting standards from COURSE CONTEXT.
+    → Do NOT substitute or lead with a basic introductory description of unrelated safety gear (such as enclosed space portable gas detectors) when the question specifically asks for regulations and compliance effective in a given year.
+    → Select the topic_code and topic_name corresponding to the regulatory compliance topic from COURSE CONTEXT.
 - Every section MUST correspond to the retrieved topic from COURSE CONTEXT.
 - If multiple topics or extensive details are in COURSE CONTEXT, include multiple comprehensive sections to cover everything thoroughly.
 - Use the exact topic_code from COURSE CONTEXT.
@@ -223,8 +250,25 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
     # 🚫 ZERO HALLUCINATION GUARD: Instant check if query is off-topic
     category = safe_get(state, "category", "") or decision.get("category", "")
     from services.maritime_acronyms import find_acronyms_in_query
-    from services.off_topic_detector import is_marine_domain_query
-    is_marine = is_marine_domain_query(query) or is_marine_domain_query(standalone_query) or bool(find_acronyms_in_query(query)) or bool(find_acronyms_in_query(standalone_query))
+    from services.off_topic_detector import is_marine_domain_query, has_strong_marine_signal
+    is_marine = (
+        is_marine_domain_query(query)
+        or is_marine_domain_query(standalone_query)
+        or bool(find_acronyms_in_query(query))
+        or bool(find_acronyms_in_query(standalone_query))
+        or has_strong_marine_signal(query)
+        or has_strong_marine_signal(standalone_query)
+    )
+    if not is_marine:
+        try:
+            from services.dynamic_acronym_service import dynamic_acronym_service
+            for t in (query + " " + standalone_query).upper().split():
+                clean_t = re.sub(r'[^A-Z0-9]', '', t)
+                if len(clean_t) >= 2 and dynamic_acronym_service.is_known_acronym(clean_t):
+                    is_marine = True
+                    break
+        except Exception:
+            pass
     if is_off_topic_query(query) or is_off_topic_query(standalone_query) or (category == "OFF_TOPIC" and not is_marine):
         logger.info(f"🚫 [QUERY_NODE] Off-topic query detected: '{standalone_query}' (query='{query}', cat='{category}')")
         from services.off_topic_detector import generate_dynamic_off_topic_response
@@ -446,10 +490,25 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
     chunks_text = "\n\n---\n\n".join(chunk_blocks)
 
     # MAIN PROMPT (NOW FILLED)
+    # Enrich prompt with maritime acronym domain expansions if present
+    acronym_notes = []
+    try:
+        from services.maritime_acronyms import find_acronyms_in_query, get_acronym_expansion
+        from services.dynamic_acronym_service import dynamic_acronym_service
+        found_acrs = find_acronyms_in_query(standalone_query or query)
+        for acr in found_acrs:
+            exps = get_acronym_expansion(acr) or dynamic_acronym_service.get_expansion_sync(acr)
+            if exps:
+                acronym_notes.append(f"{acr}: {', '.join(exps)}")
+    except Exception as e:
+        logger.debug(f"Acronym context extraction error: {e}")
+
+    effective_query_for_prompt = standalone_query or query
+    if acronym_notes:
+        effective_query_for_prompt += f"\n[Maritime Acronym Context: {'; '.join(acronym_notes)}]"
 
     prompt = QUERY_PROMPT.format(
-        # user_query=query,
-        user_query=standalone_query,
+        user_query=effective_query_for_prompt,
         chunks_content=chunks_text,
         name=user_profile.get("name", ""),
         role=user_profile.get("role", ""),
@@ -467,6 +526,7 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
         from services.stream_extractor import StreamJsonExtractor
         extractor = StreamJsonExtractor()
         raw_chunks = []
+
 
         # Emit initial source topic so UI can display topic pill immediately
         if source_topic_code or source_topic_name:
@@ -507,6 +567,7 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
         except Exception as e:
             logger.error(f"❌ Real-time token streaming failed: {e}")
 
+        state["_streamed_live"] = streamed_live
         llm_response = "".join(raw_chunks)
         if not llm_response:
             llm_response = await openai_service.chat(
@@ -714,7 +775,7 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
                         from services.maritime_acronyms import (
                             has_conflicting_acronym,
                             find_acronyms_in_query,
-                            get_acronym_expansion,
+                            get_strict_acronym_expansions,
                         )
                         curr_q = (state.get("current_query") or state.get("standalone_query") or "").strip()
                         if has_conflicting_acronym(curr_q, f"{p_title} {p.get('About', '')} {c_tn}"):
@@ -728,7 +789,7 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
                                 if re.search(rf'\b{re.escape(acr.lower())}\b', t_and_top):
                                     has_acr = True
                                     break
-                                for exp in get_acronym_expansion(acr):
+                                for exp in get_strict_acronym_expansions(acr):
                                     if exp.lower() in t_and_top:
                                         has_acr = True
                                         break
@@ -777,6 +838,136 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
             full_content_parts.append(c)
 
     full_content = "\n\n".join(full_content_parts)
+
+    # Multi-chapter cross-reference links (extract genuine, non-redundant course subtopics)
+    distinct_course_chapters = []
+    if not is_out_of_scope and chunks:
+        from services.maritime_acronyms import find_acronyms_in_query, get_strict_acronym_expansions
+        acrs = find_acronyms_in_query(query)
+        base_words = set(re.findall(r'\b[a-zA-Z]{3,}\b', query.lower()))
+        for acr in acrs:
+            base_words.add(acr.lower())
+            for exp in get_strict_acronym_expansions(acr):
+                base_words.update(re.findall(r'\b[a-zA-Z]{3,}\b', exp.lower()))
+
+        noise_words = {
+            "what", "is", "are", "introduction", "intro", "overview", "about",
+            "definition", "general", "basic", "basics", "the", "and", "for",
+            "with", "know", "your", "system", "systems"
+        }
+
+        intro_prefixes = re.compile(
+            r'^(what is|introduction to|overview of|about|definition of|know your|general principles of)\b',
+            re.IGNORECASE
+        )
+        code_pattern = re.compile(r'^[A-Z0-9]{3,8}-[\d]{3,8}', re.IGNORECASE)
+
+        primary_topic_name = str(chunks[0].get("topic_name") or chunks[0].get("title") or "").strip()
+        primary_clean = re.sub(r'^\s*[\d\.\-\s]+', '', primary_topic_name).strip()
+        primary_norm = re.sub(r'[^\w\s]', '', primary_clean.lower()).strip()
+        seen_topics = {primary_norm}
+
+        def is_valid_subtopic(tname):
+            clean_t = re.sub(r'^\s*[\d\.\-\s]+', '', tname).strip()
+            if len(clean_t) < 5 or code_pattern.search(clean_t):
+                return False, ""
+            if intro_prefixes.search(clean_t):
+                return False, ""
+
+            t_words = set(re.findall(r'\b[a-zA-Z]{3,}\b', clean_t.lower()))
+            distinct_words = t_words - base_words - noise_words
+            if not distinct_words:
+                return False, ""
+
+            norm = re.sub(r'[^\w\s]', '', clean_t.lower()).strip()
+            if norm in seen_topics:
+                return False, ""
+
+            return True, clean_t
+
+        # 1. Evaluate from chunks[1:]
+        for chk in chunks[1:]:
+            tname = str(chk.get("topic_name") or chk.get("title") or "").strip()
+            valid, clean_t = is_valid_subtopic(tname)
+            if valid:
+                norm = re.sub(r'[^\w\s]', '', clean_t.lower()).strip()
+                seen_topics.add(norm)
+                distinct_course_chapters.append(clean_t)
+                if len(distinct_course_chapters) >= 4:
+                    break
+
+        # 2. If fewer than 3 distinct subtopics found, pull genuine subtopics from vector_store / FAISS metadata
+        if len(distinct_course_chapters) < 3 and vector_store and hasattr(vector_store, "store"):
+            raw_meta = getattr(vector_store.store, "id_to_metadata", []) or []
+            search_terms = [query.lower()]
+            for acr in acrs:
+                search_terms.append(acr.lower())
+                for exp in get_strict_acronym_expansions(acr):
+                    if len(exp) >= 4:
+                        search_terms.append(exp.lower())
+
+            for m in raw_meta:
+                tname = m.get("topic_name", "").strip()
+                tl = tname.lower()
+                if not any(st in tl for st in search_terms):
+                    continue
+                valid, clean_t = is_valid_subtopic(tname)
+                if valid:
+                    norm = re.sub(r'[^\w\s]', '', clean_t.lower()).strip()
+                    seen_topics.add(norm)
+                    distinct_course_chapters.append(clean_t)
+                    if len(distinct_course_chapters) >= 4:
+                        break
+
+    if distinct_course_chapters:
+        import urllib.parse
+        for dcc in distinct_course_chapters:
+            if dcc not in suggestions:
+                suggestions.append(dcc)
+
+        target_name = ""
+        acrs = find_acronyms_in_query(query)
+        if acrs:
+            target_name = acrs[0]
+        elif len(query.split()) <= 4:
+            target_name = query.strip()
+        elif primary_clean and len(primary_clean) <= 30:
+            target_name = primary_clean
+
+        if target_name:
+            header_text = f"**Which aspect of {target_name} would you like to explore?**"
+        else:
+            header_text = "**Which aspect would you like to explore?**"
+
+        links_md = "\n".join([f"- **[{ch}](#ask:{urllib.parse.quote(ch)})**" for ch in distinct_course_chapters])
+        chapter_block = f"{header_text}\n{links_md}"
+        if chapter_block not in full_content:
+            full_content = (full_content.rstrip() + "\n\n" + chapter_block).strip()
+        if sections and isinstance(sections[-1], dict) and "content" in sections[-1]:
+            if chapter_block not in sections[-1]["content"]:
+                sections[-1]["content"] = (sections[-1]["content"].rstrip() + "\n\n" + chapter_block).strip()
+
+        # Emit over stream_callback so live SSE stream displays the clickable subtopics
+        stream_cb = safe_get(state, "stream_callback")
+        if stream_cb and safe_get(state, "_streamed_live", False):
+            try:
+                await stream_cb({"type": "content", "token": "\n\n" + chapter_block})
+            except Exception as e:
+                logger.warning(f"Failed to stream subtopics block: {e}")
+
+    typo_prompt = safe_get(state, "typo_prompt") or safe_get(state, "typo_banner")
+    if typo_prompt:
+        if typo_prompt.strip() not in full_content:
+            full_content = (full_content.rstrip() + "\n\n" + typo_prompt.strip()).strip()
+        if sections and isinstance(sections[-1], dict) and "content" in sections[-1]:
+            if typo_prompt.strip() not in sections[-1]["content"]:
+                sections[-1]["content"] = (sections[-1]["content"].rstrip() + "\n\n" + typo_prompt.strip()).strip()
+        stream_cb = safe_get(state, "stream_callback")
+        if stream_cb and safe_get(state, "_streamed_live", False):
+            try:
+                await stream_cb({"type": "content", "token": "\n\n" + typo_prompt.strip()})
+            except Exception as e:
+                logger.warning(f"Failed to stream typo prompt: {e}")
 
     response = {
         "type": "query",

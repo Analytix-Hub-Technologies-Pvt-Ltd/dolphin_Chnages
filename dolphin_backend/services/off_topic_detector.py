@@ -29,10 +29,10 @@ OFF_TOPIC_REGEX_PATTERNS = [
 
     # Non-marine Computer Science / Software / Programming
     r"\b(python\s*programming|python\s*code|python\s*script|python\s*language|learn\s*python)\b",
-    r"\b(javascript|typescript|c\+\+|c#|html\s*css|reactjs|react\s*js|angular|vuejs|nodejs)\b",
+    r"\b(javascript|typescript|c\+\+|c#|html\s*css|reactjs|react\s*js|react\s*native|mobile\s*app(?:lication)?s?|angular|vuejs|nodejs)\b",
     r"\b(machine\s*learning|deep\s*learning|coding\s*interview|software\s*engineering)\b",
-    r"\b(programming\s*languages?|golang|rust\s*programming|php\s*code|sql\s*queries?)\b",
-    r"\b(git\s*commits?|github|gitlab|chatgpt|openai|llm\s*models?|neural\s*networks?)\b",
+    r"\b(programming\s*languages?|golang|rust\s*programming|php\s*code|sql\s*queries?|mysql|postgresql?|mongodb|sqlite|database\s*tables?)\b",
+    r"\b(git\s*commits?|github|gitlab|chatgpt|openai|llm\s*models?|neural\s*networks?|docker|ubuntu|linux\s*desktop)\b",
     r"\b(write\s+(?:a\s+)?code|write\s+(?:a\s+)?script|debug\s+(?:this\s+)?code|fix\s+(?:this\s+)?bug)\b",
 
     # Pop Culture, Entertainment, Cinema, Celebrities
@@ -49,6 +49,7 @@ OFF_TOPIC_REGEX_PATTERNS = [
 
     # Politics & Non-marine Governance
     r"\b(presidential\s*elections?|prime\s*minister|parliamentary\s*election)\b",
+    r"\bwho\s+(?:was|is)\s+the\s+(?:first|current|next)?\s*(?:president|prime\s*minister|governor|monarch|king|queen)\b",
     r"\b(democrats?|republicans?|political\s*part(?:y|ies)|white\s*house|senate\s*vote)\b",
 
     # Cooking & Food Recipes
@@ -57,7 +58,7 @@ OFF_TOPIC_REGEX_PATTERNS = [
 
     # Finance, Stock Market, Crypto
     r"\b(cryptocurrency|cryptos?|bitcoins?|ethereum|dogecoin|binance)\b",
-    r"\b(stock\s*market|forex\s*trading|mutual\s*funds?|wall\s*street)\b",
+    r"\b(stock\s*market|forex\s*trading|mutual\s*funds?|wall\s*street|compound\s*interest|savings\s*account)\b",
 
     # Non-marine General Trivia, Science & Everyday Inquiries
     r"\bwho\s+is\s+(?:elon\s+musk|bill\s+gates|jeff\s+bezos|mark\s+zuckerberg|messi|ronaldo|donald\s+trump|joe\s+biden)\b",
@@ -66,15 +67,17 @@ OFF_TOPIC_REGEX_PATTERNS = [
     r"\bwhat\s+is\s+the\s+population\s+of\b",
     r"\b(tell\s+me\s+a\s+joke|jokes?|dating\s+advice|relationship\s+advice)\b",
     r"\b(eiffel\s*tower|statue\s*of\s*liberty|taj\s*mahal|pyramids?\s*of\s*giza)\b",
-    r"\b(dinosaurs?|photosynthesis|human\s*anatomy|dna\s*replication|black\s*holes?|solar\s*system)\b",
-    r"\b(airplanes?|aeroplanes?|aircrafts?|helicopters?|boeing\s*\d+|airbus\s*\d+|commercial\s*flight|aerodynamics\s*of\s*flight)\b",
-    r"\b(space\s*exploration|mars\s*rover|james\s*webb|hubble\s*telescope|astronauts?|milky\s*way|andromeda|quantum\s*mechanics|quantum\s*physics)\b",
-    r"\b(lions?|tigers?|elephants?|giraffes?|leopards?|cheetahs?|bears?|wolf|wolves|monkeys?|gorillas?|chimpanzees?|can\s+dogs\s+eat|dog\s*breeds?|cat\s*breeds?|snakes?|serpents?|vipers?|cobras?|pythons?|reptiles?)\b",
+    r"\b(dinosaurs?|photosynthesis|human\s*anatomy|dna\s*replication|black\s*holes?|solar\s*system|earth\s*and\s*mars)\b",
+    r"\b(airplanes?|aeroplanes?|aircrafts?|helicopters?|boeing\s*\d+|airbus\s*\d+|commercial\s*flight|aerodynamics\s*of\s*flight|jet\s*engines?|afterburners?|supersonic\s*(?:thrust|flight|speed)|rocket\s*engines?|spacecraft)\b",
+    r"\b(space\s*exploration|mars\s*rover|james\s*webb|hubble\s*(?:space\s*)?telescope|space\s*telescope|astronauts?|milky\s*way|andromeda|quantum\s*mechanics|quantum\s*physics|walk\s+on\s+the\s+moon|moon\s*landing|apollo\s*\d+|neil\s*armstrong|buzz\s*aldrin)\b",
+    r"\b(lions?|tigers?|elephants?|giraffes?|leopards?|cheetahs?|bears?|wolf|wolves|monkeys?(?!\s*island)|gorillas?|chimpanzees?|can\s+dogs\s+eat|dog\s*breeds?|cat\s*breeds?|puppy|puppies|golden\s*retriever|kitten|kittens|train\s+a\s+(?:dog|puppy)|snakes?|serpents?|vipers?|cobras?|pythons?|reptiles?)\b",
     r"\b(how\s+to\s+play\s+(?:guitar|piano|violin|flute|drums)|guitar\s*chords?|piano\s*notes?|acoustic\s*guitar|electric\s*guitar)\b",
-    r"\b(symptoms?\s*of\s*(?:flu|fever|diabetes|covid|cancer|malaria|dengue|migraine)|how\s+to\s+cure\s+(?:headache|cough|cold|fever)|weight\s*loss\s*tips|workout\s*plan|gym\s*workout|diet\s*plan|barbells?|dumbbells?|bench\s*press|bicep\s*curls?|pushups?|deadlifts?)\b",
-    r"\b(how\s+to\s+drive\s+a\s+car|fix\s+a\s+(?:bicycle|bike|flat\s*tire)|electric\s*cars?|tesla\s*model)\b",
+    r"\b(symptoms?\s*of\s*(?:flu|fever|diabetes|covid|cancer|malaria|dengue|migraine|high\s*blood\s*pressure|hypertension)|high\s*blood\s*pressure|hypertension|how\s+to\s+cure\s+(?:a\s+)?(?:common\s+)?(?:headache|cough|cold|fever)|cure\s+for\s+(?:a\s+)?(?:common\s+)?(?:headache|migraine|cold)|weight\s*loss\s*tips|workout\s*plan|gym\s*workout|diet\s*plan|barbells?|dumbbells?|bench\s*press|bicep\s*curls?|pushups?|deadlifts?)\b",
+    r"\b(how\s+to\s+drive\s+a\s+car|fix\s+a\s+(?:flat\s*)?(?:bicycle|bike|tire)|bicycles?|electric\s*cars?|tesla\s*model|steam\s*locomotives?|locomotives?|railroads?|railways?|honda\s*civic|toyota\s*corolla|automobiles?|passenger\s*cars?|sports\s*cars?|automotive\s*engines?|bathroom\s*toilet|toilet\s*flush|flush\s*tank|toilet\s*tank|kitchen\s*sink)\b",
+    r"\b(laparoscopic\s*appendectomy|general\s*surgery|monetary\s*policy|federal\s*reserve|feline\s*leukemia|mitosis\s*and\s*meiosis|cellular\s*biology|parkinson\s*disease|hypertension\s*symptoms?)\b",
     r"\b(world\s*war\s*[12i]+|french\s*revolution|american\s*civil\s*war|roman\s*empire|ancient\s*egypt|ancient\s*greece)\b",
     r"\b(idioms?|proverbs?|etymology|english\s+idioms?|origin\s+of\s+(?:the\s+)?(?:idiom|phrase|saying)|meaning\s+of\s+(?:the\s+)?(?:idiom|phrase|saying))\b",
+    r"\b(weather\s+(?:in|for|at)\s+[a-zA-Z\s]+|weather\s+forecast\s+for\s+[a-zA-Z\s]+|temperature\s+(?:in|at)\s+[a-zA-Z\s]+)\b",
 ]
 
 COMPILED_OFF_TOPIC = [
@@ -105,7 +108,7 @@ OFF_TOPIC_KEYWORDS = [
     # Politics & News
     "politics", "election", "president", "prime minister", "parliament", "congress",
     # Cooking / Lifestyle
-    "recipe", "how to bake", "how to cook", "cake recipe", "cooking recipe",
+    "recipe", "how to bake", "how to cook", "cake recipe", "cooking recipe", "pizza", "burger",
     # Finance / Crypto
     "crypto", "bitcoin", "ethereum", "stock market", "cryptocurrency",
     # Terrestrial Animals, Space, Science & Music
@@ -113,6 +116,11 @@ OFF_TOPIC_KEYWORDS = [
     "guitar", "piano", "violin", "flute", "drums", "astronomy", "quantum physics",
     "diabetes", "weight loss", "gym workout", "tesla",
     "snake", "snakes", "barbell", "barbells", "dumbbell", "dumbbells",
+    # General non-marine lifestyle, hobbies & personal care
+    "dentist", "dentistry", "shampoo", "popcorn", "hamburger", "hamburgers",
+    "dandruff", "liposuction", "karaoke", "disneyland", "astrology", "horoscope",
+    "tarot", "golf", "archery", "marathon", "skateboarding", "origami", "crochet",
+    "pottery", "calligraphy",
 ]
 
 
@@ -145,21 +153,25 @@ MARINE_INDICATORS = [
     "seaman", "seamanship", "helmsman", "lookout",
 
     # Bridge, Navigation & Deck Equipment
-    "navigation", "bridge", "anchor watch", "bridge watch", "passage plan",
+    "navigation", "bridge", "anchor watch", "bridge watch", "passage plan", "dead reckoning",
     "ecdis", "radar", "arpa", "ais", "gyro", "magnetic compass", "autopilot",
     "rudder", "helm", "crossing situation", "head-on", "head on", "overtaking",
     "restricted visibility", "fog signal", "sound signal", "navigation light",
-    "day shape", "pilot", "pilotage", "pilot ladder", "draft", "draught",
+    "day shape", "pilot", "pilotage", "pilot ladder", "draft", "draught", "trim", "deadweight tonnage", "gross tonnage",
+    "sidelights", "port and starboard sidelights", "shallow water cushion effect", "cushion effect", "heavy fuel oil", "marine gas oil",
+    "marine diesel", "marine diesel fuel", "marine fuel", "marine diesel oil", "marine fuel oil",
+    "fuel change over", "fuel changeover", "synchronizing alternators", "dark lamp method",
     "ladder", "ladders", "winch", "winches",
     "under keel clearance", "ukc", "tide", "squat", "bank effect", "interaction",
-    "sextant", "anemometer", "clinometer", "pelorus", "echo sounder", "speed log",
-    "chart table", "heading repeater", "gyrocompass", "alidade", "chronometer",
+    "sextant", "anemometer", "clinometer", "inclinometer", "pelorus", "echo sounder", "speed log",
+    "chart table", "heading repeater", "gyrocompass", "alidade", "chronometer", "binnacle", "taffrail",
+    "azipod", "calorifier", "hydrophore", "demister", "manometer", "chock", "hawsepipe", "skeg",
 
     # Engine Room & Machinery
     "engine room", "marine engine", "diesel engine", "main engine", "auxiliary engine",
     "two stroke", "four stroke", "boiler", "auxiliary boiler", "exhaust gas boiler",
-    "economizer", "turbocharger", "scavenge fire", "crankcase", "purifier",
-    "separator", "oily water separator", "ows", "15 ppm", "bilge", "ballast water",
+    "economizer", "turbocharger", "supercharger", "superchargers", "scavenge fire", "scavenging", "scavenge", "crankcase", "crankshaft", "crankshafts", "purifier",
+    "separator", "oily water separator", "ows", "15 ppm", "bilge", "ballast water", "ballast", "ballasting", "deballasting", "hull", "hulls", "keel", "keels", "bulkhead", "bulkheads", "seawater", "salinometer", "salinity",
     "steering gear", "propeller", "stern tube", "generator", "switchboard",
     "air compressor", "fresh water generator", "incinerator", "bunker", "bunkering",
     "pump", "pumps", "centrifugal pump", "reciprocating pump", "gear pump", "screw pump", "eductor", "ejector",
@@ -168,15 +180,17 @@ MARINE_INDICATORS = [
     "engine", "engines", "compressor", "compressors", "turbine", "turbines", "boiler", "boilers",
     "cooler", "coolers", "condenser", "condensers", "heater", "heaters", "filter", "filters",
     "strainer", "strainers", "gauge", "gauges", "sensor", "sensors", "detector", "detectors",
-    "transmitter", "transmitters", "injector", "injectors", "governor", "governors", "cylinder", "cylinders",
+    "transmitter", "transmitters", "injector", "injectors", "injection", "fuel injection", "bilge injection", "governor", "governors", "cylinder", "cylinders",
     "piston", "pistons", "bearing", "bearings", "blower", "blowers", "burner", "burners",
     "actuator", "actuators", "evaporator", "evaporators", "purifier", "purifiers", "separator", "separators",
     "generator", "generators", "switchboard", "switchboards", "intercooler", "intercoolers",
     "bbs", "bog", "bob", "boil off gas", "boil-off gas", "bunker on board", "behavior based safety",
+    "oil mist detector", "expansion tank", "expansion tanks",
 
     # Safety, Emergency & Life Saving Appliances (LSA/FFA)
     "firefighting", "fire extinguisher", "fire hose", "fire damper", "co2 system",
     "foam system", "scba", "eebd", "lifeboat", "liferaft", "lifebuoy", "lifejacket",
+    "line throwing", "line-throwing", "line throwing appliance", "line throwing appliances", "lta",
     "immersion suit", "pyrotechnics", "rocket parachute", "hand flare", "epirb",
     "sart", "gmdss", "vhf", "navtex", "hru", "hydrostatic release", "muster",
     "fire drill", "abandon ship", "man overboard", "mob", "damage control",
@@ -188,7 +202,9 @@ MARINE_INDICATORS = [
     "tank cleaning", "crude oil washing", "cow", "inert gas", "igg",
     "nitrogen generator", "pressure vacuum", "pv valve", "enclosed space",
     "confined space", "hot work", "cold work", "permit to work", "ptw",
-    "risk assessment", "toolbox talk", "atmospheric testing", "gas detector",
+    "risk assessment", "toolbox talk", "atmospheric testing", "gas detector", "gas meter", "gas meters",
+    "portable gas meter", "portable gas meters", "personal gas meter", "personal gas meters",
+    "multi-gas meter", "multigas meter", "multi gas meter",
     "oxygen analyzer", "explosimeter", "toxic gas", "manifold", "heating coil",
     "butterworth", "butterworth machine", "vapor line", "slop tank", "deepwell pump",
     "stripping pump", "cargo pump",
@@ -204,18 +220,114 @@ MARINE_INDICATORS = [
     "mooring", "anchor", "anchoring", "windlass", "capstan", "heaving line",
     "hawser", "gangway", "safety net", "chain locker", "fairlead", "bollard",
     "cleat", "bitt", "fender", "shackle", "bulwark", "scupper", "stanchion",
-    "derrick", "mooring line", "hatch coaming",
+    "derrick", "mooring line", "spring line", "breast line", "head line", "stern line", "hatch coaming",
+    "dog clutch", "sea chest", "monkey island", "poop deck", "devil's claw", "devils claw", "gypsy wheel", "mud box", "crow's nest", "crows nest", "sea anchor", "plimsoll mark", "plimsoll line", "freeboard", "steaming light",
     "snap back", "snapback", "snap-back", "snap back zone", "snapback zone", "snap-back zone", "snap backzone",
 
     # Crew Safety, Conduct & Wellbeing
     "harassment", "bullying", "intoxication", "intoxicated", "drug test",
     "alcohol test", "workplace safety", "near miss", "incident investigation",
     "crew safety", "crew member",
+
+    # Maritime Labour, MLC 2006 & Employment Agreements
+    "cba", "collective bargaining agreement", "collective bargaining",
+    "seafarers employment agreement", "seafarer employment agreement",
+    "mlc 2006", "maritime labour convention", "itf agreement",
+    "hours of rest", "hours of work and rest", "seafarer repatriation",
+    "designated person ashore", "company security officer", "ship security officer",
 ]
 
 COMPILED_MARINE = [
     re.compile(r"\b" + re.escape(term) + r"\b", re.IGNORECASE) for term in MARINE_INDICATORS
 ]
+
+
+# -------------------------------------------------------------
+# 3b. STRONG MARITIME SIGNAL DETECTION (purely additive, no manual list)
+# -------------------------------------------------------------
+# A MARINE_INDICATORS term is "strong" (unambiguous maritime) when it is:
+#   - A multi-word phrase  → can't appear as a coincidental single-word match
+#   - A single word of 7+ characters → uncommon in everyday English
+#   - A recognised maritime acronym pattern (2-8 uppercase letters/digits/hyphens)
+# This classification runs ONCE at import time — zero runtime overhead.
+# Adding new entries to MARINE_INDICATORS automatically inherits this logic.
+
+_ACRONYM_RE = re.compile(r'^[A-Z0-9\-]{2,8}$')
+
+
+def _is_strong_marine_term(term: str) -> bool:
+    """Auto-classify a single MARINE_INDICATORS entry as unambiguous or not."""
+    if " " in term:                               # multi-word phrase → always unambiguous
+        return True
+    if len(term) >= 7:                             # long domain-specific word
+        return True
+    if term.lower() in {"hull", "keel", "rudder", "helm", "scow", "bilge", "anchor", "trim"}:
+        return True
+    if _ACRONYM_RE.match(term.upper()) and len(term) >= 2:  # maritime acronym
+        return True
+    return False
+
+
+# Pre-computed at import — stays in sync with MARINE_INDICATORS automatically
+STRONG_MARINE_TERMS: set = {t for t in MARINE_INDICATORS if _is_strong_marine_term(t)}
+_COMPILED_STRONG_MARINE = [
+    re.compile(r"\b" + re.escape(t) + r"\b", re.IGNORECASE)
+    for t in STRONG_MARINE_TERMS
+]
+
+
+def has_strong_marine_signal(query: str) -> bool:
+    """
+    Returns True only when the query contains at least one UNAMBIGUOUS maritime term
+    (a multi-word maritime phrase, a 7+ character domain-specific word, or a known
+    maritime acronym).  Short common English words that happen to appear in
+    MARINE_INDICATORS ("ship", "tank", "tide", "deck", "valve" ...) do NOT qualify.
+
+    Used in chat_service.py to gate the is_direct_marine fast-path:
+      - True  → query very likely maritime → safe to fast-path to retrieval
+      - False → query is ambiguous → must go through the LLM router to decide
+
+    Fully additive — no existing function is modified.  Falls back to False
+    (never crashes) so the LLM router always acts as the safety net.
+    """
+    if not query or not isinstance(query, str):
+        return False
+    try:
+        q = query.lower().strip()
+        for pattern in _COMPILED_STRONG_MARINE:
+            if pattern.search(q):
+                return True
+        # Also honour maritime acronyms tracked in the dedicated acronym service
+        from services.maritime_acronyms import find_acronyms_in_query
+        if find_acronyms_in_query(query):
+            return True
+
+        # Check dynamic acronym service registry
+        try:
+            from services.dynamic_acronym_service import dynamic_acronym_service, COMMON_NON_ACRONYMS
+            from services.maritime_acronyms import AMBIGUOUS_SHORT_WORDS
+            cand_tokens = re.findall(r'\b[a-zA-Z0-9_\-\/]{2,12}\b', query)
+            for w in cand_tokens:
+                w_clean = re.sub(r'[^a-zA-Z0-9]', '', w).upper()
+                if w_clean in COMMON_NON_ACRONYMS:
+                    continue
+                if dynamic_acronym_service.is_known_acronym(w_clean):
+                    if w_clean in AMBIGUOUS_SHORT_WORDS and not w.isupper():
+                        continue
+                    return True
+        except Exception:
+            pass
+
+        # Check dynamic course domain match
+        try:
+            from services.dynamic_domain_service import dynamic_domain_service
+            if dynamic_domain_service.is_db_domain_match(query):
+                return True
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return False
 
 
 # -------------------------------------------------------------
@@ -231,6 +343,30 @@ def is_off_topic_query(query: str) -> bool:
 
     q_lower = query.lower().strip()
     if not q_lower:
+        return False
+
+    # Hard off-topic check (entertainment, gaming, coding requests, recipes, dental, gym, non-marine compounds)
+    HARD_OFF_TOPIC_RE = re.compile(
+        r'\b(video\s*games?|gaming|minecraft|fortnite|roblox|gta\s*\d*|call\s*of\s*duty|pubg|fifa\s*game|'
+        r'tiktok|netflix|hollywood|bollywood|pop\s*music|cricket\s*match|ipl|football\s*match|'
+        r'recipe|cake\s*recipe|pizza|baking\s*bread|dating\s*advice|horoscope|'
+        r'write\s+(?:a\s+)?python\s*script|write\s+(?:a\s+)?(?:javascript|java|c\+\+|code)|'
+        r'price\s+of\s+gold|cryptocurrency|bitcoins?|'
+        r'dental\s*(?:bridge|implant|cavity|cavities|hygiene|care|crown|cleaning)|tooth\s*(?:decay|extraction|removal|filling|ache)|teeth\s*(?:removal|whitening)|root\s*canal|dentist|orthodontic|dentures?|gingivitis|braces|'
+        r'barbell\s*squats?|bench\s*press|deadlifts?|bicep\s*curls?|squat\s*(?:workout|exercise|reps?|sets?|thrust|jump)|calisthenics|push\s*ups?|pull\s*ups?|treadmill\s*workout|creatine\s*(?:dosage|monohydrate)|whey\s*protein|hamstring\s*hypertrophy|'
+        r'draft\s*beer|draught\s*beer|port\s*wine|hot\s*dogs?|nfl\s*draft|blood\s*bank|river\s*bank|guitar\s*bridge|violin\s*bridge|toll\s*bridge|suspension\s*bridge|brooklyn\s*bridge)\b',
+        re.IGNORECASE
+    )
+    if HARD_OFF_TOPIC_RE.search(q_lower):
+        return True
+
+    # Marine comparative inquiries where maritime context takes precedence
+    is_marine_system_inquiry = bool(re.search(
+        r'\b(monkey\s+island|difference\s+between\s+(?:a\s+)?(?:ship|marine)|how\s+does\s+(?:marine|ship|shipboard)|'
+        r'does\s+ship\s+autopilot|propeller\s+slip\s+versus|ship\s+purifiers?|sea\s+dog)\b',
+        q_lower
+    ))
+    if is_marine_system_inquiry:
         return False
 
     # Exemption: If query contains any recognized maritime acronym or matches a course topic/model, it is NOT off-topic
@@ -341,11 +477,11 @@ def is_obvious_marine_query(query: str) -> bool:
 
     q = query.lower().strip()
 
-    # Guard against polysemous dual-meaning words bypassing intent classification
-    POLYSEMOUS_MARINE_WORDS = {"squat", "draft", "draught", "bridge", "tank", "ships", "ship", "watch"}
-    matched_marine = [term for term in MARINE_INDICATORS if re.search(r"\b" + re.escape(term) + r"\b", q)]
-    if matched_marine and all(m in POLYSEMOUS_MARINE_WORDS for m in matched_marine):
-        # Only fast-path if explicitly accompanied by distinct maritime operational terms
+    # Guard: if the query has no strong (unambiguous) maritime signal,
+    # require explicit maritime context words before fast-pathing.
+    # has_strong_marine_signal() is defined above and auto-classifies every
+    # MARINE_INDICATORS entry — no manual polysemous list to maintain.
+    if not has_strong_marine_signal(query):
         has_maritime_context = bool(re.search(
             r"\b(ship\s+squat|ship\s+draft|ship\s+draught|vessel|vessels|shipboard|navigation|shallow\s*water|under\s*keel|ukc|hydrodynamic|cargo|engine|deck|ballast|seafarer|seafarers|moor|mooring|anchor|anchoring|colreg|colregs|solas|marpol)\b",
             q,
