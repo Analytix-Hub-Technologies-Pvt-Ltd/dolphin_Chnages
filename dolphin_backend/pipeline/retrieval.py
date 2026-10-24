@@ -193,11 +193,48 @@ async def retrieval_node(
     search_query = standalone_query
 
     # -----------------------------
+    # CARRIER FRAME DISENTANGLEMENT
+    # -----------------------------
+    # Detect administrative preamble wrappers (e.g., "PSC inspection checklist for <Core Subject>")
+    # Emphasize the core technical question so container words don't hijack the search results.
+    prefix_patterns = [
+        r'^(?:port\s+state\s+control\s+(?:psc\s+)?inspection\s+checklist\s+for\s+)(.*)$',
+        r'^(?:auditor\s+checklist\s+(?:and\s+penalties\s+)?(?:for\s+non-compliance\s+with\s+|for\s+)?)(.*)$',
+        r'^(?:summary\s+of\s+changes\s+effective\s+dates\s+(?:and\s+grandfather\s+clauses\s+)?for\s+)(.*)$',
+        r'^(?:how\s+to\s+prepare\s+vessel\s+survey\s+and\s+certificate\s+endorsements\s+for\s+)(.*)$',
+        r'^(?:imo\s+circulars?\s+and\s+resolution\s+implementation\s+dates\s+for\s+)(.*)$',
+        r'^(?:flag\s+state\s+enforcement\s+(?:and\s+survey\s+deadlines\s+)?regarding\s+)(.*)$',
+        r'^(?:troubleshooting\s+and\s+safety\s+guidelines\s+for\s+)(.*)$',
+        r'^(?:chief\s+engineer\s+checklist\s+for\s+)(.*)$',
+        r'^(?:detailed\s+regulatory\s+guidance\s*:\s*)(.*)$',
+    ]
+    for pat in prefix_patterns:
+        m = re.match(pat, search_query, re.IGNORECASE)
+        if m:
+            extracted_core = m.group(1).strip()
+            if len(extracted_core) >= 8:
+                search_query = f"{extracted_core} {search_query}"
+            break
+
+    # -----------------------------
     # ACRONYM DOMAIN EXPANSION
     # -----------------------------
     try:
         from services.maritime_acronyms import find_acronyms_in_query, get_acronym_expansion
         acrs = find_acronyms_in_query(search_query)
+        if not acrs:
+            # Check for unknown uppercase acronym candidates (2 to 6 chars) and resolve JIT
+            candidate_tokens = re.findall(r'\b[A-Z0-9]{2,6}\b', search_query)
+            if not candidate_tokens and len(search_query.split()) <= 4:
+                from services.dynamic_acronym_service import COMMON_NON_ACRONYMS
+                raw_tokens = [w.strip().upper() for w in re.findall(r'\b[a-zA-Z0-9]{2,6}\b', search_query)]
+                candidate_tokens = [t for t in raw_tokens if t not in COMMON_NON_ACRONYMS]
+            if candidate_tokens:
+                from services.dynamic_acronym_service import dynamic_acronym_service
+                for cand in candidate_tokens:
+                    resolved = await dynamic_acronym_service.resolve_acronym(cand)
+                    if resolved:
+                        acrs.append(cand)
         for acr in acrs:
             exps = get_acronym_expansion(acr)
             if exps:
@@ -267,9 +304,14 @@ async def retrieval_node(
             except (TypeError, ValueError):
                 pass
 
+        # Drop single-letter or noise topic chunks (e.g. 'N', 'F', '1.') when query has real technical content
+        t_name = (merged.get("topic_name") or merged.get("title") or "").strip()
+        if len(t_name) <= 2 and len(search_query.strip()) > 2:
+            logger.info(f"Dropping single-character noise chunk in retrieval_node: topic='{t_name}'")
+            continue
+
         # Maritime Acronym Conflict Filter: drop chunks whose topic has a conflicting maritime acronym
         from services.maritime_acronyms import has_conflicting_acronym
-        t_name = merged.get("topic_name") or merged.get("title") or ""
         if has_conflicting_acronym(search_query, t_name):
             logger.info(
                 f"Dropping chunk with conflicting acronym in retrieval_node: topic='{t_name}' vs query='{search_query}'"
@@ -294,18 +336,21 @@ async def retrieval_node(
     # Content-aware temporal & regulatory re-ranking
     q_lower_reg = search_query.lower()
     temporal_regulatory_matches = re.findall(
-        r'\b(202[3-9]|203\d|jan(?:uary)?|effective|amendment|amendments|regulation|regulations|rule|rules|mepc(?:\.\d+)?|seemp|force|dcs)\b',
+        r'\b(20[1-3]\d|jan(?:uary)?|effective|amendment|amendments|regulation|regulations|rule|rules|mepc(?:\.\d+)?|seemp|force|dcs|eu\s*ets|fueleu|ets)\b',
         q_lower_reg
     )
     if temporal_regulatory_matches and len(final_chunks) > 1:
         query_constraints = set(temporal_regulatory_matches)
-        has_year = any(re.match(r'^(202[3-9]|203\d)$', t) for t in query_constraints)
+        has_year = any(re.match(r'^(20[1-3]\d)$', t) for t in query_constraints)
+        has_eu_ets = any(t in ("eu ets", "eu", "ets", "fueleu") for t in query_constraints)
 
         def _constraint_score(c):
-            full_text = f"{c.get('topic_name', '')} {str(c.get('topic_content', ''))[:4000]}".lower()
+            t_name_lower = str(c.get('topic_name', '')).lower()
+            full_text = f"{t_name_lower} {str(c.get('topic_content', ''))[:4000]}".lower()
             matches = sum(1 for term in query_constraints if re.search(r'\b' + re.escape(term) + r'\b', full_text))
-            year_match = 3 if has_year and any(re.search(r'\b' + re.escape(y) + r'\b', full_text) for y in query_constraints if re.match(r'^(202[3-9]|203\d)$', y)) else 0
-            return matches + year_match
+            year_match = 3 if has_year and any(re.search(r'\b' + re.escape(y) + r'\b', full_text) for y in query_constraints if re.match(r'^(20[1-3]\d)$', y)) else 0
+            eu_boost = 3 if has_eu_ets and ("eu regulation" in t_name_lower or "regional" in t_name_lower or "ets" in t_name_lower) else 0
+            return matches + year_match + eu_boost
 
         max_matches = max(_constraint_score(c) for c in final_chunks)
         if max_matches >= 2:
@@ -317,6 +362,78 @@ async def retrieval_node(
             for r_idx, c in enumerate(final_chunks):
                 c["_rank"] = r_idx
             logger.info(f"⚡ [Temporal/Regulatory Rerank] Boosted chunks matching {query_constraints} in retrieval_node to rank 0 (count={len(final_chunks)})")
+
+    # -----------------------------
+    # BROAD OVERVIEW & ACRONYM RE-RANKING
+    # -----------------------------
+    # When user asks a standalone abbreviation (e.g. "EGCS", "ECDIS", "OWS") or full name
+    # without specific procedural constraints, boost the foundational Introduction/Overview chunk to rank 0.
+    if len(final_chunks) > 1 and not temporal_regulatory_matches:
+        from services.maritime_acronyms import find_acronyms_in_query
+        q_raw = (standalone_query or query or "").strip()
+        q_clean = re.sub(r'[^\w\s]', '', q_raw).strip()
+        words = q_clean.split()
+
+        procedural_keywords = {
+            "calibrate", "calibration", "sensor", "sensors", "test", "testing",
+            "alarm", "alarms", "limit", "limits", "threshold", "thresholds",
+            "troubleshoot", "troubleshooting", "maintenance", "procedure", "procedures",
+            "overboard", "washwater", "ph", "filter", "filters", "pump", "pumps",
+            "step", "steps", "action", "actions", "checklist", "checklists"
+        }
+        has_procedural_constraint = any(w.lower() in procedural_keywords for w in words)
+
+        is_broad = False
+        query_acrs = find_acronyms_in_query(q_raw)
+        if query_acrs and len(words) <= 5 and not has_procedural_constraint:
+            is_broad = True
+        elif len(words) <= 4 and not has_procedural_constraint:
+            is_broad = True
+        elif re.match(r'^(?:what\s+is|what\s+are|explain|overview\s+of|intro(?:duction)?\s+to)\b', q_raw, re.IGNORECASE) and not has_procedural_constraint:
+            is_broad = True
+
+        if is_broad:
+            intro_pats = [
+                re.compile(r'^(?:what\s+is|overview\s+of|introduction\s+to|about|general\s+principles\s+of)\b', re.IGNORECASE),
+                re.compile(r'\b(?:overview|introduction|fundamentals|basics)\b', re.IGNORECASE),
+            ]
+
+            def _intro_score(c):
+                t_name = str(c.get("topic_name") or c.get("title") or "").strip()
+                t_name_lower = t_name.lower()
+                score = 0
+                if intro_pats[0].search(t_name):
+                    score += 10
+                elif intro_pats[1].search(t_name):
+                    score += 5
+
+                # Boost if topic name directly matches the acronym or full term
+                if query_acrs:
+                    for acr in query_acrs:
+                        if re.search(rf'\b{re.escape(acr.lower())}\b', t_name_lower):
+                            score += 4
+                elif q_clean.lower() in t_name_lower:
+                    score += 4
+
+                # Penalize specific subtopic keywords if looking for foundational overview
+                if any(w in t_name_lower for w in ["calibration", "maintenance", "troubleshooting", "alarm", "scheme", "sensor", "washwater"]):
+                    score -= 3
+                return score
+
+            best_idx = -1
+            best_score = 0
+            for idx, c in enumerate(final_chunks):
+                s = _intro_score(c)
+                if s > best_score:
+                    best_score = s
+                    best_idx = idx
+
+            if best_idx > 0 and best_score >= 4:
+                intro_chunk = final_chunks.pop(best_idx)
+                final_chunks.insert(0, intro_chunk)
+                for r_idx, c in enumerate(final_chunks):
+                    c["_rank"] = r_idx
+                logger.info(f"⚡ [Broad Overview Rerank] Boosted introductory chunk '{intro_chunk.get('topic_name')}' to rank 0 for query '{q_raw}'")
 
     # -----------------------------
     # 🌟 IMMEDIATE APPROVED FEEDBACK MEMORY CHECK

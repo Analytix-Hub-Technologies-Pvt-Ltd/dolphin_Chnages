@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     external_api_key: str = Field("", alias="EXTERNAL_API_KEY")
     external_api_base_url: str = Field("https://ai.marinerskills.com/aidata", alias="EXTERNAL_API_BASE_URL")
     auth_api_base_url: str = Field("https://cms.marinerskills.com/api/DolphinLogin", alias="AUTH_API_BASE_URL")
+    disable_external_auth: bool = Field(False, alias="DISABLE_EXTERNAL_AUTH")
     secret_key: str = Field("test-mode", alias="SECRET_KEY")
     algorithm: str = Field("test-mode", alias="ALGORITHM")
     image_base_url: str = Field("http://localhost:8000", alias="IMAGE_BASE_URL")

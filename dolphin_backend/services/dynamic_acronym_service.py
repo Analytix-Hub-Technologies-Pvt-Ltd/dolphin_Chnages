@@ -9,6 +9,7 @@ Provides:
 3. Runtime synchronization with services.maritime_acronyms.
 """
 
+import os
 from typing import Dict, List, Set, Optional, Any
 import asyncio
 import re
@@ -47,9 +48,61 @@ class DynamicAcronymService:
         self._memory_map: Dict[str, List[str]] = {}
         # In-memory negative cache: words confirmed NOT to be specialized maritime acronyms
         self._rejected_set: Set[str] = set()
+        # JIT learned acronyms to persist
+        self._jit_learned_map: Dict[str, List[str]] = {}
         self._openai_client: Optional[AsyncOpenAI] = None
         self._initialized: bool = False
         self._lock = asyncio.Lock()
+        self._local_cache_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "storage", "learned_acronyms.json"
+        )
+        self._load_local_cache()
+
+    def _load_local_cache(self) -> None:
+        """Load previously JIT-learned acronyms and rejections from local disk cache."""
+        try:
+            if os.path.exists(self._local_cache_path):
+                with open(self._local_cache_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    learned = data.get("learned", {})
+                    rejected = data.get("rejected", [])
+                    for acr, exps in learned.items():
+                        self._register_acronym(acr, exps)
+                        self._jit_learned_map[acr.upper()] = exps
+                    for rej in rejected:
+                        self._rejected_set.add(rej.upper())
+                    if learned:
+                        logger.info(f"Loaded {len(learned)} learned acronyms from local disk cache")
+        except Exception as e:
+            logger.debug(f"Failed loading local acronym cache: {e}")
+
+    def _save_local_cache(self) -> None:
+        """Persist JIT-learned acronyms and rejections to local disk cache."""
+        try:
+            os.makedirs(os.path.dirname(self._local_cache_path), exist_ok=True)
+            with open(self._local_cache_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "learned": self._jit_learned_map,
+                    "rejected": list(self._rejected_set)[:500]
+                }, f, indent=2)
+        except Exception as e:
+            logger.debug(f"Failed saving local acronym cache: {e}")
+
+    def _is_valid_acr_token(self, token: str) -> bool:
+        """Verify token is a valid candidate acronym and not a numeric rule or course code."""
+        t = token.strip().upper()
+        if len(t) < 2 or len(t) > 8:
+            return False
+        if not any(c.isalpha() for c in t):
+            return False
+        if sum(1 for c in t if c.isalpha()) < 2:
+            return False
+        if t in COMMON_NON_ACRONYMS:
+            return False
+        # Exclude numeric course codes like Q112A, 2203A, 01A
+        if re.search(r'\d{2,}', t) and t not in {"MLC2006", "MARPOL7378"}:
+            return False
+        return True
 
     def _get_openai_client(self) -> AsyncOpenAI:
         if self._openai_client is None:
@@ -64,7 +117,7 @@ class DynamicAcronymService:
     async def harvest_course_acronyms(self, pool=None) -> int:
         """
         Scans distinct course_content topic names from PostgreSQL to harvest acronyms.
-        Runs once at server startup in ~0.35s and registers 900+ terms into memory.
+        Uses clean, high-confidence regexes without noisy fragments.
         """
         if self._initialized:
             return len(self._memory_map)
@@ -84,7 +137,7 @@ class DynamicAcronymService:
                 )
             except Exception as e:
                 logger.warning(f"⚠️ [Dynamic Acronyms] DB harvesting skipped (DB unavailable): {e}")
-                return 0
+                return len(self._memory_map)
 
             # Regex 1: Full Name (ACR) e.g. "Boil-Off Gas (BOG)", "Emergency Escape Breathing Device (EEBD)"
             p1 = re.compile(r'([A-Za-z\s\-]{3,45})\s*\(([A-Z0-9]{2,8})\)')
@@ -93,50 +146,33 @@ class DynamicAcronymService:
             # Regex 3: ACR - Full Name e.g. "ALARP - As Low As Reasonably Practicable"
             p3 = re.compile(r'\b([A-Z0-9]{2,8})\s*[-:]\s*([A-Za-z\s\-]{4,45})\b')
 
+            NOISE_EXPANSIONS = {
+                "explain", "introduction", "overview", "definition", "basics", "summary",
+                "test", "quiz", "general", "activity", "examples", "case study", "guidelines",
+                "types", "part", "requirements", "compliance", "verification", "planning"
+            }
+
             discovered = 0
             for r in rows:
                 tname = r["topic_name"] or ""
 
                 for m in p1.finditer(tname):
                     full, acr = self._clean_expansion(m.group(1)), m.group(2).upper()
-                    if acr not in COMMON_NON_ACRONYMS and len(acr) >= 2 and len(full) > len(acr):
+                    if self._is_valid_acr_token(acr) and len(full) >= 4 and full not in NOISE_EXPANSIONS:
                         self._register_acronym(acr, [full])
                         discovered += 1
 
                 for m in p2.finditer(tname):
                     acr, full = m.group(1).upper(), self._clean_expansion(m.group(2))
-                    if acr not in COMMON_NON_ACRONYMS and len(acr) >= 2 and len(full) > len(acr):
+                    if self._is_valid_acr_token(acr) and len(full) >= 4 and full not in NOISE_EXPANSIONS:
                         self._register_acronym(acr, [full])
                         discovered += 1
 
                 for m in p3.finditer(tname):
                     acr, full = m.group(1).upper(), self._clean_expansion(m.group(2))
-                    if acr not in COMMON_NON_ACRONYMS and len(acr) >= 2 and len(full) > len(acr):
+                    if self._is_valid_acr_token(acr) and len(full) >= 6 and len(full.split()) >= 2 and full not in NOISE_EXPANSIONS:
                         self._register_acronym(acr, [full])
                         discovered += 1
-
-            # Pass 2 (Additive): Extract standalone syllabus acronyms from course topic titles
-            # Catches all curriculum acronyms without explicit parentheses definitions (e.g., ABC, SHELL, SIRE, FTA, ETA, BWM, SOP)
-            for r in rows:
-                tname = r["topic_name"] or ""
-                # Skip titles written in ALL-CAPS (e.g. "LONDON CONVENTION DUMPING 1972") to avoid harvesting normal words
-                title_words = [w for w in re.findall(r'[a-zA-Z]+', tname) if len(w) >= 2]
-                if title_words and sum(1 for w in title_words if w.isupper()) / len(title_words) > 0.5:
-                    continue
-
-                tokens = re.findall(r'\b[A-Z0-9]{2,6}\b', tname)
-                for cand in tokens:
-                    cand_upper = cand.upper()
-                    if (
-                        cand_upper not in self._memory_map
-                        and cand_upper not in COMMON_NON_ACRONYMS
-                        and any(c.isalpha() for c in cand_upper)
-                        and not cand_upper.isdigit()
-                    ):
-                        clean_exp = self._clean_expansion(tname)
-                        if clean_exp and len(clean_exp) >= 4:
-                            self._register_acronym(cand_upper, [clean_exp])
-                            discovered += 1
 
             self._initialized = True
             dur = asyncio.get_event_loop().time() - t0
@@ -218,11 +254,14 @@ class DynamicAcronymService:
                 if cached_val:
                     if cached_val == "__NOT_MARITIME__":
                         self._rejected_set.add(token_clean)
+                        self._save_local_cache()
                         return None
                     try:
                         exp_list = json.loads(cached_val)
                         if isinstance(exp_list, list):
                             self._register_acronym(token_clean, exp_list)
+                            self._jit_learned_map[token_clean] = exp_list
+                            self._save_local_cache()
                             return exp_list
                     except Exception:
                         pass
@@ -271,6 +310,8 @@ class DynamicAcronymService:
 
                 if expansions:
                     self._register_acronym(token_clean, expansions)
+                    self._jit_learned_map[token_clean] = expansions
+                    self._save_local_cache()
                     logger.success(
                         f"✨ [Dynamic Acronyms] JIT learned maritime abbreviation '{token_clean}': {expansions}"
                     )
@@ -290,6 +331,7 @@ class DynamicAcronymService:
 
             # If not maritime, cache negative result
             self._rejected_set.add(token_clean)
+            self._save_local_cache()
             try:
                 if redis_service.is_connected() and redis_service.redis:
                     await redis_service.redis.setex(

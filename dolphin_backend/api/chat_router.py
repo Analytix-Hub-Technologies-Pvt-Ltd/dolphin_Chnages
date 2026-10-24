@@ -518,7 +518,18 @@ async def chat1(
                 or getattr(node_response, "category", "") in ("GREETING", "GOODBYE", "THANK", "WELL_WISH")
             )
 
-            if is_stream_out_of_scope or is_resp_social or suppress_extras:
+            resp_content_str = " ".join(getattr(s, "content", "") for s in getattr(node_response, "sections", [])).lower()
+            is_course_missing = any(neg in resp_content_str for neg in [
+                "not available in the curriculum",
+                "not detailed in the provided course",
+                "not explicitly stated in the provided course",
+                "not present in the provided course",
+                "does not contain information",
+                "does not contain a specific module",
+                "does not cover",
+            ])
+
+            if is_stream_out_of_scope or is_resp_social or suppress_extras or is_course_missing:
                 media_videos = []
                 media_images = []
                 media_pdfs = []
@@ -611,7 +622,7 @@ async def chat1(
                 if len(unique_chunks) >= 5:
                     break
 
-            if not is_stream_out_of_scope and not is_resp_social and not suppress_extras and unique_chunks:
+            if not is_stream_out_of_scope and not is_resp_social and not suppress_extras and not is_course_missing and unique_chunks:
                 yield (
                     "data: "
                     + json.dumps(
@@ -693,3 +704,4 @@ async def chat1(
             "Content-Encoding": "identity",
         }
     )
+

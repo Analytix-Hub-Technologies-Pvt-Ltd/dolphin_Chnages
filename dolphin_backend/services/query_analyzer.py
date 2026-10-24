@@ -162,6 +162,7 @@ class QueryAnalyzer:
         "how should", "what should", "how to handle",
         "advice", "need advice", "what do i do",
         "egcs", "scrubber", "scrubbers", "bwms", "vlsfo", "scr", "mepc",
+        "msa", "merchant shipping act", "merchant shipping", "merchant shipping bill",
     ]
     def __init__(self, intent_service: GPTIntentService):
         self.intent_service = intent_service

@@ -13,6 +13,11 @@ import bcrypt
 from models.user_models import User, LoginRequest, LoginResponse, UserCreate
 
 
+class DolphinAuthConnectionError(Exception):
+    """Raised when the Dolphin authentication service is unreachable."""
+    pass
+
+
 class AuthService:
     def __init__(self, pool: Pool) -> None:
         self.pool = pool
@@ -192,15 +197,18 @@ class AuthService:
         url = settings.auth_api_base_url
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(url, json=payload)
                 if response.status_code == 200:
                     return response.json()
                 logger.warning(f"Dolphin auth API returned status {response.status_code}: {response.text}")
-                return None
+                return {"Status": "Error", "Message": f"API returned status {response.status_code}"}
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.WriteTimeout, httpx.NetworkError, httpx.RequestError) as e:
+            logger.error(f"Error calling Dolphin auth API ({url}): {e}")
+            raise DolphinAuthConnectionError(f"Unable to connect to Dolphin auth API: {e}") from e
         except Exception as e:
-            logger.error(f"Error calling Dolphin auth API: {e}")
-            return None
+            logger.error(f"Unexpected error calling Dolphin auth API: {e}")
+            raise DolphinAuthConnectionError(f"Unexpected error calling Dolphin auth API: {e}") from e
         
     async def get_user_by_useremail(self, email: str):
 

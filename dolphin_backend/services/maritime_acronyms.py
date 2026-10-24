@@ -62,12 +62,14 @@ MARITIME_ACRONYMS_MAP: Dict[str, List[str]] = {
     "SOPEP": ["shipboard oil pollution emergency plan", "oil spill"],
     "SMPEP": ["shipboard marine pollution emergency plan"],
     "IOPP": ["international oil pollution prevention", "certificate"],
+    "IAPPC": ["international air pollution prevention certificate", "marpol annex vi", "air pollution prevention", "iapp"],
     "ODME": ["oil discharge monitoring equipment", "oil discharge", "tanker"],
     "ODMCS": ["oil discharge monitoring and control system"],
     "OWS": ["oily water separator", "15 ppm", "bilge", "separator"],
 
     # Navigation & Bridge Systems
     "ECDIS": ["electronic chart display and information system", "electronic chart", "enc"],
+    "RCDS": ["raster chart display system", "raster charts", "ecdis", "vector charts"],
     "ARPA": ["automatic radar plotting aid", "radar", "target tracking"],
     "AIS": ["automatic identification system", "transponder"],
     "BNWAS": ["bridge navigational watch alarm system", "bridge watch"],
@@ -85,6 +87,7 @@ MARITIME_ACRONYMS_MAP: Dict[str, List[str]] = {
 
     # Radio & Emergency Communications (GMDSS)
     "GMDSS": ["global maritime distress and safety system", "distress", "vhf", "mf/hf"],
+    "NBDP": ["narrow band direct printing", "radio communication", "gmdss telex", "teleprinter"],
     "EPIRB": ["emergency position indicating radio beacon", "beacon", "satellite"],
     "SART": ["search and rescue transponder", "radar transponder"],
     "NAVTEX": ["navigational telex", "maritime safety information"],
@@ -100,6 +103,8 @@ MARITIME_ACRONYMS_MAP: Dict[str, List[str]] = {
     "BA": ["breathing apparatus"],
     "LSA": ["life saving appliances", "lifeboat", "liferaft", "lifebuoy"],
     "FFA": ["fire fighting appliances", "firefighting", "fire extinguisher"],
+    "FFE": ["fire fighting equipment", "fire fighting appliances", "fire safety", "fire main"],
+    "FRC": ["fast rescue craft", "rescue boat", "life saving appliances", "rescue craft"],
     "HRU": ["hydrostatic release unit", "liferaft"],
     "MOB": ["man overboard", "rescue"],
     "MES": ["marine evacuation system"],
@@ -149,6 +154,13 @@ MARITIME_ACRONYMS_MAP: Dict[str, List[str]] = {
     "DPA": ["designated person ashore", "ism code", "safety management system"],
     "CSO": ["company security officer", "isps code", "ship security"],
     "SSO": ["ship security officer", "isps code", "security assessment"],
+    "MSA": [
+        "merchant shipping act",
+        "maritime safety administration",
+        "maritime security awareness",
+        "merchant shipping",
+        "marine safety act",
+    ],
 }
 
 # Pre-computed uppercase set for fast O(1) membership test
@@ -293,7 +305,7 @@ def find_acronyms_in_query(query: str) -> List[str]:
 
 
 GLOBAL_MARITIME_FRAMEWORKS: Set[str] = {
-    "IMO", "ILO", "MARPOL", "SOLAS", "STCW", "ISM", "ISPS", "MLC", "MEPC", "PSC", "FSI", "IACS", "USCG"
+    "IMO", "ILO", "MARPOL", "SOLAS", "STCW", "ISM", "ISPS", "MLC", "MEPC", "PSC", "FSI", "IACS", "USCG", "MSA"
 }
 
 
@@ -308,6 +320,11 @@ def has_conflicting_acronym(query_text: str, candidate_text: str) -> bool:
     """
     query_acronyms = set(find_acronyms_in_query(query_text))
     if not query_acronyms:
+        return False
+
+    # Framework and statutory queries (MSA, IMO, SOLAS, MARPOL, MLC, PSC, etc.) govern multiple systems & certificates;
+    # do NOT treat candidates mentioning specific appliances, equipment, or certificates as conflicting
+    if query_acronyms.issubset(GLOBAL_MARITIME_FRAMEWORKS):
         return False
 
     candidate_lower = (candidate_text or "").lower()
@@ -340,6 +357,90 @@ def has_conflicting_acronym(query_text: str, candidate_text: str) -> bool:
                 break
         if not is_synonym:
             return True
+
+    return False
+
+
+# Mutually exclusive distinct maritime equipment and operational domains
+# Prevents images/videos/PDFs of one system (e.g. Boilers) from being returned for another system (e.g. Steering)
+MARITIME_SYSTEM_DOMAINS: Dict[str, Set[str]] = {
+    "STEERING": {
+        "steering", "steering gear", "rudder", "telemotor", "tiller", "ram"
+    },
+    "BOILER": {
+        "boiler", "boilers", "steam", "economizer", "feedwater", "burner", "soot blower"
+    },
+    "PURIFIER_SEPARATOR": {
+        "purifier", "purifiers", "clarifier", "centrifuge", "oily water separator", "ows", "15 ppm", "bilge separator", "sludge"
+    },
+    "BALLAST_WATER": {
+        "ballast", "ballasting", "deballasting", "bwms", "bwm"
+    },
+    "LIFE_SAVING": {
+        "lifeboat", "lifeboats", "liferaft", "liferafts", "davit", "davits", "lifebuoy", "lifebuoys", "lifejacket", "immersion suit", "eebd", "scba"
+    },
+    "FIRE_FIGHTING": {
+        "fire", "firefighting", "fire fighting", "fire extinguisher", "sprinkler", "co2 system", "fire damper", "foam system", "fire pump", "hyper mist"
+    },
+    "NAVIGATION_BRIDGE": {
+        "ecdis", "radar", "arpa", "gyro", "magnetic compass", "ais", "echo sounder", "speed log", "colreg"
+    },
+    "CARGO_CRANE": {
+        "crane", "cranes", "derrick", "cargo winch", "hatch cover", "grab", "cargo pump", "cargo gear"
+    },
+    "ANCHOR_MOORING": {
+        "anchor", "anchoring", "windlass", "mooring", "capstan", "hawse pipe", "anchor chain"
+    },
+    "REFRIGERATION_HVAC": {
+        "provision plant", "chiller", "air conditioning", "hvac", "refrigerant", "refrigeration"
+    },
+    "SEWAGE": {
+        "sewage", "stp", "black water", "grey water", "vacuum toilet"
+    },
+    "ENCLOSED_SPACE": {
+        "enclosed space", "confined space", "entry permit"
+    }
+}
+
+
+def has_conflicting_maritime_system(query_text: str, candidate_text: str) -> bool:
+    """
+    Check if candidate_text (title, about, or topic name) belongs to a completely
+    different maritime machinery/operational system than the user queried.
+    Example:
+      query: 'what causes steering gear alarm?' (Domain: STEERING)
+      candidate: 'Boiler Water Level Alarm' (Domain: BOILER)
+      -> Returns True (conflict!)
+    """
+    if not query_text or not candidate_text:
+        return False
+
+    q_lower = query_text.lower()
+    c_lower = candidate_text.lower()
+
+    # Identify primary system domain(s) in query
+    query_domains = set()
+    for domain, terms in MARITIME_SYSTEM_DOMAINS.items():
+        if any(re.search(r'\b' + re.escape(t) + r'\b', q_lower) for t in terms):
+            query_domains.add(domain)
+
+    if not query_domains:
+        return False
+
+    # Check candidate text for conflicting system domains
+    for domain, terms in MARITIME_SYSTEM_DOMAINS.items():
+        if domain in query_domains:
+            continue
+        # Does candidate contain strong keywords from another domain?
+        candidate_has_other_domain = any(re.search(r'\b' + re.escape(t) + r'\b', c_lower) for t in terms)
+        if candidate_has_other_domain:
+            # If candidate does NOT contain any keywords from the query's domain, it is a conflict
+            candidate_has_query_domain = any(
+                any(re.search(r'\b' + re.escape(qt) + r'\b', c_lower) for qt in MARITIME_SYSTEM_DOMAINS[qd])
+                for qd in query_domains
+            )
+            if not candidate_has_query_domain:
+                return True
 
     return False
 

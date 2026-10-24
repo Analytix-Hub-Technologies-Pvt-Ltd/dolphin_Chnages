@@ -10,7 +10,7 @@ import json
 
 from api.dependencies import get_db_pool
 from models.user_models import LoginRequest, LoginResponse, UserCreate, User
-from services.auth_service import AuthService
+from services.auth_service import AuthService, DolphinAuthConnectionError
 from core.rate_limiter import rate_limit_auth
 from config import settings
 from api.access_control import create_access_token, require_super_admin
@@ -156,53 +156,111 @@ async def login(
                     detail="Email and password are required"
                 )
 
-            dolphin_payload = {
-                "UserName": payload.email,
-                "Password": payload.password,
-                "SecurityKey": "FslKviDfp2tH3qeZla00hp"
-            }
+            clean_email = str(payload.email).strip().lower()
+            dolphin_result = None
+            user = None
 
-            dolphin_result = await auth_service.authenticateDolphin(
-                dolphin_payload
-            )
-
-            if (
-                not dolphin_result
-                or dolphin_result.get("Status") == "Error"
-            ):
-                raise HTTPException(
-                    status_code=401,
-                    detail="Invalid credentials"
+            # ⚡ LOCAL/DEV MODE: If external CMS auth is disabled via DISABLE_EXTERNAL_AUTH
+            if settings.disable_external_auth:
+                logger.info(
+                    f"[LOCAL AUTH] External CMS auth disabled via DISABLE_EXTERNAL_AUTH=true. Authenticating locally for: {clean_email}"
                 )
+                existing_user = await auth_service.get_user_by_useremail(clean_email)
+                if existing_user:
+                    user = existing_user
+                else:
+                    username = clean_email.split("@")[0].capitalize()
+                    user = await create_or_update_user(
+                        UserCreate(
+                            name=username,
+                            user_name=clean_email.split("@")[0],
+                            email=clean_email,
+                            role="User",
+                            user_type="Student",
+                            role_id=1,
+                        )
+                    )
+            else:
+                dolphin_payload = {
+                    "UserName": payload.email,
+                    "Password": payload.password,
+                    "SecurityKey": "FslKviDfp2tH3qeZla00hp"
+                }
 
-            email = (dolphin_result.get("EmailId") or payload.email or "").strip().lower()
-            full_name = dolphin_result.get("FullName") or dolphin_result.get("LoginId") or email or "User"
-            login_id = dolphin_result.get("LoginId") or email
-
-            company_id_val = dolphin_result.get("CompanyId")
-            company_id_int = None
-            if company_id_val is not None and str(company_id_val).strip().isdigit():
                 try:
-                    company_id_int = int(company_id_val)
-                except (ValueError, TypeError):
-                    company_id_int = None
+                    dolphin_result = await auth_service.authenticateDolphin(
+                        dolphin_payload
+                    )
+                except DolphinAuthConnectionError as e:
+                    logger.error(f"Dolphin auth API unreachable: {e}")
 
-            user = await create_or_update_user(
-                UserCreate(
-                    name=full_name,
-                    user_name=login_id,
-                    email=email,
-                    company_name=dolphin_result.get("CompanyName"),
-                    role=dolphin_result.get("Role"),
-                    user_type=dolphin_result.get("UserType"),
-                    ship_name=dolphin_result.get("ShipName"),
-                    ship_type=dolphin_result.get("ShipType"),
-                    id_type=dolphin_result.get("IdType"),
-                    id_country=dolphin_result.get("IdCountry"),
-                    company_id=company_id_int,
-                    role_id=1,
+                    # Dev fallback: when external CMS is down/unreachable during local development
+                    if settings.app_env != "production":
+                        existing_user = await auth_service.get_user_by_useremail(clean_email)
+                        if existing_user:
+                            logger.warning(
+                                f"[DEV FALLBACK] External auth unreachable. Logging in as existing user: {clean_email}"
+                            )
+                            user = existing_user
+                        else:
+                            username = clean_email.split("@")[0].capitalize()
+                            logger.warning(
+                                f"[DEV FALLBACK] External auth unreachable. Auto-creating dev user: {clean_email}"
+                            )
+                            user = await create_or_update_user(
+                                UserCreate(
+                                    name=username,
+                                    user_name=clean_email.split("@")[0],
+                                    email=clean_email,
+                                    role="User",
+                                    user_type="Student",
+                                    role_id=1,
+                                )
+                            )
+                    else:
+                        raise HTTPException(
+                            status_code=503,
+                            detail="Authentication service is currently unreachable. Please try again later."
+                        )
+
+            if user is None:
+                if (
+                    not dolphin_result
+                    or dolphin_result.get("Status") == "Error"
+                ):
+                    raise HTTPException(
+                        status_code=401,
+                        detail="Invalid credentials"
+                    )
+
+                email = (dolphin_result.get("EmailId") or payload.email or "").strip().lower()
+                full_name = dolphin_result.get("FullName") or dolphin_result.get("LoginId") or email or "User"
+                login_id = dolphin_result.get("LoginId") or email
+
+                company_id_val = dolphin_result.get("CompanyId")
+                company_id_int = None
+                if company_id_val is not None and str(company_id_val).strip().isdigit():
+                    try:
+                        company_id_int = int(company_id_val)
+                    except (ValueError, TypeError):
+                        company_id_int = None
+
+                user = await create_or_update_user(
+                    UserCreate(
+                        name=full_name,
+                        user_name=login_id,
+                        email=email,
+                        company_name=dolphin_result.get("CompanyName"),
+                        role=dolphin_result.get("Role"),
+                        user_type=dolphin_result.get("UserType"),
+                        ship_name=dolphin_result.get("ShipName"),
+                        ship_type=dolphin_result.get("ShipType"),
+                        id_type=dolphin_result.get("IdType"),
+                        id_country=dolphin_result.get("IdCountry"),
+                        company_id=company_id_int,
+                        role_id=1,
+                    )
                 )
-            )
 
         # -------------------------------------------------
         # USER NOT FOUND AFTER CREATE/UPDATE
@@ -218,7 +276,7 @@ async def login(
         # -------------------------------------------------
         company_courses = []
         company_id_str = str(user.company_id) if user.company_id else None
-        if company_id_str:
+        if company_id_str and not settings.disable_external_auth:
             try:
                 cc_response = requests.get(
                     COMPANY_COURSES_API_URL,
@@ -226,7 +284,7 @@ async def login(
                         "CompanyId": company_id_str,
                         "SecurityKey": COMPANY_COURSES_SECURITY_KEY
                     },
-                    timeout=10.0
+                    timeout=2.0
                 )
                 if cc_response.status_code == 200:
                     cc_data = cc_response.json()
@@ -315,6 +373,9 @@ async def sync_user_courses(
     user_id: str,
     pool: Pool = Depends(get_db_pool)
 ):
+    if settings.disable_external_auth:
+        return {"message": "External course sync disabled in local mode", "courses": []}
+
     async with pool.acquire() as conn:
 
         # 1. GET USER + USERNAME

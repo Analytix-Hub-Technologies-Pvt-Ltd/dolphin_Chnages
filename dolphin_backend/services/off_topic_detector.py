@@ -133,6 +133,8 @@ MARINE_INDICATORS = [
     "igc code", "ibc code", "imo", "psc", "port state control", "flag state",
     "class survey", "drydock", "load line", "musters", "maritime", "nautical",
     "eedi", "seemp", "cii", "eexi", "sopep", "smpep", "iopp", "bwm", "mepc",
+    "msa", "merchant shipping act", "merchant shipping", "merchant shipping bill",
+    "maritime safety administration", "marine safety act",
 
     # Environmental Regulations, Emissions & Exhaust Cleaning (EGCS / Scrubbers)
     "egcs", "scrubber", "scrubbers", "wet scrubber", "dry scrubber", "sox scrubber",

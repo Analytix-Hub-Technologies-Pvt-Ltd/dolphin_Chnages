@@ -1927,29 +1927,18 @@ class ChatService:
 
         async def _enrich_images() -> List[Dict[str, Any]]:
             t_if0 = time.perf_counter()
-            images = await self._filter_and_rank_images(retrieval_chunks, query=current_query, max_images=5)
+            images = await self._filter_and_rank_images(retrieval_chunks, query=current_query, max_images=4)
             media_sub_timings["image_filter_cache"] = time.perf_counter() - t_if0
 
-            if len(images) < 3 and retrieval_chunks:
+            if len(images) < 4 and retrieval_chunks:
                 t_sib0 = time.perf_counter()
-                needed = 3 - len(images)
+                needed = 4 - len(images)
                 sibling_images = await self._find_sibling_images(
                     retrieval_chunks, query=current_query, max_images=needed, db_timings=media_sub_timings
                 )
-                seen_img_keys = {img.get("Url") or img.get("url") for img in images}
-                seen_titles = {re.sub(r'[^a-zA-Z0-9]', '', (img.get("Title") or img.get("title") or "")).lower() for img in images}
-                for simg in sibling_images:
-                    s_key = simg.get("Url") or simg.get("url")
-                    s_title = re.sub(r'[^a-zA-Z0-9]', '', (simg.get("Title") or simg.get("title") or "")).lower()
-                    if s_key and s_key not in seen_img_keys and (not s_title or s_title not in seen_titles):
-                        seen_img_keys.add(s_key)
-                        if s_title:
-                            seen_titles.add(s_title)
-                        images.append(simg)
-                        if len(images) >= 3:
-                            break
+                images.extend(sibling_images)
                 media_sub_timings["sibling_images"] = time.perf_counter() - t_sib0
-            return images
+            return images[:4]
 
         async def _enrich_pdfs() -> List[Dict[str, Any]]:
             t_pr0 = time.perf_counter()
@@ -1982,27 +1971,17 @@ class ChatService:
             pdfs = pdf_service.deduplicate_titles(pdfs)
             media_sub_timings["pdf_resolution"] = time.perf_counter() - t_pr0
 
-            # 4. Sibling PDF lookup if fewer than 3 relevant PDFs exist in retrieved chunks
+            # 4. Fallback: Search DB siblings if fewer than 3 PDFs were found
             if len(pdfs) < 3 and retrieval_chunks:
                 t_sib0 = time.perf_counter()
                 needed = 3 - len(pdfs)
                 sibling_pdfs = await self._find_sibling_pdfs(
                     retrieval_chunks, query=current_query, max_pdfs=needed, db_timings=media_sub_timings
                 )
-                seen_pdf_keys = {p.get("link", "").lower().split("?")[0].rstrip("/") for p in pdfs if p.get("link")}
-                seen_pdf_titles = {re.sub(r'[^a-zA-Z0-9]', '', (p.get("title") or "")).lower() for p in pdfs if p.get("title")}
-
+                seen_pdf_titles = {p.get("title", "").strip().lower() for p in pdfs}
                 for spdf in sibling_pdfs:
-                    p_link = spdf.get("link", "").lower().split("?")[0].rstrip("/")
-                    s_title = re.sub(r'[^a-zA-Z0-9]', '', (spdf.get("title") or "")).lower()
-
-                    if p_link and p_link in seen_pdf_keys:
-                        continue
-                    if s_title and s_title in seen_pdf_titles:
-                        continue
-
-                    seen_pdf_keys.add(p_link)
-                    if s_title:
+                    s_title = spdf.get("title", "").strip().lower()
+                    if s_title and s_title not in seen_pdf_titles:
                         seen_pdf_titles.add(s_title)
                     pdfs.append(spdf)
                     if len(pdfs) >= 3:
@@ -2081,6 +2060,27 @@ class ChatService:
         try:
             # Acronym domain expansion for vector embedding & BM25 search
             effective_search_query = query
+
+            # Carrier Frame Disentanglement
+            prefix_patterns = [
+                r'^(?:port\s+state\s+control\s+(?:psc\s+)?inspection\s+checklist\s+for\s+)(.*)$',
+                r'^(?:auditor\s+checklist\s+(?:and\s+penalties\s+)?(?:for\s+non-compliance\s+with\s+|for\s+)?)(.*)$',
+                r'^(?:summary\s+of\s+changes\s+effective\s+dates\s+(?:and\s+grandfather\s+clauses\s+)?for\s+)(.*)$',
+                r'^(?:how\s+to\s+prepare\s+vessel\s+survey\s+and\s+certificate\s+endorsements\s+for\s+)(.*)$',
+                r'^(?:imo\s+circulars?\s+and\s+resolution\s+implementation\s+dates\s+for\s+)(.*)$',
+                r'^(?:flag\s+state\s+enforcement\s+(?:and\s+survey\s+deadlines\s+)?regarding\s+)(.*)$',
+                r'^(?:troubleshooting\s+and\s+safety\s+guidelines\s+for\s+)(.*)$',
+                r'^(?:chief\s+engineer\s+checklist\s+for\s+)(.*)$',
+                r'^(?:detailed\s+regulatory\s+guidance\s*:\s*)(.*)$',
+            ]
+            for pat in prefix_patterns:
+                m = re.match(pat, effective_search_query, re.IGNORECASE)
+                if m:
+                    extracted_core = m.group(1).strip()
+                    if len(extracted_core) >= 8:
+                        effective_search_query = f"{extracted_core} {effective_search_query}"
+                    break
+
             try:
                 acrs = find_acronyms_in_query(query)
                 for acr in acrs:
@@ -2162,6 +2162,12 @@ class ChatService:
                     except (TypeError, ValueError):
                         pass
 
+                # Drop single-letter or noise topic chunks (e.g. 'N', 'F', '1.') when query has real technical content
+                t_name = (merged.get("topic_name") or "").strip()
+                if len(t_name) <= 2 and len(query.strip()) > 2:
+                    logger.info(f"Dropping single-character noise chunk: topic='{t_name}'")
+                    continue
+
                 # Acronym conflict guard: If query targets a specific acronym (e.g. OMM),
                 # reject chunks that belong to a conflicting acronym domain (e.g. ODMCS).
                 try:
@@ -2181,21 +2187,24 @@ class ChatService:
                 retrieval_chunks.append(self._normalize_chunk(merged))
 
             # Content-aware temporal & regulatory re-ranking
-            # When the user query specifies a date constraint (e.g. 2024, 2025, 2026, jan 2026) or regulatory action (amendment, mepc, seemp, regulation, dcs)
+            # When the user query specifies a date constraint (e.g. 2024, 2025, 2026, jan 2026) or regulatory action (amendment, mepc, seemp, regulation, dcs, eu ets)
             q_lower_reg = query.lower()
             temporal_regulatory_matches = re.findall(
-                r'\b(202[3-9]|203\d|jan(?:uary)?|effective|amendment|amendments|regulation|regulations|rule|rules|mepc(?:\.\d+)?|seemp|force|dcs)\b',
+                r'\b(20[1-3]\d|jan(?:uary)?|effective|amendment|amendments|regulation|regulations|rule|rules|mepc(?:\.\d+)?|seemp|force|dcs|eu\s*ets|fueleu|ets)\b',
                 q_lower_reg
             )
             if temporal_regulatory_matches and len(retrieval_chunks) > 1:
                 query_constraints = set(temporal_regulatory_matches)
-                has_year = any(re.match(r'^(202[3-9]|203\d)$', t) for t in query_constraints)
+                has_year = any(re.match(r'^(20[1-3]\d)$', t) for t in query_constraints)
+                has_eu_ets = any(t in ("eu ets", "eu", "ets", "fueleu") for t in query_constraints)
 
                 def _constraint_score(c):
-                    full_text = f"{c.get('topic_name', '')} {str(c.get('topic_content', ''))[:4000]}".lower()
+                    t_name_lower = str(c.get('topic_name', '')).lower()
+                    full_text = f"{t_name_lower} {str(c.get('topic_content', ''))[:4000]}".lower()
                     matches = sum(1 for term in query_constraints if re.search(r'\b' + re.escape(term) + r'\b', full_text))
-                    year_match = 3 if has_year and any(re.search(r'\b' + re.escape(y) + r'\b', full_text) for y in query_constraints if re.match(r'^(202[3-9]|203\d)$', y)) else 0
-                    return matches + year_match
+                    year_match = 3 if has_year and any(re.search(r'\b' + re.escape(y) + r'\b', full_text) for y in query_constraints if re.match(r'^(20[1-3]\d)$', y)) else 0
+                    eu_boost = 3 if has_eu_ets and ("eu regulation" in t_name_lower or "regional" in t_name_lower or "ets" in t_name_lower) else 0
+                    return matches + year_match + eu_boost
 
                 max_matches = max(_constraint_score(c) for c in retrieval_chunks)
                 if max_matches >= 2:
@@ -2877,8 +2886,13 @@ Rules:
             for w in words_raw:
                 w_token = re.sub(r'[^a-zA-Z0-9_\-]', '', w).upper()
                 if 2 <= len(w_token) <= 12 and w_token not in COMMON_NON_ACRONYMS and w_token not in AMBIGUOUS_SHORT_WORDS:
-                    # For short queries (<= 3 words), check any candidate; for longer questions, check uppercase or alphanumeric/hyphenated tokens
-                    is_candidate = is_short_query or w.isupper() or any(c.isdigit() or c in '_-' for c in w)
+                    # For short queries (<= 3 words), check any candidate; for longer questions, check uppercase, alphanumeric, or short tokens in marine domain
+                    is_candidate = (
+                        is_short_query
+                        or w.isupper()
+                        or any(c.isdigit() or c in '_-' for c in w)
+                        or (len(w_token) <= 5 and is_marine_domain_query(current_query))
+                    )
                     if is_candidate:
                         if (
                             not is_known_maritime_acronym(w_token)
@@ -3838,6 +3852,22 @@ Rules:
                 f"sibling_videos={latencies['media_sibling_videos']:.3f}s | "
                 f"db_query={latencies['media_db_query']:.3f}s"
             )
+
+        # Check if the generated response indicates the requested information is not in the course
+        resp_lower = " ".join(getattr(s, "content", "") for s in getattr(validated, "sections", [])).lower()
+        if any(neg in resp_lower for neg in [
+            "not available in the curriculum",
+            "not detailed in the provided course",
+            "not explicitly stated in the provided course",
+            "not present in the provided course",
+            "does not contain information",
+            "does not contain a specific module",
+            "does not cover",
+        ]):
+            logger.info("🚫 Suppressing media because requested topic is not available in course")
+            all_images = []
+            all_pdfs = []
+            final_videos = []
 
         # Synchronize validated model
         validated.images = all_images
