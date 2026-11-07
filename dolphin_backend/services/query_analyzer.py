@@ -435,22 +435,38 @@ class QueryAnalyzer:
             return "QUIZ_REQUEST"
 
         # ---- SUMMARY ----
-        if any(
-            k in text
-            for k in [
-                "summary",
-                "sumary",
-                "summarize",
-                "summery",
-                "overview",
-                "brief me",
-                "give summary",
-                "recap",
-                "explain my learnings",
-                "summary of my learnings",
-                "summaries",
-            ]
-        ):
+        summary_keywords = [
+            "summary",
+            "sumary",
+            "summarize",
+            "summery",
+            "overview",
+            "brief me",
+            "give summary",
+            "recap",
+            "explain my learnings",
+            "summary of my learnings",
+            "summaries",
+        ]
+        if any(k in text for k in summary_keywords):
+            # If the query asks for an overview or summary of a specific maritime topic or acronym
+            # (e.g., "Overview of ECDIS", "Summary of SOLAS", "give me an overview of boiler"),
+            # without referring to past session/conversation history ("what we discussed", "our chat", etc.),
+            # it is an informational query about that subject, NOT a session recap!
+            session_ref_pattern = (
+                r'\b(we discussed|we talked about|our discussion|our chat|our conversation|'
+                r'my learning|my learnings|today(?:\'s)? session|this session|what we covered|'
+                r'what we learned|so far)\b'
+            )
+            has_session_ref = bool(re.search(session_ref_pattern, text))
+            try:
+                from services.maritime_acronyms import find_acronyms_in_query
+                has_marine_topic = is_marine_domain_query(text) or bool(find_acronyms_in_query(text))
+            except Exception:
+                has_marine_topic = is_marine_domain_query(text)
+
+            if has_marine_topic and not has_session_ref:
+                return "QUERY"
             return "SUMMARY_REQUEST"
 
         # ---- INCOMPLETE ----

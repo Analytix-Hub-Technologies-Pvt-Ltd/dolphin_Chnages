@@ -125,7 +125,7 @@ async def lifespan(app: FastAPI):
     # FAISS + BM25 init + scheduler
     # -----------------------------
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    from api.dependencies import get_faiss_store, get_company_store, get_transcribe_store, get_bm25_store, get_approved_memory_service
+    from api.dependencies import get_faiss_store, get_company_store, get_transcribe_store, get_bm25_store, get_approved_memory_service, get_pdf_store
     from retrieval.refresh_chunks import rebuild_faiss_index, schedule_daily_rebuild
 
     scheduler: AsyncIOScheduler | None = None
@@ -137,6 +137,16 @@ async def lifespan(app: FastAPI):
         company_store = get_company_store()
         transcribe_store = get_transcribe_store()
         bm25_store = get_bm25_store()
+
+        try:
+            logger.info("📦 Lifespan: Pre-warming PDF FAISS store and metadata...")
+            pdf_store = get_pdf_store()
+            logger.success(
+                "✅ PDF FAISS store pre-warmed — vectors={}",
+                pdf_store.index.ntotal if pdf_store.index is not None else 0,
+            )
+        except Exception as pdf_warm_err:
+            logger.warning(f"⚠️ PDF FAISS store pre-warming warning: {pdf_warm_err}")
 
         try:
             approved_mem_svc = await get_approved_memory_service()

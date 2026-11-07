@@ -219,6 +219,13 @@ FORMATTING & STRUCTURE RULES:
       - Directly anchor the response on the specific question asked.
       - Title the first section directly with the specific concept or procedure (e.g., "### Safety Depth Contour in ECDIS" or "### Washwater Discharge pH Limits").
       - Answer the question immediately, thoroughly, and comprehensively using the specific details from the retrieved COURSE CONTEXT.
+  * SCENARIO 3: MARITIME CALCULATIONS, FORMULAS, WORKED PROBLEMS & TECHNICAL PLANNING:
+    → When the user asks for a calculation, formula, draft survey, stowage calculation, displacement method, or creating a plan given parameters (e.g., hatch dimensions, stowage factor, load density, broken stowage, engine slip, ullage, trim/stability):
+      - DO NOT begin with a generic "Overview of [Topic]" or basic descriptive theory.
+      - Directly state the governing mathematical formulas with clear variable definitions.
+      - Outline the exact step-by-step calculation procedure and physical constraints (e.g., net hold volume allowance for broken stowage vs. tank-top load density limit).
+      - If numerical inputs were provided by the user, compute and solve step-by-step.
+      - If no numerical values were provided, provide the step-by-step procedure followed by a clear, realistic WORKED NUMERICAL EXAMPLE demonstrating the formulas in action so the user receives the calculation immediately in the primary response.
 - REGULATORY MANDATES & UPCOMING AMENDMENTS:
   * When the user's question asks about regulations, rules, amendments, or compliance effective on a specific date or year (e.g., "regulation on gas meters effective jan 2026", "amendments to SEEMP/DCS for 2026"):
     → Focus the response directly on the regulatory requirements, compliance deadlines, MARPOL/IMO resolutions, and instrumentation/reporting standards from COURSE CONTEXT.
@@ -488,6 +495,7 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
     # State
     decision = safe_get(state, "router_decision", {}) or {}
     chunks = safe_get(state, "retrieval_chunks", [])
+    pdf_context_chunks = safe_get(state, "pdf_context_chunks", []) or []
     query = safe_get(state, "current_query", "")
     standalone_query = safe_get(state, "standalone_query", query)
 
@@ -598,7 +606,7 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
 
     chunks = filter_chunks(standalone_query, chunks)
 
-    if not chunks:
+    if not chunks and not pdf_context_chunks:
         from services.off_topic_detector import generate_dynamic_off_topic_response
         out_of_scope_text, dynamic_suggestions = await generate_dynamic_off_topic_response(
             standalone_query or query
@@ -643,7 +651,12 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
 
     # 🌟 IMMEDIATE DIRECT SME-APPROVED GUIDANCE HANDLER
     sme_chunk = next((c for c in chunks if c.get("_is_sme_approved")), None)
-    if sme_chunk:
+    if sme_chunk and not sme_chunk.get("_is_direct_override", True):
+        logger.info(
+            f"🌟 Contextual SME Approved Guidance match found (id={sme_chunk.get('_sme_feedback_id')})! "
+            f"Grounding LLM synthesis with verified SME chunk at Rank 0."
+        )
+    elif sme_chunk:
         sme_resp = (
             sme_chunk.get("_sme_preferred_response")
             or sme_chunk.get("topic_content")
@@ -765,6 +778,28 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
 
     chunks_text = "\n\n---\n\n".join(chunk_blocks)
 
+    # PDF search used to run only for UI cards after answer generation. Include its
+    # extracted text in the answer prompt, while preserving document/page provenance.
+    pdf_blocks = []
+    for pdf_chunk in pdf_context_chunks[:4]:
+        pdf_text = str(
+            pdf_chunk.get("raw_text") or pdf_chunk.get("text") or pdf_chunk.get("content") or ""
+        ).strip()
+        if not pdf_text:
+            continue
+        title = str(pdf_chunk.get("source_pdf") or pdf_chunk.get("title") or "PDF document").strip()
+        page = pdf_chunk.get("page") or "unknown"
+        topic = str(pdf_chunk.get("topic_name") or "").strip()
+        pdf_blocks.append(
+            f"PDF DOCUMENT: {title}\nTOPIC: {topic}\nPAGE: {page}\nEXTRACTED TEXT:\n{pdf_text[:5000]}"
+        )
+    if pdf_blocks:
+        pdf_context_text = (
+            "\n\n---\n\nOFFICIAL PDF EXCERPTS (use when relevant; do not infer details absent from these excerpts):\n\n"
+            + "\n\n---\n\n".join(pdf_blocks)
+        )
+        chunks_text = (chunks_text + "\n\n" + pdf_context_text).strip()
+
     # MAIN PROMPT (NOW FILLED)
     # Enrich prompt with maritime acronym domain expansions if present
     acronym_notes = []
@@ -782,6 +817,21 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
     effective_query_for_prompt = standalone_query or query
     if acronym_notes:
         effective_query_for_prompt += f"\n[Maritime Acronym Context: {'; '.join(acronym_notes)}]"
+
+    # Dynamic calculation intent detection
+    is_calc_query = bool(re.search(
+        r'\b(?:calculat(?:e|ion|ions|ing)|formula(?:s)?|draft\s+survey|stowage\s+factor|'
+        r'broken\s+stowage|load\s+density|cargo\s+plan(?:ning)?|ullage\s+calculation|'
+        r'engine\s+slip|sfoc|fwa|dwa|displacement\s+method|worked\s+example|numerical)\b',
+        effective_query_for_prompt,
+        re.IGNORECASE
+    ))
+    if is_calc_query:
+        effective_query_for_prompt += (
+            "\n[Query Intent: Maritime Calculation & Technical Planning. Directly provide governing mathematical "
+            "formulas, parameter definitions, constraint checks (volume vs load density), and a complete step-by-step "
+            "worked numerical example. Do not output a generic descriptive overview.]"
+        )
 
     prompt = QUERY_PROMPT.format(
         user_query=effective_query_for_prompt,
@@ -1241,7 +1291,10 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
             elif len(query.split()) <= 4:
                 target_name = query.strip()
 
-        header_text = generate_subtopic_header(target_name, query)
+        if safe_get(state, "_is_calc_query", False) or (locals().get("is_calc_query", False)):
+            header_text = "**Related reference and calculation modules:**"
+        else:
+            header_text = generate_subtopic_header(target_name, query)
 
         formatted_items = []
         for clean_t, raw_c in distinct_course_chapters:
@@ -1298,6 +1351,8 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
             "short_topic": "marine" if is_out_of_scope else decision.get("short_topic", "marine"),
             "routing_reason": "off_topic" if is_out_of_scope else decision.get("reason", "query"),
             "out_of_scope": is_out_of_scope,
+            "is_sme_grounded": any(c.get("_is_sme_approved") for c in chunks),
+            "sme_feedback_id": next((c.get("_sme_feedback_id") for c in chunks if c.get("_is_sme_approved")), None),
         }
     }
 

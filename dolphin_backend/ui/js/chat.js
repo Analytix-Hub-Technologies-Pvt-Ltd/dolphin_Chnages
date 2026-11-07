@@ -18,6 +18,8 @@ const imageSection = document.getElementById('image-suggestions');
 const imageList = document.getElementById('image-list');
 const pdfSection = document.getElementById('pdf-suggestions');
 const pdfList = document.getElementById('pdf-list');
+const matchedPdfSection = document.getElementById('matched-pdf-suggestions');
+const matchedPdfList = document.getElementById('matched-pdf-list');
 const questionList = document.getElementById('question-list');
 const logoutButton = document.getElementById('logout-button');
 const newSessionButton = document.getElementById('new-session-button');
@@ -253,6 +255,80 @@ const renderPdfSuggestions = (pdfs = []) => {
   });
 };
 
+const renderMatchedPdfSuggestions = (chunks = []) => {
+  if (!matchedPdfList) return;
+  matchedPdfList.innerHTML = '';
+
+  if (!Array.isArray(chunks) || chunks.length === 0) {
+    if (matchedPdfSection) matchedPdfSection.hidden = true;
+    return;
+  }
+
+  if (matchedPdfSection) matchedPdfSection.hidden = false;
+
+  chunks.forEach((chunk) => {
+    const url = chunk.link || chunk.url || '';
+    const title = chunk.document || chunk.title || 'Referenced Document';
+    const page = chunk.page || 1;
+    const matchPct = chunk.match_pct || (chunk.score ? Math.round(chunk.score * 100) : null);
+    const topic = chunk.topic_name || chunk.course_name || '';
+    const preview = chunk.text_preview || '';
+    const images = Array.isArray(chunk.images) ? chunk.images : [];
+
+    const card = document.createElement('div');
+    card.className = 'matched-pdf-card';
+
+    const headerEl = document.createElement('div');
+    headerEl.className = 'matched-pdf-header';
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'matched-pdf-title';
+    titleEl.textContent = title;
+
+    const badgesEl = document.createElement('div');
+    badgesEl.className = 'matched-pdf-badges';
+
+    const pageChip = document.createElement('span');
+    pageChip.className = 'pdf-page-chip';
+    pageChip.textContent = `Page ${page}`;
+    badgesEl.appendChild(pageChip);
+
+    if (matchPct) {
+      const scoreChip = document.createElement('span');
+      scoreChip.className = 'pdf-score-chip';
+      scoreChip.textContent = `${matchPct}% Match`;
+      badgesEl.appendChild(scoreChip);
+    }
+
+    headerEl.appendChild(titleEl);
+    headerEl.appendChild(badgesEl);
+    card.appendChild(headerEl);
+
+    if (topic) {
+      const topicEl = document.createElement('div');
+      topicEl.className = 'matched-pdf-topic';
+      topicEl.textContent = `📍 ${topic}`;
+      card.appendChild(topicEl);
+    }
+
+    if (preview) {
+      const snippetEl = document.createElement('div');
+      snippetEl.className = 'matched-pdf-snippet';
+      snippetEl.textContent = preview;
+      card.appendChild(snippetEl);
+    }
+
+
+    card.addEventListener('click', () => {
+      if (url) {
+        openPdf(url, page);
+      }
+    });
+
+    matchedPdfList.appendChild(card);
+  });
+};
+
 const renderSuggestions = (suggestions = []) => {
   questionList.innerHTML = '';
 
@@ -317,6 +393,7 @@ const clearSuggestions = () => {
   renderVideoSuggestions([]);
   renderImageSuggestions([]);
   renderPdfSuggestions([]);
+  renderMatchedPdfSuggestions([]);
   renderQuestionSuggestions([]);
 };
 
@@ -477,6 +554,7 @@ const applyLatestSuggestions = (messages = []) => {
   const videos = assistantMessage.videos || assistantMessage.video_suggestions || assistantMessage.metadata?.videos || [];
   const images = assistantMessage.images || assistantMessage.metadata?.images || [];
   const pdfs = assistantMessage.pdfs || assistantMessage.metadata?.pdfs || [];
+  const matchedPdfs = assistantMessage.matched_pdf_chunks || assistantMessage.metadata?.matched_pdf_chunks || [];
   const questions = assistantMessage.question_suggestions || assistantMessage.metadata?.question_suggestions || [];
 
   console.debug('[History] Applying latest media from history', {
@@ -490,6 +568,7 @@ const applyLatestSuggestions = (messages = []) => {
   renderVideoSuggestions(Array.isArray(videos) ? videos : []);
   renderImageSuggestions(Array.isArray(images) ? images : []);
   renderPdfSuggestions(Array.isArray(pdfs) ? pdfs : []);
+  renderMatchedPdfSuggestions(Array.isArray(matchedPdfs) ? matchedPdfs : []);
   renderQuestionSuggestions(Array.isArray(questions) ? questions : []);
 };
 // video open popup
@@ -582,15 +661,19 @@ document.addEventListener(
   true
 );
 
-// pdf open and close in popup
-function openPdf(url) {
+// pdf open and close in popup with page anchor support
+function openPdf(url, page = null) {
   const modal = document.getElementById('pdfModal');
   const iframe = document.getElementById('popupPdf');
 
   if (!modal || !iframe) return;
 
-  // 🔒 Hide toolbar & download button (browser dependent)
-  iframe.src = `${url}#toolbar=0&navpanes=0&scrollbar=0`;
+  const baseUrl = (url || '').split('#')[0];
+  const hashParts = ['toolbar=0', 'navpanes=0', 'scrollbar=0'];
+  if (page) {
+    hashParts.unshift(`page=${page}`);
+  }
+  iframe.src = `${baseUrl}#${hashParts.join('&')}`;
 
   modal.classList.remove('hidden');
 }
@@ -827,6 +910,7 @@ const sendMessage = async (messageText, { skipClarification = false, displayText
       [];
     const images = nodeResponse.images || nodeResponse.metadata?.images || [];
     const pdfs = nodeResponse.pdfs || nodeResponse.metadata?.pdfs || [];
+    const matchedPdfs = nodeResponse.matched_pdf_chunks || nodeResponse.metadata?.matched_pdf_chunks || data.matched_pdf_chunks || [];
 
     console.debug('[Chat] Response received', {
       hasNodeResponse: Boolean(data.node_response),
@@ -847,6 +931,7 @@ const sendMessage = async (messageText, { skipClarification = false, displayText
     renderVideoSuggestions(videos);
     renderImageSuggestions(images);
     renderPdfSuggestions(pdfs);
+    renderMatchedPdfSuggestions(matchedPdfs);
 
     const clarification = nodeResponse.metadata?.clarification;
     if (clarification) {

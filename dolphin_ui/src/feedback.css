@@ -668,3 +668,33 @@
   .fb-page-container .fb-kpi-grid { grid-template-columns: minmax(0, 1fr) !important; }
   .fb-page-container .fb-main-body { padding: 16px !important; }
 }
+
+/* Mathematical Variable and Symbol Typography (Upright Maritime Style, No Lean) */
+var, .math-sym {
+  font-family: "Cambria Math", "STIX Two Math", "Segoe UI Symbol", "Times New Roman", serif;
+  font-style: normal; /* Completely straight, upright mathematical typography */
+  font-size: 1.15em;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: normal;
+}
+
+/* Subscript & Superscript Formatting for Formulas & Equations */
+sub {
+  font-size: 0.78em;
+  font-weight: 500;
+  line-height: 0;
+  position: relative;
+  vertical-align: baseline;
+  bottom: -0.30em; /* Distinct subscript drop (~4px), visibly lower than the main letter */
+}
+
+sup {
+  font-size: 0.78em;
+  font-weight: 500;
+  line-height: 0;
+  position: relative;
+  vertical-align: baseline;
+  top: -0.40em;
+}
+

@@ -80,3 +80,42 @@ async def check_topic_course(
             return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/topic-info/{topic_code}")
+async def get_topic_info(
+    topic_code: str,
+    pool: Pool = Depends(get_db_pool),
+):
+    """Return course_code, course_name, and topic_name for a given topic_code for media inspection."""
+    try:
+        async with pool.acquire() as conn:
+            query = """
+                SELECT c.course_code, c.topic_name, COALESCE(m.course_name, '') as course_name 
+                FROM course_content c
+                LEFT JOIN master_course_data m ON c.course_code = m.course_code
+                WHERE c.topic_code = $1
+                LIMIT 1
+            """
+            row = await conn.fetchrow(query, topic_code)
+            if not row:
+                return {
+                    "course_code": "",
+                    "course_name": "",
+                    "topic_name": "",
+                    "found": False,
+                }
+            return {
+                "course_code": str(row["course_code"] or ""),
+                "course_name": str(row["course_name"] or ""),
+                "topic_name": str(row["topic_name"] or ""),
+                "found": True,
+            }
+    except Exception as e:
+        return {
+            "course_code": "",
+            "course_name": "",
+            "topic_name": "",
+            "found": False,
+            "error": str(e),
+        }

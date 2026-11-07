@@ -1,4 +1,5 @@
 """Verified caller identity and database-backed administrative access."""
+import time
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -6,6 +7,8 @@ from fastapi import Depends, HTTPException, Request
 
 from config import settings
 from api.dependencies import get_db_pool
+
+_USER_CACHE: dict[str, tuple[float, dict]] = {}  # user_id -> (expiry_time, user_dict)
 
 
 def token_secret():
@@ -35,12 +38,44 @@ async def get_current_user(request: Request, pool=Depends(get_db_pool)):
             raise jwt.InvalidTokenError()
     except jwt.InvalidTokenError:
         raise HTTPException(401, "Invalid or expired access token")
-    async with pool.acquire() as conn:
-        user = await conn.fetchrow("SELECT u.id, u.email, ur.role_name FROM users u "
-                                   "LEFT JOIN user_roles ur ON ur.id = u.role_id WHERE u.id = $1", claims["sub"])
+
+    user_id = str(claims["sub"])
+    now = time.time()
+
+    # Fast path: in-memory cache (TTL: 120 seconds) to prevent DB connection exhaustion
+    if user_id in _USER_CACHE:
+        exp, cached_user = _USER_CACHE[user_id]
+        if now < exp:
+            return cached_user
+
+    # Query DB with retry for resilience
+    user = None
+    for attempt in range(1, 4):
+        try:
+            async with pool.acquire() as conn:
+                user = await conn.fetchrow(
+                    "SELECT u.id, u.email, ur.role_name FROM users u "
+                    "LEFT JOIN user_roles ur ON ur.id = u.role_id WHERE u.id = $1",
+                    user_id,
+                )
+            break
+        except Exception:
+            # If DB pool is saturated but user was previously cached, use stale cached user
+            if user_id in _USER_CACHE:
+                _, stale_user = _USER_CACHE[user_id]
+                return stale_user
+            if attempt < 3:
+                import asyncio
+                await asyncio.sleep(0.5)
+            else:
+                raise
+
     if not user:
         raise HTTPException(401, "User no longer exists")
-    return dict(user)
+
+    user_dict = dict(user)
+    _USER_CACHE[user_id] = (now + 120.0, user_dict)
+    return user_dict
 
 
 def can_view_all_sessions(user) -> bool:

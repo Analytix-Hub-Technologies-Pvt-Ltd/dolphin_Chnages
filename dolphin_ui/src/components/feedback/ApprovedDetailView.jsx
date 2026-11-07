@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -18,10 +18,16 @@ import {
   AlertTriangle,
   Eye,
   Edit3,
+  Image as ImageIcon,
 } from "lucide-react";
 
 import { sanitizeMarkdown } from "../chat/ChatWindow";
 import { updateApprovedFeedback, deleteApprovedFeedback, formatErrorMessage } from "../../api/feedbackApi";
+import {
+  handleSmartPaste,
+  readImageAsBase64,
+  insertAtCursor,
+} from "../../utils/markdownPasteHelper";
 
 const ApprovedDetailView = ({
   item,
@@ -39,6 +45,28 @@ const ApprovedDetailView = ({
   const [deleting, setDeleting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+
+  const preferredTextareaRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const base64 = await readImageAsBase64(file);
+      const name = file.name ? file.name.replace(/\.[^/.]+$/, "") : "Figure Diagram";
+      insertAtCursor(
+        preferredTextareaRef.current,
+        `\n\n![${name}](${base64})\n\n`,
+        preferredResponse,
+        setPreferredResponse
+      );
+    } catch (err) {
+      console.error("Failed to read image file:", err);
+    } finally {
+      e.target.value = "";
+    }
+  };
 
   useEffect(() => {
     if (item) {
@@ -351,43 +379,74 @@ const ApprovedDetailView = ({
                     </button>
                   </>
                 ) : (
-                  <div style={{ display: "flex", alignItems: "center", backgroundColor: "var(--fb-bg-default)", borderRadius: 10, padding: 3 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      accept="image/*"
+                      style={{ display: "none" }}
+                      onChange={handleImageUpload}
+                    />
                     <button
                       type="button"
-                      onClick={() => setEditorTab(0)}
+                      onClick={() => fileInputRef.current?.click()}
                       style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
                         padding: "4px 10px",
                         borderRadius: 8,
                         fontSize: 11,
-                        fontWeight: 700,
-                        border: "none",
+                        fontWeight: 600,
+                        border: "1px solid var(--fb-border)",
+                        backgroundColor: "var(--fb-bg-default)",
+                        color: "var(--fb-text-primary)",
                         cursor: "pointer",
-                        backgroundColor: editorTab === 0 ? "var(--fb-bg-paper)" : "transparent",
-                        color: editorTab === 0 ? "var(--fb-primary)" : "var(--fb-text-secondary)",
-                        boxShadow: editorTab === 0 ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
                       }}
+                      title="Upload an image or diagram to insert at cursor position"
                     >
-                      <Edit3 style={{ width: 12, height: 12, display: "inline", marginRight: 4 }} />
-                      <span>Edit</span>
+                      <ImageIcon style={{ width: 13, height: 13, color: "var(--fb-primary)" }} />
+                      <span>Insert Diagram</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditorTab(1)}
-                      style={{
-                        padding: "4px 10px",
-                        borderRadius: 8,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        border: "none",
-                        cursor: "pointer",
-                        backgroundColor: editorTab === 1 ? "var(--fb-bg-paper)" : "transparent",
-                        color: editorTab === 1 ? "var(--fb-primary)" : "var(--fb-text-secondary)",
-                        boxShadow: editorTab === 1 ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
-                      }}
-                    >
-                      <Eye style={{ width: 12, height: 12, display: "inline", marginRight: 4 }} />
-                      <span>Preview</span>
-                    </button>
+
+                    <div style={{ display: "flex", alignItems: "center", backgroundColor: "var(--fb-bg-default)", borderRadius: 10, padding: 3 }}>
+                      <button
+                        type="button"
+                        onClick={() => setEditorTab(0)}
+                        style={{
+                          padding: "4px 10px",
+                          borderRadius: 8,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          border: "none",
+                          cursor: "pointer",
+                          backgroundColor: editorTab === 0 ? "var(--fb-bg-paper)" : "transparent",
+                          color: editorTab === 0 ? "var(--fb-primary)" : "var(--fb-text-secondary)",
+                          boxShadow: editorTab === 0 ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
+                        }}
+                      >
+                        <Edit3 style={{ width: 12, height: 12, display: "inline", marginRight: 4 }} />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditorTab(1)}
+                        style={{
+                          padding: "4px 10px",
+                          borderRadius: 8,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          border: "none",
+                          cursor: "pointer",
+                          backgroundColor: editorTab === 1 ? "var(--fb-bg-paper)" : "transparent",
+                          color: editorTab === 1 ? "var(--fb-primary)" : "var(--fb-text-secondary)",
+                          boxShadow: editorTab === 1 ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
+                        }}
+                      >
+                        <Eye style={{ width: 12, height: 12, display: "inline", marginRight: 4 }} />
+                        <span>Preview</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -401,22 +460,24 @@ const ApprovedDetailView = ({
               <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 12 }}>
                 {editorTab === 0 ? (
                   <textarea
+                    ref={preferredTextareaRef}
                     rows={18}
                     value={preferredResponse}
                     onChange={(e) => setPreferredResponse(e.target.value)}
-                    placeholder="Enter corrected procedural response with exact markdown formatting..."
+                    onPaste={(e) => handleSmartPaste(e, preferredResponse, setPreferredResponse, preferredTextareaRef)}
+                    placeholder="Enter corrected procedural response with exact markdown formatting... (Tip: Paste diagrams, bold headings, and formulas directly)"
                     style={{
                       width: "100%",
                       flex: 1,
                       minHeight: 340,
                       padding: 14,
-                      fontSize: 12,
+                      fontSize: 13,
                       borderRadius: 12,
                       backgroundColor: "var(--fb-bg-default)",
                       border: "1px solid #cbd5e1",
                       color: "var(--fb-text-primary)",
-                      fontFamily: "monospace",
-                      lineHeight: 1.5,
+                      fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+                      lineHeight: 1.6,
                       outline: "none",
                       boxSizing: "border-box",
                       resize: "vertical",

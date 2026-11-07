@@ -841,22 +841,21 @@ class FeedbackService:
 
         # Trigger immediate response memory update for Dolphin AI retrieval
         try:
-            from services.approved_memory_service import ApprovedMemoryService
-            from services.embedding_service import EmbeddingService
-            from services.openai_service import OpenAIService
+            from api.dependencies import get_approved_memory_service
+            from services.approved_memory_service import normalize_company_id
 
-            embedder = EmbeddingService(OpenAIService())
-            memory_service = ApprovedMemoryService(self.pool, embedder=embedder)
+            memory_service = await get_approved_memory_service()
 
             if status == "approved":
                 preferred = row["edited_response"] or row["original_response"]
                 if preferred and row["question"]:
+                    norm_cid = normalize_company_id(row.get("company_id"))
                     await memory_service.sync_feedback_approval(
                         feedback_id=row["feedback_id"],
                         question=row["question"],
                         preferred_response=preferred,
                         original_response=row["original_response"],
-                        company_id=str(row["company_id"]) if row["company_id"] is not None else None,
+                        company_id=str(norm_cid) if norm_cid is not None else None,
                         ship_type=row["ship_type"],
                         approved_by=reviewer_name or reviewer_id,
                         is_active=True,

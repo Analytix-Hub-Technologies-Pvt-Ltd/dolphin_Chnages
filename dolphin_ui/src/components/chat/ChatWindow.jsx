@@ -19,6 +19,7 @@ import {
   fetchTopicDetails,
 } from "../../api/fetchApi";
 import ChatMessage, { markdownContainerSx } from "./ChatMessage";
+import MediaInspectorDrawer from "./MediaInspectorDrawer";
 import { resolveImageUrl } from "../../api/config";
 import { useThemeMode } from "../../context/ThemeModeContext";
 import { Message } from "../../assets/svgIcons/message";
@@ -36,20 +37,56 @@ import StopRoundedIcon from "@mui/icons-material/StopRounded";
 
 const formatGlossaryContent = (content) => {
   if (!content) return "";
-  return content.replace(
-    /([A-Z][A-Z\s]{2,}):\s*([\s\S]+?)(?=(?:[A-Z][A-Z\s]{2,}:)|$)/g,
-    (_, title, desc) =>
-      `\n- **${title
-        .trim()
-        .toLowerCase()
-        .replace(/\b\w/g, (c) => c.toUpperCase())}**: ${desc.trim()}\n`,
-  );
+  // Only convert standalone, unbulleted raw glossary lines (e.g., "ECDIS: Electronic Chart...")
+  // Do NOT touch lines that are already markdown list items (- , * , • ) or already bolded (**...)
+  const lines = content.split(/\r?\n/);
+  const formattedLines = lines.map((line) => {
+    const trimmed = line.trim();
+    if (
+      !trimmed ||
+      /^[•\-\*\⁃\◦\▪\▫\–\d\.]/.test(trimmed) ||
+      trimmed.startsWith("#") ||
+      trimmed.startsWith("**")
+    ) {
+      return line;
+    }
+    const match = trimmed.match(/^([A-Z][A-Za-z0-9\s]{1,30}):\s+(.+)$/);
+    if (match) {
+      const term = match[1].trim();
+      const desc = match[2].trim();
+      return `- **${term}**: ${desc}`;
+    }
+    return line;
+  });
+  return formattedLines.join("\n");
 };
 
 export const formatMarkdownContent = (content) => {
   if (!content) return "";
 
-  let formatted = formatGlossaryContent(content);
+  // ── Protection Layer: Preserve Images, Data URIs, and Code Blocks ──
+  // Prevents downstream formula/glossary regexes from corrupting Base64 image payloads or code blocks
+  const protectedTokens = [];
+  const mask = (match) => {
+    const token = `@@PROTECTED_CONTENT_${protectedTokens.length}@@`;
+    protectedTokens.push(match);
+    return token;
+  };
+
+  // 1. Mask code blocks first (fenced and inline)
+  let masked = content.replace(/```[\s\S]*?```/g, mask);
+  masked = masked.replace(/`[^`\n]+`/g, mask);
+
+  // 2. Mask markdown images: ![alt](url)
+  masked = masked.replace(/!\[[\s\S]*?\]\([\s\S]*?\)/g, mask);
+
+  // 3. Mask HTML img tags: <img ... />
+  masked = masked.replace(/<img\b[^>]*\/?>/gi, mask);
+
+  // 4. Mask any standalone data URIs
+  masked = masked.replace(/data:image\/[^;]+;base64,[a-zA-Z0-9+/=]+/gi, mask);
+
+  let formatted = formatGlossaryContent(masked);
 
   // Remove thinking text
   formatted = formatted.replace(/Dolphin is thinking\.\.\./gi, "");
@@ -178,6 +215,41 @@ export const formatMarkdownContent = (content) => {
     formatted += "*";
   }
 
+  // ── Dynamic Maritime Formula & Subscript Formatting ──
+  // 1. Dynamic wind/heeling levers: lw1, lw2, l_w1, l_w2 -> <var>l</var><sub>w1</sub>, <var>l</var><sub>w2</sub>, etc.
+  formatted = formatted.replace(/(?<!<var[^>]*>)\b[lL]_?w([0-9a-zA-Z]+)\b(?!<\/sub>)/g, "<var>l</var><sub>w$1</sub>");
+  formatted = formatted.replace(/\bl(?=<sub>w[0-9a-zA-Z]+<\/sub>)/gi, "<var>l</var>");
+
+  // 2. Universal Greek variable + Subscript pattern: ϕ0, ϕ1, ϕ2, ϕf, θf, etc. (dynamic for any symbol & index)
+  formatted = formatted.replace(
+    /(?<=^|[^a-zA-Z0-9<>/])([ϕφθλαβγμρσΔ])_?([0-9a-z])(?![a-zA-Z0-9<>/])/gi,
+    "<var>$1</var><sub>$2</sub>"
+  );
+
+  // 3. Common maritime variables with subscripts: GM0, GM_0, GMo
+  formatted = formatted.replace(/\b(?:GMo|GM0|GM_0)\b(?!<\/sub>)/g, "<var>GM</var><sub>0</sub>");
+
+  // 4. Universal units with power exponents: m3, m2, cm3, cm2, mm3, etc.
+  formatted = formatted.replace(/\b(\d+)\s*(m|cm|mm|km)([23])\b(?!<\/sup>)/gi, "$1 $2<sup>$3</sup>");
+
+  // 5. Maritime emissions, gases, and chemicals
+  formatted = formatted.replace(/\bCO2\b(?!<\/sub>)/g, "CO<sub>2</sub>");
+  formatted = formatted.replace(/\bSOx\b(?!<\/sub>)/g, "SO<sub>x</sub>");
+  formatted = formatted.replace(/\bNOx\b(?!<\/sub>)/g, "NO<sub>x</sub>");
+  formatted = formatted.replace(/\bH2S\b(?!<\/sub>)/g, "H<sub>2</sub>S");
+  formatted = formatted.replace(/\bCH4\b(?!<\/sub>)/g, "CH<sub>4</sub>");
+  formatted = formatted.replace(/\bO2\b(?!<\/sub>)/g, "O<sub>2</sub>");
+  formatted = formatted.replace(/\bN2\b(?!<\/sub>)/g, "N<sub>2</sub>");
+  formatted = formatted.replace(/\bH2O\b(?!<\/sub>)/g, "H<sub>2</sub>O");
+
+  // Wrap remaining standalone mathematical variables and Greek symbols in <var>
+  formatted = formatted.replace(/(?<!<var[^>]*>)(ϕ|φ|θ|Δ|α|β|γ|λ|μ|π|ρ|σ|Σ|Ω)(?!<\/var>)/g, "<var>$1</var>");
+
+  // ── Restoration Layer: Restore Protected Images, Data URIs, and Code Blocks ──
+  for (let i = protectedTokens.length - 1; i >= 0; i--) {
+    formatted = formatted.replace(`@@PROTECTED_CONTENT_${i}@@`, () => protectedTokens[i]);
+  }
+
   return formatted.trim();
 };
 export const sanitizeMarkdown = (content, skipFormatting = false) => {
@@ -191,8 +263,10 @@ export const sanitizeMarkdown = (content, skipFormatting = false) => {
   });
 
   return DOMPurify.sanitize(html, {
-    ADD_TAGS: ["input"],
-    ADD_ATTR: ["type", "checked", "disabled"],
+    ADD_TAGS: ["input", "sub", "sup", "var"],
+    ADD_ATTR: ["type", "checked", "disabled", "style", "class"],
+    ADD_DATA_URI_TAGS: ["img"],
+    ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
   });
 };
 
@@ -201,6 +275,11 @@ const normalizeVideo = (v) => ({
   title: v.title || v.Title || "",
   url: v.url || v.Url || v.videourl || "",
   thumbnail: v.thumbnail || v.Thumbnail || "",
+  video_id: String(v.video_id || v.Id || v.id || (v.url ? v.url.split("/").pop().split("?")[0].replace(/\.mp4$/i, "") : "")),
+  topic_code: String(v.topic_code || ""),
+  topic_name: String(v.topic_name || ""),
+  source_type: String(v.source_type || "curriculum"),
+  content: String(v.content || ""),
 });
 
 const normalizeImage = (img) => {
@@ -246,6 +325,7 @@ const EMPTY_LIVE = {
   media: { videos: [], images: [], pdfs: [] },
   topics: [],
   transcripts: [],
+  matched_pdf_chunks: [],
   checkLicCoursesData: null
 };
 
@@ -258,6 +338,7 @@ const EMPTY_ACC = () => ({
   topics: [],
   pendingTopics: [],
   transcripts: [],
+  matched_pdf_chunks: [],
   checkLicCoursesData: null,
 });
 
@@ -294,6 +375,19 @@ const ChatWindow = ({
     selectedTopicCode: null,
     detailTopic: null,
   });
+
+  // ── Testing: Media & Topic Inspector Drawer ──
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [inspectorData, setInspectorData] = useState(null);
+
+  const handleOpenInspector = useCallback((data) => {
+    setInspectorData(data);
+    setInspectorOpen(true);
+  }, []);
+
+  const handleCloseInspector = useCallback(() => {
+    setInspectorOpen(false);
+  }, []);
 
   // Close the sources panel when a new chat is started
   useEffect(() => {
@@ -414,6 +508,7 @@ const ChatWindow = ({
           pdfs: acc.media.pdfs || [],
           topics: acc.topics || [],
           transcripts: acc.transcripts || [],
+          matched_pdf_chunks: acc.matched_pdf_chunks || [],
           question_suggestions: acc.suggestions || [],
           checkLicCoursesData: acc.checkLicCoursesData,
           timestamp: new Date().toISOString(),
@@ -589,14 +684,24 @@ const ChatWindow = ({
             },
 
             onMedia: (rawMedia) => {
+              const normVideos = (rawMedia.videos || []).map(normalizeVideo);
               accRef.current.media = {
-                videos: (rawMedia.videos || []).map(normalizeVideo),
+                videos: normVideos,
                 images: (rawMedia.images || []).map(normalizeImage),
                 pdfs: (rawMedia.pdfs || []).map(normalizePdf),
               };
+              if (rawMedia.topics && Array.isArray(rawMedia.topics)) {
+                for (const t of rawMedia.topics) {
+                  const tObj = typeof t === "object" ? t : { code: String(t), name: String(t) };
+                  if (!accRef.current.topics.some((x) => (typeof x === "object" ? x.code === tObj.code : x === tObj.code))) {
+                    accRef.current.topics.push(tObj);
+                  }
+                }
+              }
               setLiveMessage((prev) => ({
                 ...prev,
                 media: accRef.current.media,
+                topics: [...accRef.current.topics],
               }));
             },
 
@@ -604,11 +709,18 @@ const ChatWindow = ({
               const { code, name } =
                 typeof topicData === "string"
                   ? { code: topicData, name: topicData }
-                  : topicData;
+                  : (topicData || {});
 
-              if (code && code.trim() && name && name.trim()) {
-                if (!accRef.current.topics.includes(code)) {
-                  accRef.current.topics.push(code);
+              if ((code && String(code).trim()) || (name && String(name).trim())) {
+                const topicObj = {
+                  code: String(code || "").trim(),
+                  name: String(name || "").trim(),
+                };
+                const alreadyExists = accRef.current.topics.some(
+                  (t) => (typeof t === "object" ? t.code === topicObj.code : t === topicObj.code)
+                );
+                if (!alreadyExists) {
+                  accRef.current.topics.push(topicObj);
                 }
                 setLiveMessage((prev) => ({
                   ...prev,
@@ -630,6 +742,14 @@ const ChatWindow = ({
               setLiveMessage((prev) => ({
                 ...prev,
                 transcripts: accRef.current.transcripts,
+              }));
+            },
+
+            onPdfResult: (chunks) => {
+              accRef.current.matched_pdf_chunks = chunks;
+              setLiveMessage((prev) => ({
+                ...prev,
+                matched_pdf_chunks: accRef.current.matched_pdf_chunks,
               }));
             },
 
@@ -669,6 +789,7 @@ const ChatWindow = ({
                     pdfs: acc.media.pdfs,
                     topics: acc.topics,
                     transcripts: acc.transcripts,
+                    matched_pdf_chunks: acc.matched_pdf_chunks || [],
                     question_suggestions: acc.suggestions || [],
                     checkLicCoursesData: acc.checkLicCoursesData,
                     timestamp: new Date().toISOString(),
@@ -1043,6 +1164,7 @@ const ChatWindow = ({
                   onTopicClick={(topicCode) =>
                     handleTopicClick(topicCode, msg.topics)
                   }
+                  onOpenInspector={handleOpenInspector}
                   isStreaming={false}
                 />
               );
@@ -1069,6 +1191,7 @@ const ChatWindow = ({
                   question_suggestions: liveMessage.suggestions || [],
                   topics: liveMessage.topics,
                   transcripts: liveMessage.transcripts,
+                  matched_pdf_chunks: liveMessage.matched_pdf_chunks || [],
                   images: liveMessage.media?.images || [],
                   pdfs: liveMessage.media?.pdfs || [],
                   videos: liveMessage.media?.videos || [],
@@ -1079,6 +1202,7 @@ const ChatWindow = ({
                 onTopicClick={(topicCode) =>
                   handleTopicClick(topicCode, liveMessage.topics)
                 }
+                onOpenInspector={handleOpenInspector}
                 isStreaming={true}
               />
             )}
@@ -1615,6 +1739,13 @@ const ChatWindow = ({
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Testing: Media & Source Inspector Drawer */}
+      <MediaInspectorDrawer
+        open={inspectorOpen}
+        onClose={handleCloseInspector}
+        data={inspectorData}
+      />
     </Box>
   );
 };

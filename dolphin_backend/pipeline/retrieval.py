@@ -166,7 +166,11 @@ async def retrieval_node(
                 )
                 if approved_mem and approved_mem.get("preferred_response"):
                     sme_pref = approved_mem["preferred_response"]
-                    logger.info(f"🌟 Retrieved SME-Approved Override for query '{(standalone_query or query)[:50]}'")
+                    is_direct = approved_mem.get("is_direct_override", True)
+                    logger.info(
+                        f"🌟 Retrieved SME-Approved match (direct={is_direct}, score={approved_mem.get('score', 1.0):.2f}) "
+                        f"for query '{(standalone_query or query)[:50]}'"
+                    )
                     sme_chunk = {
                         "content_id": 999999,
                         "topic_code": "SME-OFFICIAL-GUIDANCE",
@@ -176,11 +180,13 @@ async def retrieval_node(
                         "videos": [],
                         "images": [],
                         "pdfs": [],
-                        "_score": 1.0,
+                        "_score": float(approved_mem.get("score", 1.0)),
                         "_rank": 0,
                         "_is_sme_approved": True,
+                        "_is_direct_override": is_direct,
                         "_sme_preferred_response": sme_pref,
                         "_sme_feedback_id": approved_mem.get("feedback_id"),
+                        "_sme_match_type": approved_mem.get("match_type", "exact"),
                     }
                     existing_chunks.insert(0, sme_chunk)
             except Exception as mem_err:
@@ -191,6 +197,7 @@ async def retrieval_node(
         return state
 
     search_query = standalone_query
+    raw_user_query = standalone_query
 
     # -----------------------------
     # CARRIER FRAME DISENTANGLEMENT
@@ -259,9 +266,12 @@ async def retrieval_node(
     # VECTOR SEARCH
     # -----------------------------
     try:
+        # Fetch wider pool (2× K) so the downstream relevance filter and reranking
+        # steps see more candidates. Correct chunk at rank-11 was previously invisible.
         chunks = await vector_store.search_with_embeddings(
             search_query,
-            k=DEFAULT_TOP_K
+            k=DEFAULT_TOP_K * 2,    # fetch 20 internally; trimmed after normalization
+            original_query=raw_user_query,
         )
     except Exception as e:
         logger.error(f"Retrieval failed: {e}")
@@ -296,9 +306,19 @@ async def retrieval_node(
 
         if score is not None:
             try:
-                if not has_bm25 and not has_topic_match and float(score) > 1.45:
+                # Adaptive relevance threshold: long/complex queries produce higher L2 distances
+                # naturally because the query embedding blends many concepts.
+                # Short query (1–3 words):  threshold ≈ 1.45 (same as before, no change)
+                # Medium query (5–6 words): threshold ≈ 1.60
+                # Long query  (8+ words):   threshold = 1.75 (lenient for complex questions)
+                _query_words = len((search_query or "").split())
+                _length_factor = min(1.0, _query_words / 8.0)
+                _effective_threshold = 1.45 + (0.30 * _length_factor)
+
+                if not has_bm25 and not has_topic_match and float(score) > _effective_threshold:
                     logger.info(
-                        f"Dropping low-relevance chunk in retrieval_node: topic='{merged.get('topic_name')}', score={score}"
+                        f"Dropping low-relevance chunk in retrieval_node: topic='{merged.get('topic_name')}', "
+                        f"score={score:.4f} threshold={_effective_threshold:.2f} query_words={_query_words}"
                     )
                     continue
             except (TypeError, ValueError):
@@ -447,7 +467,11 @@ async def retrieval_node(
         )
         if approved_mem and approved_mem.get("preferred_response"):
             sme_pref = approved_mem["preferred_response"]
-            logger.info(f"🌟 Retrieved SME-Approved Override for query '{search_query[:50]}'")
+            is_direct = approved_mem.get("is_direct_override", True)
+            logger.info(
+                f"🌟 Retrieved SME-Approved match (direct={is_direct}, score={approved_mem.get('score', 1.0):.2f}) "
+                f"for query '{search_query[:50]}'"
+            )
             
             sme_chunk = {
                 "content_id": 999999,
@@ -458,11 +482,13 @@ async def retrieval_node(
                 "videos": [],
                 "images": [],
                 "pdfs": [],
-                "_score": 1.0,
+                "_score": float(approved_mem.get("score", 1.0)),
                 "_rank": 0,
                 "_is_sme_approved": True,
+                "_is_direct_override": is_direct,
                 "_sme_preferred_response": sme_pref,
                 "_sme_feedback_id": approved_mem.get("feedback_id"),
+                "_sme_match_type": approved_mem.get("match_type", "exact"),
             }
             final_chunks.insert(0, sme_chunk)
     except Exception as mem_err:

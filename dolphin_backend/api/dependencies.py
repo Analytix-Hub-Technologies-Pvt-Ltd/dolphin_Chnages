@@ -8,7 +8,7 @@ from fastapi import Depends
 from loguru import logger
 
 from models.database import get_pool
-from retrieval.faiss_store import COMPANY_INDEX_PATH, COMPANY_META_PATH, TRANSCRIBE_INDEX_PATH, TRANSCRIBE_META_PATH, FAISSStore
+from retrieval.faiss_store import COMPANY_INDEX_PATH, COMPANY_META_PATH, TRANSCRIBE_INDEX_PATH, TRANSCRIBE_META_PATH, PDF_INDEX_PATH, PDF_META_PATH, FAISSStore
 from services.embedding_service import EmbeddingService
 from services.openai_service import OpenAIService
 
@@ -69,6 +69,16 @@ def get_transcribe_store() -> FAISSStore:
 
     transcribe_store.load()
     return transcribe_store
+
+
+@lru_cache(maxsize=1)
+def get_pdf_store() -> FAISSStore:
+    pdf_store = FAISSStore(
+        index_path=PDF_INDEX_PATH,
+        meta_path=PDF_META_PATH,
+    )
+    pdf_store.load()
+    return pdf_store
 
 
 # ---------------------------------------------------------------------------

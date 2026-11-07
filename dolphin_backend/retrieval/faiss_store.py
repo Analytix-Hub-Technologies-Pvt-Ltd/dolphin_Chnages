@@ -23,6 +23,16 @@ COMPANY_META_PATH = os.path.join(os.path.dirname(__file__),"company_index.meta.j
 
 TRANSCRIBE_INDEX_PATH = os.path.join(os.path.dirname(__file__),"transcribe_index.bin")
 TRANSCRIBE_META_PATH = os.path.join(os.path.dirname(__file__),"transcribe_index.meta.json")
+
+# PDF FAISS Store paths (checks project root and local retrieval directory)
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_root_pdf_idx = os.path.join(_project_root, "pdf_faiss_index.bin")
+_root_pdf_meta = os.path.join(_project_root, "pdf_faiss_index.meta.json")
+_local_pdf_idx = os.path.join(os.path.dirname(__file__), "pdf_faiss_index.bin")
+_local_pdf_meta = os.path.join(os.path.dirname(__file__), "pdf_faiss_index.meta.json")
+
+PDF_INDEX_PATH = _root_pdf_idx if os.path.exists(_root_pdf_idx) else _local_pdf_idx
+PDF_META_PATH = _root_pdf_meta if os.path.exists(_root_pdf_meta) else _local_pdf_meta
 class FAISSStore:
     """
     Thin wrapper around a FAISS index + sidecar metadata.
@@ -206,6 +216,9 @@ class FAISSStore:
             raise ValueError(
                 f"Query vector dim mismatch. Expected {EMBEDDING_DIM}, got {q.shape[1]}"
             )
+
+        if getattr(self.index, "metric_type", None) == faiss.METRIC_INNER_PRODUCT:
+            faiss.normalize_L2(q)
 
         logger.debug("🔍 FAISSStore.search() → running search with k={}", k)
         distances, indices = self.index.search(q, k)  # shape (1, k)

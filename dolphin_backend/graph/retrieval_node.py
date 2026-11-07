@@ -893,14 +893,21 @@ class RetrievalNode(BaseNode):
                             expanded_query = search_query
                     # ========================================
                     
+                    # Fetch a wider pool (2× K) so _rerank_by_topic_match sees more candidates.
+                    # Previously at k=10: correct chunk at rank-11 was never seen by reranker.
+                    # Now at k=20: reranker can pull it to rank-0, then we trim back to top-10.
                     retrieved_chunks = await self.vector_store.search_with_embeddings(
-                        expanded_query, k=DEFAULT_TOP_K
+                        expanded_query,
+                        k=DEFAULT_TOP_K * 2,   # fetch 20, rerank, then trim to 10
+                        original_query=search_query,
                     )
                     
                     # Re-rank results: Boost chunks where topic_name contains query terms
                     # Use original query (before extraction) for better topic name matching
                     # This ensures "Explain cargo sampling" and "Cargo Sampling" both match "CargoSamplingProcedures"
                     retrieved_chunks = self._rerank_by_topic_match(query, retrieved_chunks)
+                    # Trim back to DEFAULT_TOP_K after reranking (LLM receives same chunk count as before)
+                    retrieved_chunks = retrieved_chunks[:DEFAULT_TOP_K]
                     
                     logger.error("🔍 FAISS RAW RESULTS (count={})", len(retrieved_chunks))
                     for r in retrieved_chunks:

@@ -152,6 +152,45 @@ async def chat(
         skip_clarification=payload.skip_clarification,
     )
 
+    # Non-streaming PDF Vector Retrieval (Part 2)
+    try:
+        if not is_simple_social_intent(user_content):
+            raw_pdf_chunks = await chat_service._retrieve_pdf_chunks(user_content, k=4)
+            cleaned_pdf_chunks = []
+            seen_p = set()
+            for chunk in (raw_pdf_chunks or []):
+                d_title = str(chunk.get("source_pdf") or chunk.get("title") or chunk.get("topic_name") or "Document").strip()
+                p_url = str(chunk.get("pdf_url") or chunk.get("link") or "").strip()
+                p_num = chunk.get("page") or 1
+                k_key = f"{d_title}_{p_num}"
+                if k_key in seen_p:
+                    continue
+                seen_p.add(k_key)
+                score = float(chunk.get("_score") or chunk.get("score") or 0.0)
+                cleaned_pdf_chunks.append({
+                    "document": d_title,
+                    "title": d_title,
+                    "page": p_num,
+                    "link": p_url,
+                    "url": p_url,
+                    "topic_code": str(chunk.get("topic_code") or ""),
+                    "topic_name": str(chunk.get("topic_name") or ""),
+                    "course_code": str(chunk.get("course_code") or ""),
+                    "course_name": str(chunk.get("course_name") or ""),
+                    "chunk_type": str(chunk.get("chunk_type") or "text"),
+                    "score": round(score, 4),
+                    "match_pct": round(max(0.0, min(100.0, score * 100)), 1) if score <= 1.0 else round(score, 1),
+                    "text_preview": str(chunk.get("raw_text") or chunk.get("text") or "")[:350].strip(),
+                    "images": list(chunk.get("image_refs") or [])[:4]
+                })
+                if len(cleaned_pdf_chunks) >= 4:
+                    break
+            node_response.matched_pdf_chunks = cleaned_pdf_chunks
+            if updated_messages and isinstance(updated_messages[-1], dict) and updated_messages[-1].get("role") == "assistant":
+                updated_messages[-1]["matched_pdf_chunks"] = cleaned_pdf_chunks
+    except Exception as e:
+        logger.debug(f"Non-fatal PDF vector retrieval error: {e}")
+
     logger.info(f"Updated messages count: {len(updated_messages)}")
 
     t_save_start = time.perf_counter()
@@ -366,8 +405,10 @@ async def chat1(
 
             t_stream_start = time.perf_counter()
             transcript_dur = 0.0
+            pdf_dur = 0.0
             is_social_query = bool(is_simple_social_intent(user_content))
             transcript_task: Optional[asyncio.Task] = None
+            pdf_task: Optional[asyncio.Task] = None
 
             if not is_social_query:
                 async def transcript_search():
@@ -391,6 +432,25 @@ async def chat1(
 
                 transcript_task = asyncio.create_task(
                     transcript_search()
+                )
+
+                async def pdf_vector_search():
+                    nonlocal pdf_dur
+                    try:
+                        logger.info("Preparing PDF vector search...")
+                        t_pdf = time.perf_counter()
+                        chunks = await chat_service._retrieve_pdf_chunks(user_content, k=4)
+                        pdf_dur = time.perf_counter() - t_pdf
+                        logger.info(
+                            f"[Timer] PDF Vector Search returned {len(chunks)} chunks in {pdf_dur:.2f}s"
+                        )
+                        return chunks
+                    except Exception:
+                        logger.exception("PDF vector search failed")
+                        return []
+
+                pdf_task = asyncio.create_task(
+                    pdf_vector_search()
                 )
             else:
                 logger.info("⚡ [Router] Skipped transcript video search for social query")
@@ -535,10 +595,57 @@ async def chat1(
                 media_pdfs = []
                 media_topic_codes = []
             else:
-                media_videos = media.get("videos", []) or getattr(node_response, "videos", []) or []
-                media_images = media.get("images", []) or getattr(node_response, "images", []) or []
-                media_pdfs = media.get("pdfs", []) or getattr(node_response, "pdfs", []) or []
-                media_topic_codes = media.get("topic_codes", [])
+                # The final filtered media payload is authoritative.
+                # If scope filtering returns an empty list, keep it empty and do NOT fall back to node_response.
+                media_videos = media["videos"] if (isinstance(media, dict) and "videos" in media) else (getattr(node_response, "videos", None) or [])
+                media_images = media["images"] if (isinstance(media, dict) and "images" in media) else (getattr(node_response, "images", None) or [])
+                media_pdfs = media["pdfs"] if (isinstance(media, dict) and "pdfs" in media) else (getattr(node_response, "pdfs", None) or [])
+                media_topic_codes = media.get("topic_codes", []) if isinstance(media, dict) else (getattr(node_response, "topic_codes", None) or [])
+
+            extracted_topics = []
+            seen_t_keys = set()
+            for s in (sections or []):
+                tc = str(s.get("topic_code") or "").strip()
+                tn = str(s.get("topic_name") or "").strip()
+                c_code = str(s.get("course_code") or s.get("CourseCode") or "").strip()
+                c_name = str(s.get("course_name") or s.get("CourseName") or "").strip()
+                if tc or tn:
+                    key = tc or tn
+                    if key not in seen_t_keys:
+                        seen_t_keys.add(key)
+                        extracted_topics.append({
+                            "code": tc,
+                            "name": tn,
+                            "course_code": c_code,
+                            "course_name": c_name,
+                        })
+
+            for v in (media_videos or []):
+                tc = str(v.get("topic_code") or "").strip()
+                tn = str(v.get("topic_name") or "").strip()
+                c_code = str(v.get("course_code") or v.get("CourseCode") or "").strip()
+                c_name = str(v.get("course_name") or v.get("CourseName") or "").strip()
+                if tc or tn:
+                    key = tc or tn
+                    if key not in seen_t_keys:
+                        seen_t_keys.add(key)
+                        extracted_topics.append({
+                            "code": tc,
+                            "name": tn,
+                            "course_code": c_code,
+                            "course_name": c_name,
+                        })
+
+            if not extracted_topics and media_topic_codes:
+                for tc in media_topic_codes:
+                    if tc and str(tc) not in seen_t_keys:
+                        seen_t_keys.add(str(tc))
+                        extracted_topics.append({
+                            "code": str(tc),
+                            "name": f"Topic {tc}",
+                            "course_code": "",
+                            "course_name": "",
+                        })
 
             if not is_stream_out_of_scope and not is_resp_social and not suppress_extras:
                 media_payload = {
@@ -546,12 +653,16 @@ async def chat1(
                     "videos": media_videos[:5],
                     "images": media_images[:5],
                     "pdfs": media_pdfs[:5],
-                    "topic_codes": media_topic_codes
+                    "topic_codes": media_topic_codes,
+                    "topics": extracted_topics,
                 }
 
                 yield (
                     f"data: {json.dumps(media_payload)}\n\n"
                 )
+
+                for top in extracted_topics:
+                    yield f"data: {json.dumps({'type': 'source_topic', 'topic_code': top['code'], 'topic_name': top['name']})}\n\n"
 
             company_answer = None if (is_stream_out_of_scope or is_resp_social or suppress_extras) else media.get("company_answer")
 
@@ -576,6 +687,14 @@ async def chat1(
                 transcript_chunks = []
             else:
                 transcript_chunks = await transcript_task
+
+            stream_scope = (
+                (media.get("question_scope") if isinstance(media, dict) else None)
+                or (node_response.metadata or {}).get("question_scope")
+                or "GENERAL"
+            )
+            from services.question_scope import extract_specific_subject_terms, SCOPE_SPECIFIC
+            specific_terms = extract_specific_subject_terms(user_content) if stream_scope == SCOPE_SPECIFIC else set()
 
             unique_chunks = []
             seen_videos = set()
@@ -602,22 +721,35 @@ async def chat1(
                 if has_conflicting_acronym(user_content, title_lower):
                     continue
 
-                # Filter out generic intro videos if query didn't ask for intro
+                # Filter out generic intro videos if query didn't ask for intro or if query is specific
                 is_intro = any(w in title_lower for w in ["introduction", "intro to", "overview", "course overview", "welcome", "module overview"])
-                if is_intro and not query_asked_intro:
-                    has_match = any(qw in title_lower for qw in effective_terms) if effective_terms else False
-                    if not has_match:
-                        continue
+                if is_intro:
+                    if stream_scope == SCOPE_SPECIFIC or not query_asked_intro:
+                        has_match = any(qw in title_lower for qw in effective_terms) if (effective_terms and stream_scope != SCOPE_SPECIFIC) else False
+                        if not has_match:
+                            continue
 
-                # Strict relevance check for transcript videos:
-                # If effective terms exist, ensure the video title or content matches at least one term
-                if effective_terms:
+                # Specific scope relevance check:
+                if stream_scope == SCOPE_SPECIFIC and specific_terms:
+                    chunk_text = f"{title_lower} {str(chunk.get('content') or '').lower()}"
+                    has_spec_match = any(
+                        re.search(r'\b' + re.escape(st) + r'\b', chunk_text)
+                        for st in specific_terms
+                    )
+                    if not has_spec_match:
+                        continue
+                elif effective_terms:
+                    # General / fallback relevance check:
                     chunk_text = f"{title_lower} {str(chunk.get('content') or '').lower()}"
                     has_term_match = any(qw in chunk_text for qw in effective_terms)
                     if not has_term_match:
                         continue
 
                 seen_videos.add(video_id)
+                if isinstance(chunk, dict):
+                    chunk["source_type"] = "transcript_vector"
+                    chunk["topic_code"] = str(chunk.get("topic_code") or "")
+                    chunk["course_code"] = str(chunk.get("course_code") or "")
                 unique_chunks.append(chunk)
                 if len(unique_chunks) >= 5:
                     break
@@ -634,7 +766,74 @@ async def chat1(
                     + "\n\n"
                 )
 
+            # -----------------------------
+            # PDF VECTOR RESULT (PART 2)
+            # -----------------------------
+            if is_stream_out_of_scope or is_resp_social or suppress_extras or is_course_missing or pdf_task is None:
+                if pdf_task is not None and not pdf_task.done():
+                    pdf_task.cancel()
+                raw_pdf_chunks = []
+            else:
+                raw_pdf_chunks = await pdf_task
+
+            unique_pdf_chunks = []
+            seen_pdf_keys = set()
+            for chunk in (raw_pdf_chunks or []):
+                doc_title = str(chunk.get('source_pdf') or chunk.get('title') or chunk.get('topic_name') or 'Document').strip()
+                pdf_url = str(chunk.get('pdf_url') or chunk.get('link') or '').strip()
+                page = chunk.get('page') or 1
+                score = float(chunk.get('_score') or chunk.get('score') or 0.0)
+                dedup_key = f"{doc_title}_{page}"
+                if dedup_key in seen_pdf_keys:
+                    continue
+                seen_pdf_keys.add(dedup_key)
+
+                cleaned_chunk = {
+                    'document': doc_title,
+                    'title': doc_title,
+                    'page': page,
+                    'link': pdf_url,
+                    'url': pdf_url,
+                    'topic_code': str(chunk.get('topic_code') or ''),
+                    'topic_name': str(chunk.get('topic_name') or ''),
+                    'course_code': str(chunk.get('course_code') or ''),
+                    'course_name': str(chunk.get('course_name') or ''),
+                    'chunk_type': str(chunk.get('chunk_type') or 'text'),
+                    'score': round(score, 4),
+                    'match_pct': round(max(0.0, min(100.0, score * 100)), 1) if score <= 1.0 else round(score, 1),
+                    'text_preview': str(chunk.get('raw_text') or chunk.get('text') or '')[:350].strip(),
+                    'images': list(chunk.get('image_refs') or [])[:4]
+                }
+                unique_pdf_chunks.append(cleaned_chunk)
+                if len(unique_pdf_chunks) >= 4:
+                    break
+
+            if not is_stream_out_of_scope and not is_resp_social and not suppress_extras and not is_course_missing and unique_pdf_chunks:
+                yield (
+                    'data: '
+                    + json.dumps(
+                        {
+                            'type': 'pdf_result',
+                            'chunks': unique_pdf_chunks,
+                        }
+                    )
+                    + '\n\n'
+                )
+
                         
+            # Attach rich media, transcripts, and topics to saved session message
+            if updated_messages and isinstance(updated_messages[-1], dict) and updated_messages[-1].get("role") == "assistant":
+                if unique_chunks:
+                    updated_messages[-1]["transcripts"] = unique_chunks
+                if unique_pdf_chunks:
+                    updated_messages[-1]["matched_pdf_chunks"] = unique_pdf_chunks
+                if extracted_topics:
+                    updated_messages[-1]["topics"] = extracted_topics
+                if media_topic_codes:
+                    updated_messages[-1]["topic_codes"] = media_topic_codes
+                if media_videos:
+                    updated_messages[-1]["videos"] = media_videos[:5]
+
             # -----------------------------
             # SAVE (Concurrent Redis + PostgreSQL)
             # -----------------------------

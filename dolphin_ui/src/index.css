@@ -103,3 +103,38 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+/* Mathematical Variable and Symbol Typography (Upright Maritime Style, Zero Lean) */
+var, .math-sym, em > var, em > sub, var sub, sub, sup {
+  font-style: normal !important;
+}
+
+var, .math-sym {
+  font-family: "Cambria Math", "STIX Two Math", "Segoe UI Symbol", "Times New Roman", serif;
+  font-style: normal !important; /* Completely straight, upright mathematical typography */
+  font-size: 1.15em;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: normal;
+}
+
+sub {
+  font-size: 0.78em;
+  font-weight: 500;
+  line-height: 0;
+  position: relative;
+  vertical-align: baseline;
+  bottom: -0.30em; /* Distinct subscript drop (~4px), visibly lower than the main letter */
+  font-style: normal !important;
+}
+
+sup {
+  font-size: 0.78em;
+  font-weight: 500;
+  line-height: 0;
+  position: relative;
+  vertical-align: baseline;
+  top: -0.40em;
+  font-style: normal !important;
+}
+

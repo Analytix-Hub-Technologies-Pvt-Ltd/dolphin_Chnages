@@ -160,10 +160,11 @@ async def login(
             dolphin_result = None
             user = None
 
-            # ⚡ LOCAL/DEV MODE: If external CMS auth is disabled via DISABLE_EXTERNAL_AUTH
-            if settings.disable_external_auth:
+            # ⚡ LOCAL/DEV MODE ONLY: If external CMS auth is disabled via DISABLE_EXTERNAL_AUTH
+            # In production, external auth is ALWAYS enforced and cannot be bypassed.
+            if settings.app_env != "production" and settings.disable_external_auth:
                 logger.info(
-                    f"[LOCAL AUTH] External CMS auth disabled via DISABLE_EXTERNAL_AUTH=true. Authenticating locally for: {clean_email}"
+                    f"[LOCAL AUTH] External CMS auth disabled via DISABLE_EXTERNAL_AUTH=true in {settings.app_env} mode. Authenticating locally for: {clean_email}"
                 )
                 existing_user = await auth_service.get_user_by_useremail(clean_email)
                 if existing_user:
@@ -276,7 +277,7 @@ async def login(
         # -------------------------------------------------
         company_courses = []
         company_id_str = str(user.company_id) if user.company_id else None
-        if company_id_str and not settings.disable_external_auth:
+        if company_id_str and (settings.app_env == "production" or not settings.disable_external_auth):
             try:
                 cc_response = requests.get(
                     COMPANY_COURSES_API_URL,
@@ -284,7 +285,7 @@ async def login(
                         "CompanyId": company_id_str,
                         "SecurityKey": COMPANY_COURSES_SECURITY_KEY
                     },
-                    timeout=2.0
+                    timeout=5.0
                 )
                 if cc_response.status_code == 200:
                     cc_data = cc_response.json()
@@ -373,7 +374,7 @@ async def sync_user_courses(
     user_id: str,
     pool: Pool = Depends(get_db_pool)
 ):
-    if settings.disable_external_auth:
+    if settings.app_env != "production" and settings.disable_external_auth:
         return {"message": "External course sync disabled in local mode", "courses": []}
 
     async with pool.acquire() as conn:

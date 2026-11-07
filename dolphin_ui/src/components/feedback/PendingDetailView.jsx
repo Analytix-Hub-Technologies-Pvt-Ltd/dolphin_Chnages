@@ -18,6 +18,7 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Image as ImageIcon,
 } from "lucide-react";
 
 import { sanitizeMarkdown } from "../chat/ChatWindow";
@@ -29,6 +30,12 @@ import {
   searchReferenceTopics,
   formatErrorMessage,
 } from "../../api/feedbackApi";
+import {
+  handleSmartPaste,
+  readImageAsBase64,
+  insertAtCursor,
+  wrapSelectionOrInsert,
+} from "../../utils/markdownPasteHelper";
 
 const SUGGESTED_QUICK_TOPICS = [
   "Enclosed Space Entry Safety & Gas Testing",
@@ -70,6 +77,27 @@ const PendingDetailView = ({
   const [lastGeneratedTopic, setLastGeneratedTopic] = useState("");
 
   const dropdownRef = useRef(null);
+  const preferredTextareaRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const base64 = await readImageAsBase64(file);
+      const name = file.name ? file.name.replace(/\.[^/.]+$/, "") : "Figure Diagram";
+      insertAtCursor(
+        preferredTextareaRef.current,
+        `\n\n![${name}](${base64})\n\n`,
+        preferredResponse,
+        setPreferredResponse
+      );
+    } catch (err) {
+      console.error("Failed to read image file:", err);
+    } finally {
+      e.target.value = "";
+    }
+  };
 
   useEffect(() => {
     if (item) {
@@ -672,70 +700,161 @@ const PendingDetailView = ({
                 )}
               </div>
 
-              {/* Tab switch */}
-              <div style={{ display: "flex", alignItems: "center", backgroundColor: "var(--fb-bg-default)", borderRadius: 10, padding: 3 }}>
+              {/* Toolbar Actions: Insert Image & Tab switch */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={handleImageUpload}
+                />
                 <button
                   type="button"
-                  onClick={() => setEditorTab(0)}
+                  onClick={() => fileInputRef.current?.click()}
                   style={{
-                    padding: "4px 12px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "4px 10px",
                     borderRadius: 8,
                     fontSize: 11,
-                    fontWeight: 700,
-                    border: "none",
+                    fontWeight: 600,
+                    border: "1px solid var(--fb-border)",
+                    backgroundColor: "var(--fb-bg-default)",
+                    color: "var(--fb-text-primary)",
                     cursor: "pointer",
-                    backgroundColor: editorTab === 0 ? "var(--fb-bg-paper)" : "transparent",
-                    color: editorTab === 0 ? "var(--fb-primary)" : "var(--fb-text-secondary)",
-                    boxShadow: editorTab === 0 ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
-                    transition: "all 0.2s ease",
+                    transition: "all 0.15s ease",
                   }}
+                  title="Upload an image or diagram to insert at cursor position"
                 >
-                  Edit Response
+                  <ImageIcon style={{ width: 13, height: 13, color: "var(--fb-primary)" }} />
+                  <span>Insert Diagram</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setEditorTab(1)}
-                  style={{
-                    padding: "4px 12px",
-                    borderRadius: 8,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    border: "none",
-                    cursor: "pointer",
-                    backgroundColor: editorTab === 1 ? "var(--fb-bg-paper)" : "transparent",
-                    color: editorTab === 1 ? "var(--fb-primary)" : "var(--fb-text-secondary)",
-                    boxShadow: editorTab === 1 ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
-                    transition: "all 0.2s ease",
-                  }}
-                >
-                  Preview Markdown
-                </button>
+
+                <div style={{ display: "flex", alignItems: "center", backgroundColor: "var(--fb-bg-default)", borderRadius: 10, padding: 3 }}>
+                  <button
+                    type="button"
+                    onClick={() => setEditorTab(0)}
+                    style={{
+                      padding: "4px 12px",
+                      borderRadius: 8,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      border: "none",
+                      cursor: "pointer",
+                      backgroundColor: editorTab === 0 ? "var(--fb-bg-paper)" : "transparent",
+                      color: editorTab === 0 ? "var(--fb-primary)" : "var(--fb-text-secondary)",
+                      boxShadow: editorTab === 0 ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
+                      transition: "all 0.2s ease",
+                    }}
+                  >
+                    Edit Response
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditorTab(1)}
+                    style={{
+                      padding: "4px 12px",
+                      borderRadius: 8,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      border: "none",
+                      cursor: "pointer",
+                      backgroundColor: editorTab === 1 ? "var(--fb-bg-paper)" : "transparent",
+                      color: editorTab === 1 ? "var(--fb-primary)" : "var(--fb-text-secondary)",
+                      boxShadow: editorTab === 1 ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
+                      transition: "all 0.2s ease",
+                    }}
+                  >
+                    Preview Markdown
+                  </button>
+                </div>
               </div>
             </div>
 
-            <p style={{ fontSize: 12, color: "var(--fb-text-secondary)", margin: "0 0 12px 0", lineHeight: 1.4 }}>
+            <p style={{ fontSize: 12, color: "var(--fb-text-secondary)", margin: "0 0 8px 0", lineHeight: 1.4 }}>
               Review or adjust the authoritative response below. Once approved, this response is saved to vector memory to instantly correct future queries, and added to the DPO dataset for background training.
             </p>
 
+            <div style={{ fontSize: 11, color: "var(--fb-primary)", backgroundColor: "rgba(16, 107, 163, 0.08)", border: "1px solid rgba(16, 107, 163, 0.2)", padding: "6px 12px", borderRadius: 8, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
+              <span>💡 <strong>Smart Paste enabled:</strong> Paste Word/PDF text directly to keep bold (<code>**</code>), headings (<code>###</code>), and math formulas (<code>ϕ</code>), or paste diagram screenshots (<code>Ctrl+V</code>) directly!</span>
+            </div>
+
+            {editorTab === 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 5, marginBottom: 10, padding: "6px 10px", backgroundColor: "var(--fb-bg-default)", border: "1px solid var(--fb-border)", borderRadius: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "var(--fb-text-secondary)", marginRight: 3 }}>Quick Symbols:</span>
+                {[
+                  { label: "ϕ (Phi)", val: "ϕ", isTag: false },
+                  { label: "ϕf (Flood)", val: "ϕ<sub>f</sub>", isTag: false, tooltip: "Angle of down-flooding (ϕf)" },
+                  { label: "ϕ₀", val: "ϕ<sub>0</sub>", isTag: false, tooltip: "Angle of equilibrium (ϕ0)" },
+                  { label: "ϕ₁", val: "ϕ<sub>1</sub>", isTag: false, tooltip: "Angle of roll to windward (ϕ1)" },
+                  { label: "lw₁", val: "l<sub>w1</sub>", isTag: false, tooltip: "Steady wind heeling lever (lw1)" },
+                  { label: "lw₂", val: "l<sub>w2</sub>", isTag: false, tooltip: "Gust wind heeling lever (lw2)" },
+                  { label: "GM₀", val: "GM<sub>0</sub>", isTag: false, tooltip: "Initial metacentric height (GM0)" },
+                  { label: "θ (Theta)", val: "θ", isTag: false },
+                  { label: "Δ (Delta)", val: "Δ", isTag: false },
+                  { label: "°", val: "°", isTag: false, tooltip: "Degree symbol" },
+                  { label: "±", val: "±", isTag: false },
+                  { label: "≤", val: "≤", isTag: false },
+                  { label: "≥", val: "≥", isTag: false },
+                  { label: "x₂ Sub", prefix: "<sub>", suffix: "</sub>", isTag: true, tooltip: "Wrap selection or insert subscript (x₂)" },
+                  { label: "x² Super", prefix: "<sup>", suffix: "</sup>", isTag: true, tooltip: "Wrap selection or insert superscript (x²)" },
+                ].map((sym, sIdx) => (
+                  <button
+                    key={sIdx}
+                    type="button"
+                    title={sym.tooltip || `Insert ${sym.label}`}
+                    onClick={() => {
+                      if (sym.isTag) {
+                        wrapSelectionOrInsert(preferredTextareaRef.current, sym.prefix, sym.suffix, preferredResponse, setPreferredResponse);
+                      } else {
+                        insertAtCursor(preferredTextareaRef.current, sym.val, preferredResponse, setPreferredResponse);
+                      }
+                    }}
+                    style={{
+                      padding: "3px 8px",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      fontFamily: "'Cambria Math', 'Times New Roman', serif, sans-serif",
+                      fontStyle: "normal",
+                      borderRadius: 6,
+                      border: "1px solid var(--fb-border)",
+                      backgroundColor: "var(--fb-bg-paper)",
+                      color: "var(--fb-text-primary)",
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--fb-primary)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--fb-border)")}
+                  >
+                    {sym.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {editorTab === 0 ? (
               <textarea
+                ref={preferredTextareaRef}
                 rows={14}
-                placeholder="Enter or refine the preferred authoritative response..."
+                placeholder="Enter or refine the preferred authoritative response... (Tip: Paste diagrams, bold headings, and formulas directly)"
                 value={preferredResponse}
                 onChange={(e) => setPreferredResponse(e.target.value)}
+                onPaste={(e) => handleSmartPaste(e, preferredResponse, setPreferredResponse, preferredTextareaRef)}
                 disabled={submitting || regenerating}
                 style={{
                   width: "100%",
                   flex: 1,
                   minHeight: 280,
                   padding: 14,
-                  fontSize: 12,
+                  fontSize: 13,
                   borderRadius: 12,
                   backgroundColor: "var(--fb-bg-default)",
                   border: "1px solid #cbd5e1",
                   color: "var(--fb-text-primary)",
-                  fontFamily: "monospace",
-                  lineHeight: 1.5,
+                  fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+                  lineHeight: 1.6,
                   outline: "none",
                   boxSizing: "border-box",
                   marginBottom: 14,

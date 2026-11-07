@@ -22,6 +22,7 @@ class VideoSuggestion(BaseModel):
 #     videos: List[dict] = Field(default_factory=list)
 #     images: List[dict] = Field(default_factory=list)
 #     pdfs: List[dict] = Field(default_factory=list)
+    matched_pdf_chunks: List[dict] = Field(default_factory=list)
 #     question_suggestions: List[str]
 #     timestamp: datetime = Field(default_factory=datetime.utcnow)
 #     metadata: dict[str, Any]

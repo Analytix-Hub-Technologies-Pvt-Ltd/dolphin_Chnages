@@ -7,8 +7,9 @@ const SecurePdfViewer = ({ src }) => {
 
   // Resolve full valid URL and append parameters to hide toolbar, download button, and navpanes
   const resolved = resolveImageUrl(src) || src || "";
-  const [baseAndQuery] = resolved.split("#");
-  const pdfUrl = `${baseAndQuery}#toolbar=0&navpanes=0&scrollbar=0`;
+  const [baseAndQuery, hash] = resolved.split("#");
+  const pageAnchor = hash && hash.includes("page=") ? `#${hash}&` : "#";
+  const pdfUrl = `${baseAndQuery}${pageAnchor}toolbar=0&navpanes=0&scrollbar=0`;
 
   return (
     <Box

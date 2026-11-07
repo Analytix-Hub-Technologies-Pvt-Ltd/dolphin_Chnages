@@ -56,7 +56,7 @@ export const sendMessage = async (
   sessionId,
   messageText,
   signal,
-  { onContentToken, onSuggestions, onMedia, onTopic, onError, onDone, onCompanyContent, onTranscriptResult, onCheckLicCourses, onStatus } = {},
+  { onContentToken, onSuggestions, onMedia, onTopic, onError, onDone, onCompanyContent, onTranscriptResult, onCheckLicCourses, onStatus, onPdfResult } = {},
 ) => {
   const userId = localStorage.getItem("user_id");
   const role = localStorage.getItem("role");
@@ -191,6 +191,10 @@ export const sendMessage = async (
 
         case "transcript_result":
           onTranscriptResult?.(event.videos ?? event.chunks ?? []);
+          break;
+
+        case "pdf_result":
+          onPdfResult?.(event.chunks ?? []);
           break;
 
         // Errors

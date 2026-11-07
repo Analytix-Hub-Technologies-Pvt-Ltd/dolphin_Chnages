@@ -1,70 +1,92 @@
-# Backed up Bitbucket git histories
-**/.git_bitbucket_backup/
-.git_bitbucket_backup/
-
-# Environment and sensitive configuration
+# Environments & Secrets
 .env
-.env.*
-!.env.example
 *.env
-**/.env
-**/.env.*
-!**/.env.example
+backend/.env
+dolphin_ui/.env
 
-# Python virtual environment
+# Python Virtual Environments & Packages
 venv/
 .venv/
-**/venv/
-**/.venv/
+backend/venv/
+backend/.venv/
 env/
-**/env/
-
-# Python cache and bytecode
-__pycache__/
-**/__pycache__/
+.env/
+ENV/
 *.py[cod]
 *$py.class
-*.pytest_cache/
-**/.pytest_cache/
+__pycache__/
+*/__pycache__/
+backend/**/__pycache__/
+
+# Node / Frontend Artifacts
+node_modules/
+dolphin_ui/node_modules/
+build/
+dolphin_ui/build/
+dist/
+dolphin_ui/dist/
+.npm
+*.log
+
+# Caches & Test Artefacts
+.pytest_cache/
+backend/.pytest_cache/
 .coverage
 htmlcov/
 
-# Node dependencies and build artifacts
-node_modules/
-**/node_modules/
-build/
-**/build/
-dist/
-**/dist/
-.pnp
-.pnp.js
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# Large Archives & Binaries
+*.zip
+*.tar
+*.gz
+*.rar
+*.7z
+backend (2).zip
+backend.zip
+dolphin_ui.zip
 
-# Large ML / vector indices and binary cache
+# Storage & Large Media
 storage/
-**/storage/
-**/*.bin
-**/*.pkl
-retrieval/company_index.meta.json
-retrieval/faiss_index.meta.json
-retrieval/*.bin
-retrieval/*.pkl
-data/checkpoints/
+backend/storage/
+*.mp4
+*.avi
+*.mov
+*.wmv
 
-# OS and IDE files
+# OS & IDE Artefacts
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
-*.swp
 
-# Test files and test suites
-tests/
-**/tests/
-test_*.py
-*_test.py
-*.test.js
-*.test.jsx
-setupTests.js
+# Scratch & Temporary Scripts
+backend/scratch/
+scratch/
+backend/meeting_note.txt
+meeting_note.txt
+dolphin_backend/meeting_note.txt
+backend/retrieval/*.bak
+backend/retrieval/faiss_sync_history/
+backend/retrieval/faiss_sync_report.json
+faiss_sync_report.json
+dolphin_backend/retrieval/faiss_sync_report.json
+faiss_sync/
+mariner_ingestion/
+
+# PDF FAISS & Vector Index Binaries & Large Metadata
+*.bin
+*.meta.json
+*.pkl
+backend/retrieval/*.bin
+backend/retrieval/*.meta.json
+backend/retrieval/*.pkl
+dolphin_backend/retrieval/*.bin
+dolphin_backend/retrieval/*.meta.json
+dolphin_backend/retrieval/*.pkl
+*.jsonl
+indexing_state.json
+processing_state.json
+pdf_faiss_indexer/
+pdf_processor/
+pdf_processor_backup/
+pdf_processor_client/
+backend/check_sire_pdf.py
