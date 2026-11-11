@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Annotated
 
 from pydantic import Field, BeforeValidator, AnyUrl, computed_field
@@ -95,7 +96,7 @@ class Settings(BaseSettings):
     ui_directory: str = Field("ui", alias="UI_DIRECTORY")
 
     class Config:
-        env_file = ".env"
+        env_file = (Path(__file__).resolve().parent / ".env", ".env")
         env_file_encoding = "utf-8"
         case_sensitive = False
 

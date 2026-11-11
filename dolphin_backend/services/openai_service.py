@@ -277,40 +277,43 @@ class OpenAIService:
             # Truncate very long texts (OpenAI has limits)
             if len(text) > 8000:
                 text = text[:8000]
-                logger.warning(f"⚠️ Text[{i}]: Input truncated to 8000 characters")
+                logger.debug(f"ℹ️ Text[{i}]: Input truncated to 8000 characters for token limit")
             
             cleaned_texts.append(text)
         
         logger.debug(f"🔍 Batch embedding {len(cleaned_texts)} texts")
         
-        try:
-            # OpenAI API supports batch embedding with list input
-            response = await self.client.embeddings.create(
-                model=self.embedding_model,
-                input=cleaned_texts,
-            )
-            
-            # Extract embeddings in order
-            embeddings = []
-            for i, data in enumerate(response.data):
-                embedding = data.embedding
+        for attempt in range(1, 4):
+            try:
+                # OpenAI API supports batch embedding with list input
+                response = await self.client.embeddings.create(
+                    model=self.embedding_model,
+                    input=cleaned_texts,
+                )
                 
-                # Validate and fix dimensions if needed
-                if len(embedding) != self.embedding_dim:
-                    logger.warning(
-                        f"⚠️ Embedding[{i}] dimension mismatch. Expected {self.embedding_dim}, got {len(embedding)}"
-                    )
-                    embedding = (embedding + [0.0] * self.embedding_dim)[: self.embedding_dim]
+                # Extract embeddings in order
+                embeddings = []
+                for i, data in enumerate(response.data):
+                    embedding = data.embedding
+                    
+                    # Validate and fix dimensions if needed
+                    if len(embedding) != self.embedding_dim:
+                        logger.warning(
+                            f"⚠️ Embedding[{i}] dimension mismatch. Expected {self.embedding_dim}, got {len(embedding)}"
+                        )
+                        embedding = (embedding + [0.0] * self.embedding_dim)[: self.embedding_dim]
+                    
+                    embeddings.append(embedding)
                 
-                embeddings.append(embedding)
-            
-            logger.debug(f"✅ Batch embedding completed: {len(embeddings)} vectors generated")
-            return embeddings
-            
-        except Exception as e:
-            logger.error(f"❌ OpenAI batch embedding error: {e}")
-            # Return zero vectors as fallback
-            return [[0.0] * self.embedding_dim for _ in range(len(cleaned_texts))]
+                logger.debug(f"✅ Batch embedding completed: {len(embeddings)} vectors generated")
+                return embeddings
+                
+            except Exception as e:
+                logger.warning(f"⚠️ OpenAI batch embedding attempt {attempt}/3 failed: {e}")
+                if attempt == 3:
+                    logger.error(f"❌ OpenAI batch embedding failed permanently after 3 retries: {e}")
+                    raise
+                await asyncio.sleep(2.0 * attempt)
 
     async def _log_llm_call(self, prompt: str, response: str, category: str) -> None:
         """Persist LLM interactions for auditing and analytics."""

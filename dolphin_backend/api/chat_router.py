@@ -155,14 +155,19 @@ async def chat(
     # Non-streaming PDF Vector Retrieval (Part 2)
     try:
         if not is_simple_social_intent(user_content):
-            raw_pdf_chunks = await chat_service._retrieve_pdf_chunks(user_content, k=4)
+            # Reuse PDF context chunks from run_chat extras (Call #1) to ensure the UI
+            # displays the exact documents used during answer generation without duplicate searching.
+            raw_pdf_chunks = (extras or {}).get("pdf_context_chunks")
+            if raw_pdf_chunks is None:
+                raw_pdf_chunks = await chat_service._retrieve_pdf_chunks(user_content, k=4)
             cleaned_pdf_chunks = []
             seen_p = set()
             for chunk in (raw_pdf_chunks or []):
                 d_title = str(chunk.get("source_pdf") or chunk.get("title") or chunk.get("topic_name") or "Document").strip()
                 p_url = str(chunk.get("pdf_url") or chunk.get("link") or "").strip()
                 p_num = chunk.get("page") or 1
-                k_key = f"{d_title}_{p_num}"
+                # Document-level deduplication: display each unique PDF document once
+                k_key = d_title.lower()
                 if k_key in seen_p:
                     continue
                 seen_p.add(k_key)
@@ -190,6 +195,14 @@ async def chat(
                 updated_messages[-1]["matched_pdf_chunks"] = cleaned_pdf_chunks
     except Exception as e:
         logger.debug(f"Non-fatal PDF vector retrieval error: {e}")
+
+    # Non-streaming Transcript Chunks attachment
+    try:
+        raw_tr_chunks = (extras or {}).get("transcript_chunks")
+        if raw_tr_chunks and updated_messages and isinstance(updated_messages[-1], dict) and updated_messages[-1].get("role") == "assistant":
+            updated_messages[-1]["transcripts"] = raw_tr_chunks
+    except Exception as tr_err:
+        logger.debug(f"Non-fatal transcript attachment error: {tr_err}")
 
     logger.info(f"Updated messages count: {len(updated_messages)}")
 
@@ -681,7 +694,12 @@ async def chat1(
             # -----------------------------
             # TRANSCRIPT RESULT
             # -----------------------------
-            if is_stream_out_of_scope or is_resp_social or suppress_extras or transcript_task is None:
+            cached_transcripts = (media or {}).get("transcript_chunks") if isinstance(media, dict) else None
+            if cached_transcripts is not None:
+                if transcript_task is not None and not transcript_task.done():
+                    transcript_task.cancel()
+                transcript_chunks = cached_transcripts
+            elif is_stream_out_of_scope or is_resp_social or suppress_extras or transcript_task is None:
                 if transcript_task is not None and not transcript_task.done():
                     transcript_task.cancel()
                 transcript_chunks = []
@@ -769,12 +787,21 @@ async def chat1(
             # -----------------------------
             # PDF VECTOR RESULT (PART 2)
             # -----------------------------
-            if is_stream_out_of_scope or is_resp_social or suppress_extras or is_course_missing or pdf_task is None:
+            if is_stream_out_of_scope or is_resp_social or suppress_extras or is_course_missing:
                 if pdf_task is not None and not pdf_task.done():
                     pdf_task.cancel()
                 raw_pdf_chunks = []
             else:
-                raw_pdf_chunks = await pdf_task
+                # Prefer PDF chunks returned from chat_task (Call #1) that grounded the LLM generation
+                cached_pdf = (media or {}).get("pdf_context_chunks")
+                if cached_pdf is not None:
+                    if pdf_task is not None and not pdf_task.done():
+                        pdf_task.cancel()
+                    raw_pdf_chunks = cached_pdf
+                elif pdf_task is not None:
+                    raw_pdf_chunks = await pdf_task
+                else:
+                    raw_pdf_chunks = []
 
             unique_pdf_chunks = []
             seen_pdf_keys = set()
@@ -783,7 +810,8 @@ async def chat1(
                 pdf_url = str(chunk.get('pdf_url') or chunk.get('link') or '').strip()
                 page = chunk.get('page') or 1
                 score = float(chunk.get('_score') or chunk.get('score') or 0.0)
-                dedup_key = f"{doc_title}_{page}"
+                # Document-level deduplication: display each unique PDF document once
+                dedup_key = doc_title.lower()
                 if dedup_key in seen_pdf_keys:
                     continue
                 seen_pdf_keys.add(dedup_key)

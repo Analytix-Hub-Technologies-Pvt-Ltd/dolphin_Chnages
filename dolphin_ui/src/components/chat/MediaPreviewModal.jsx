@@ -65,6 +65,26 @@ const MediaPreviewModal = ({ open, onClose, type, src, title }) => {
     }
   }, [open]);
 
+  /* ⏩ Seek video to #t= timestamp on load if present in src */
+  const handleLoadedMetadata = () => {
+    if (src && src.includes('#t=') && videoRef.current) {
+      const match = src.match(/#t=([0-9:]+)/);
+      if (match) {
+        const val = match[1];
+        let secs = 0;
+        if (val.includes(':')) {
+          const parts = val.split(':').map(Number);
+          secs = parts.length === 2 ? parts[0] * 60 + parts[1] : (parts[0] * 3600 + parts[1] * 60 + parts[2]);
+        } else {
+          secs = Number(val);
+        }
+        if (!isNaN(secs) && secs > 0) {
+          videoRef.current.currentTime = secs;
+        }
+      }
+    }
+  };
+
   const toggleFullscreen = () => setIsFullscreen((p) => !p);
 
   return (
@@ -181,6 +201,7 @@ const MediaPreviewModal = ({ open, onClose, type, src, title }) => {
             src={src}
             autoPlay
             controls
+            onLoadedMetadata={handleLoadedMetadata}
             controlsList="nodownload noplaybackrate"
             disablePictureInPicture
             style={{
@@ -210,6 +231,7 @@ const MediaPreviewModal = ({ open, onClose, type, src, title }) => {
         {type === "pdf" && (
           <SecurePdfViewer
             src={src}
+            title={title}
             isFullscreen={isFullscreen}
             onClose={onClose}
           />

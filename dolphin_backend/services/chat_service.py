@@ -438,6 +438,9 @@ class ChatService:
         # Debug hook for tests and observability
         self._last_state: Dict[str, Any] | None = None
 
+    # Minimum similarity score threshold for PDF chunks (cosine similarity / blended score)
+    PDF_MIN_SCORE: float = 0.30
+
     async def _retrieve_pdf_chunks(
         self,
         query: str,
@@ -461,17 +464,26 @@ class ChatService:
             search_query = query.strip()
             from services.maritime_acronyms import find_acronyms_in_query, get_strict_acronym_expansions
             detected_acrs = find_acronyms_in_query(search_query)
-            for acr in detected_acrs:
+            for acr in detected_acrs[:3]:
                 exps = get_strict_acronym_expansions(acr)
                 if exps and exps[0].lower() not in search_query.lower():
                     search_query = f"{search_query} {exps[0]}"
-                    break
 
             pdf_chunks = await self.pdf_vector_store.search_with_embeddings(
                 search_query,
                 k=k,
                 original_query=query.strip(),
             )
+            # Filter low-similarity chunks using PDF_MIN_SCORE to prevent irrelevant PDFs
+            if pdf_chunks and self.PDF_MIN_SCORE > 0:
+                filtered_chunks = []
+                for c in pdf_chunks:
+                    score_val = float(c.get("_score") if c.get("_score") is not None else (c.get("score") or 0.0))
+                    if score_val > 0.0 and score_val < self.PDF_MIN_SCORE:
+                        continue
+                    filtered_chunks.append(c)
+                pdf_chunks = filtered_chunks
+
             logger.info(
                 f"📄 PDF Vector retrieval returned {len(pdf_chunks)} chunks for '{search_query}'"
             )
@@ -3582,6 +3594,7 @@ Rules:
             logger.info(f"[MEMORY] Loaded meaningful_history: {len(meaningful_history)}")
 
         pdf_context_chunks: List[Dict[str, Any]] = []
+        transcript_chunks: List[Dict[str, Any]] = []
         if node_type in {"query", "quiz", "summary"}:
 
             if status_callback:
@@ -3623,12 +3636,28 @@ Rules:
                 except Exception as pdf_err:
                     pdf_context_chunks = []
                     logger.warning("PDF context retrieval failed; continuing without PDF context: %s", pdf_err)
+
+                # Video transcript chunks: combine spoken dialogue into the prompt
+                try:
+                    t_trans_ret = time.perf_counter()
+                    transcript_chunks = await self._retrieve_transcript_chunks(
+                        standalone_query or current_query, k=3
+                    )
+                    latencies["transcript_context_retrieval"] = time.perf_counter() - t_trans_ret
+                    logger.info(
+                        f"🎥 Retrieved {len(transcript_chunks)} transcript context chunks for answer generation"
+                    )
+                except Exception as trans_err:
+                    transcript_chunks = []
+                    logger.warning("Transcript context retrieval failed; continuing without transcript context: %s", trans_err)
+
                 sme_checked = True
 
         else:
             retrieval_chunks = []
             video_suggestions = []
             pdf_context_chunks = []
+            transcript_chunks = []
             sme_checked = False
 
         # -----------------------------
@@ -3716,6 +3745,7 @@ Rules:
             "previous_questions": previous_questions,
             "retrieval_chunks": retrieval_chunks,
             "pdf_context_chunks": pdf_context_chunks,
+            "transcript_chunks": transcript_chunks,
             "video_suggestions": video_suggestions,
             "_sme_checked": sme_checked,
             "meaningful_messages": meaningful_history,
@@ -4380,6 +4410,8 @@ Rules:
                 "videos": [] if (is_resp_out_of_scope or is_social or is_clarification) else final_videos,
                 "images": [] if (is_resp_out_of_scope or is_social or is_clarification) else all_images,
                 "pdfs": [] if (is_resp_out_of_scope or is_social or is_clarification) else all_pdfs,
+                "pdf_context_chunks": [] if (is_resp_out_of_scope or is_social or is_clarification) else pdf_context_chunks,
+                "transcript_chunks": [] if (is_resp_out_of_scope or is_social or is_clarification) else transcript_chunks,
                 "topic_codes": [] if (is_resp_out_of_scope or is_social or is_clarification) else all_topic_codes,
                 "question_scope": question_scope,
                 "company_answer": None if (is_resp_out_of_scope or is_social or is_clarification) else company_answer,

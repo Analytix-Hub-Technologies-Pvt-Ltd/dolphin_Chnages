@@ -74,9 +74,9 @@ def format_seconds(seconds: float) -> str:
 
 
 def compute_content_fingerprint(topic_name: str, topic_content: str) -> str:
-    """Compute SHA-256 hash of combined topic text for exact change detection."""
+    """Compute MD5 hash of combined topic text for exact change detection."""
     combined = f"Topic Name: {topic_name or ''}\n\nTopic Content:\n{topic_content or ''}"
-    return hashlib.sha256(combined.encode("utf-8")).hexdigest()
+    return hashlib.md5(combined.encode("utf-8")).hexdigest()
 
 
 class SelectiveFaissSyncService:
@@ -173,28 +173,38 @@ class SelectiveFaissSyncService:
 
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-        # Deduplicate by topic_code taking max(content_id) to guard against any double ingestion
+        # Fast lightweight query with server-side MD5 fingerprint
+        # Avoids transferring 1+ GB of topic_content over remote network and eliminates unindexed database disk-sort
         sql = f"""
-            SELECT DISTINCT ON (topic_code)
+            SELECT
                 content_id,
                 course_code,
                 topic_code,
                 topic_name,
-                topic_content,
+                length(COALESCE(topic_content, '')) as content_len,
+                md5('Topic Name: ' || COALESCE(topic_name, '') || E'\\n\\nTopic Content:\\n' || COALESCE(topic_content, '')) AS fingerprint,
                 fetched_on
             FROM course_content
             {where_sql}
-            ORDER BY topic_code, content_id DESC
+            ORDER BY content_id ASC
         """
 
-        logger.info(f"🔍 Fetching candidates from PostgreSQL `course_content` (filters: {where_clauses or 'ALL'})...")
+        logger.info(f"🔍 Fetching candidates from PostgreSQL `course_content` (lightweight fingerprint scan)...")
         t0 = time.time()
         async with pool.acquire() as conn:
             rows = await conn.fetch(sql, *params)
         fetch_sec = time.time() - t0
 
-        logger.info(f"✓ Fetched {len(rows):,} distinct topic rows from PostgreSQL in {fetch_sec:.2f}s")
-        return [dict(r) for r in rows]
+        # Deduplicate by topic_code in memory, keeping latest content_id
+        unique_by_topic: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            tc = r["topic_code"]
+            if tc:
+                unique_by_topic[tc] = dict(r)
+
+        result_rows = list(unique_by_topic.values())
+        logger.info(f"✓ Scanned {len(rows):,} rows -> {len(result_rows):,} distinct topics from PostgreSQL in {fetch_sec:.2f}s")
+        return result_rows
 
     def analyze_changes(
         self,
@@ -242,7 +252,7 @@ class SelectiveFaissSyncService:
             t_name = row.get("topic_name") or ""
             t_content = row.get("topic_content") or ""
 
-            new_fingerprint = compute_content_fingerprint(t_name, t_content)
+            new_fingerprint = row.get("fingerprint") or compute_content_fingerprint(t_name, t_content)
 
             # Check if topic exists in FAISS (by topic_code first, then by content_id)
             match = meta_by_topic.get(t_code) or (meta_by_cid.get(cid) if cid is not None else None)
@@ -266,7 +276,7 @@ class SelectiveFaissSyncService:
                         "action": "UPDATED",
                         "reason": "topic_content modified" if old_t_content != t_content else "topic_name modified",
                         "char_length_before": len(old_t_content),
-                        "char_length_after": len(t_content),
+                        "char_length_after": row.get("content_len", len(t_content)),
                         "row_data": row,
                     }
                     updated_topics.append(diff_item)
@@ -284,7 +294,7 @@ class SelectiveFaissSyncService:
                     "action": "NEW",
                     "reason": "New topic discovered in DB",
                     "char_length_before": 0,
-                    "char_length_after": len(t_content),
+                    "char_length_after": row.get("content_len", len(t_content)),
                     "row_data": row,
                 }
                 new_topics.append(diff_item)
@@ -359,10 +369,14 @@ class SelectiveFaissSyncService:
         )
 
         all_vectors: List[List[float]] = []
-        for i in range(0, len(texts), self.batch_size):
+        total_batches = (len(texts) + self.batch_size - 1) // self.batch_size
+        for batch_idx, i in enumerate(range(0, len(texts), self.batch_size), 1):
             batch = texts[i : i + self.batch_size]
             batch_vectors = await self.embedder.embed_documents(batch)
             all_vectors.extend(batch_vectors)
+            logger.info(
+                f"🚀 Embedded {len(all_vectors):,}/{len(texts):,} topics (Batch {batch_idx}/{total_batches})..."
+            )
 
         duration = time.time() - t0
         arr = np.array(all_vectors, dtype="float32")
@@ -637,6 +651,34 @@ async def run_selective_faiss_sync(
 
     # 5. Live Embedding Generation for Changed Topics Only
     items_to_embed = analysis["updated_topics"] + analysis["new_topics"]
+    if items_to_embed:
+        needed_cids = [item["content_id"] for item in items_to_embed if item.get("content_id")]
+        logger.info(f"📥 Hydrating full topic_content for {len(needed_cids):,} changed topic(s)...")
+        pool = await get_pool()
+        cid_to_content: Dict[int, str] = {}
+        hydration_batch_size = 1000
+        for i in range(0, len(needed_cids), hydration_batch_size):
+            batch_cids = needed_cids[i : i + hydration_batch_size]
+            async with pool.acquire() as conn:
+                content_rows = await conn.fetch(
+                    """
+                    SELECT content_id, topic_content
+                    FROM course_content
+                    WHERE content_id = ANY($1)
+                    """,
+                    batch_cids,
+                    timeout=60,
+                )
+                for r in content_rows:
+                    cid_to_content[r["content_id"]] = r["topic_content"] or ""
+            if len(needed_cids) > hydration_batch_size:
+                logger.info(f"   Hydrated {len(cid_to_content):,}/{len(needed_cids):,} topic contents...")
+
+        for item in items_to_embed:
+            cid = item.get("content_id")
+            if cid in cid_to_content:
+                item["row_data"]["topic_content"] = cid_to_content[cid]
+
     new_embeddings, embed_sec, tokens_used = await sync_service.generate_embeddings_for_diff(
         items_to_embed
     )
@@ -774,11 +816,28 @@ def parse_args():
         default=None,
         help="Sync a specific course code only (e.g. BBSV-1002-...).",
     )
+    parser.add_argument("--db-host", type=str, default=None, help="PostgreSQL host (overrides config/env)")
+    parser.add_argument("--db-port", type=int, default=None, help="PostgreSQL port (overrides config/env)")
+    parser.add_argument("--db-name", type=str, default=None, help="PostgreSQL database name (overrides config/env)")
+    parser.add_argument("--db-user", type=str, default=None, help="PostgreSQL user (overrides config/env)")
+    parser.add_argument("--db-password", type=str, default=None, help="PostgreSQL password (overrides config/env)")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+
+    if args.db_host:
+        settings.db_host = args.db_host
+    if args.db_port:
+        settings.db_port = args.db_port
+    if args.db_name:
+        settings.db_name = args.db_name
+    if args.db_user:
+        settings.db_user = args.db_user
+    if args.db_password:
+        settings.db_password = args.db_password
+
     try:
         asyncio.run(
             run_selective_faiss_sync(

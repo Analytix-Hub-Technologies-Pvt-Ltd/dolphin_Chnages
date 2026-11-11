@@ -496,6 +496,7 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
     decision = safe_get(state, "router_decision", {}) or {}
     chunks = safe_get(state, "retrieval_chunks", [])
     pdf_context_chunks = safe_get(state, "pdf_context_chunks", []) or []
+    transcript_chunks = safe_get(state, "transcript_chunks", []) or []
     query = safe_get(state, "current_query", "")
     standalone_query = safe_get(state, "standalone_query", query)
 
@@ -606,7 +607,7 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
 
     chunks = filter_chunks(standalone_query, chunks)
 
-    if not chunks and not pdf_context_chunks:
+    if not chunks and not pdf_context_chunks and not transcript_chunks:
         from services.off_topic_detector import generate_dynamic_off_topic_response
         out_of_scope_text, dynamic_suggestions = await generate_dynamic_off_topic_response(
             standalone_query or query
@@ -795,10 +796,61 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
         )
     if pdf_blocks:
         pdf_context_text = (
-            "\n\n---\n\nOFFICIAL PDF EXCERPTS (use when relevant; do not infer details absent from these excerpts):\n\n"
+            "\n\n---\n\nOFFICIAL PDF EXCERPTS (use when relevant; do not infer details absent from these excerpts. "
+            "When stating facts, statutory limits, or procedures directly derived from one of these excerpts, "
+            "append an inline reference token at the end of the sentence or paragraph in this exact format: "
+            "[[PDF: <document title> | p. <page> | <key search phrase 2-4 words>]]):\n\n"
             + "\n\n---\n\n".join(pdf_blocks)
         )
         chunks_text = (chunks_text + "\n\n" + pdf_context_text).strip()
+
+    # Video transcript search: spoken explanations from training videos. Include transcript text
+    # in the answer prompt, while preserving video title and approximate timestamp provenance.
+    transcript_blocks = []
+    for tr_chunk in transcript_chunks[:3]:
+        tr_text = str(tr_chunk.get("content") or tr_chunk.get("text") or "").strip()
+        if not tr_text:
+            continue
+        v_title = str(tr_chunk.get("video_title") or tr_chunk.get("Title") or tr_chunk.get("title") or "Course Video").strip()
+        dur_str = str(tr_chunk.get("video_duration") or tr_chunk.get("duration") or "").strip()
+        try:
+            chunk_idx = int(tr_chunk.get("chunk_index", 0) or 0)
+        except (ValueError, TypeError):
+            chunk_idx = 0
+
+        # Calculate approximate chunk start timestamp
+        total_secs = 0
+        if dur_str and ":" in dur_str:
+            parts = dur_str.split(":")
+            if len(parts) == 2:
+                try:
+                    total_secs = int(parts[0]) * 60 + int(parts[1])
+                except ValueError:
+                    total_secs = 0
+            elif len(parts) == 3:
+                try:
+                    total_secs = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                except ValueError:
+                    total_secs = 0
+        est_secs = chunk_idx * 60
+        if total_secs > 0:
+            est_secs = min(est_secs, max(0, total_secs - 10))
+        timestamp = f"{est_secs // 60:02d}:{est_secs % 60:02d}"
+
+        transcript_blocks.append(
+            f"VIDEO TITLE: {v_title}\nESTIMATED TIMESTAMP: {timestamp} (chunk {chunk_idx})\nSPOKEN TRANSCRIPT:\n{tr_text[:4000]}"
+        )
+
+    if transcript_blocks:
+        transcript_context_text = (
+            "\n\n---\n\nOFFICIAL VIDEO TRANSCRIPT EXCERPTS (transcribed spoken explanations from training videos; "
+            "use when relevant to explain maritime procedures, operational steps, or watchkeeping workflows. "
+            "When stating procedures or explanations directly derived from one of these video transcripts, "
+            "append an inline reference token at the end of the sentence or paragraph in this exact format: "
+            "[[VIDEO: <exact video title> | t. <timestamp> | <key search phrase 2-4 words>]]):\n\n"
+            + "\n\n---\n\n".join(transcript_blocks)
+        )
+        chunks_text = (chunks_text + "\n\n" + transcript_context_text).strip()
 
     # MAIN PROMPT (NOW FILLED)
     # Enrich prompt with maritime acronym domain expansions if present
@@ -1134,7 +1186,9 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
                                 if has_acr:
                                     break
                             if not has_acr:
-                                continue
+                                p_score = float(p_copy.get("score") or p_copy.get("_score") or c.get("score") or c.get("_score") or 0.0)
+                                if p_score < 0.55:
+                                    continue
 
                         if len(p_title.split()) == 1 and p_title.lower() in ("chemicals", "difficulties", "necessary", "operation", "issues"):
                             if p_title.lower() not in curr_q.lower():

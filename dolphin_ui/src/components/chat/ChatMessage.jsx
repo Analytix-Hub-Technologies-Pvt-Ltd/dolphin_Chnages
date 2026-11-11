@@ -468,8 +468,13 @@ const ChatMessage = ({
     src: null,
     title: "",
   });
-  const openPreview = (type, src, title = "") =>
-    setPreviewMedia({ open: true, type, src, title });
+  const openPreview = (type, src, title = "", page = null) => {
+    let finalSrc = src;
+    if (type === "pdf" && finalSrc && page && !String(finalSrc).includes("#page=")) {
+      finalSrc = `${finalSrc}#page=${page}`;
+    }
+    setPreviewMedia({ open: true, type, src: finalSrc, title });
+  };
   const closePreview = () =>
     setPreviewMedia({ open: false, type: null, src: null, title: "" });
 
@@ -922,7 +927,11 @@ const ChatMessage = ({
 
   const sanitizeDisplayContent = (content) => {
     if (!content || typeof content !== "string") return "";
-    return content.replace(/^(?:#{1,6}\s*|\*{2})?(?:Out of Scope|Off Topic)(?:\*{2})?[:\s]*\n*/i, "");
+    let clean = content.replace(/^(?:#{1,6}\s*|\*{2})?(?:Out of Scope|Off Topic)(?:\*{2})?[:\s]*\n*/i, "");
+    if (!ENABLE_MEDIA_INSPECTOR) {
+      clean = clean.replace(/\[\[\s*(?:PDF|VIDEO|TRANSCRIPT):[^\]]+\]\]/gi, "");
+    }
+    return clean;
   };
 
   const getFormattedTime = (timestamp) => {
@@ -966,6 +975,111 @@ const ChatMessage = ({
       }
       return `Topic: ${code}`;
     };
+
+    // 0. Replace explicit PDF reference tokens: [[PDF: Document Title | p. 14 | search phrase]]
+    output = output.replace(
+      /\[\[\s*PDF:\s*([^|\]]+?)\s*(?:\|\s*p\.?\s*(\d+))?\s*(?:\|\s*([^\]]+?))?\s*\]\]/gi,
+      (match, rawDocTitle, rawPage, rawSearch) => {
+        const docTitle = (rawDocTitle || "").trim();
+        const pageNum = (rawPage || "").trim() || "1";
+        const searchPhrase = (rawSearch || "").trim();
+
+        // Match PDF from groupedVectorPdfs
+        const matched = (groupedVectorPdfs || []).find(p =>
+          p.title && docTitle && (
+            p.title.toLowerCase().includes(docTitle.toLowerCase()) ||
+            docTitle.toLowerCase().includes(p.title.toLowerCase())
+          )
+        ) || groupedVectorPdfs?.[0] || null;
+
+        const pdfUrl = matched?.link || matched?.url || matched?.pdf_url || "";
+        const shortTitle = docTitle.length > 22 ? `${docTitle.slice(0, 20)}…` : docTitle;
+        const disp = `📄 ${shortTitle}${pageNum ? `, p. ${pageNum}` : ""}`;
+
+        return `<span class="pdf-citation-pill" data-pdf-url="${pdfUrl}" data-pdf-page="${pageNum}" data-pdf-title="${docTitle}" data-search="${encodeURIComponent(searchPhrase || docTitle)}" style="display:inline-flex;align-items:center;padding:1px 7px;margin:0 4px;border-radius:4px;font-size:0.75rem;font-weight:700;cursor:pointer;background:rgba(217,119,6,0.15);color:#d97706;border:1px solid rgba(217,119,6,0.35);vertical-align:baseline;transition:all 0.15s ease;" title="${docTitle} (Page ${pageNum}) - Click to open PDF and highlight text">[${disp}]</span>`;
+      }
+    );
+
+    // 0b. Replace explicit Video Transcript reference tokens: [[VIDEO: Video Title | t. 01:23 | search phrase]]
+    output = output.replace(
+      /\[\[\s*(?:VIDEO|TRANSCRIPT):\s*([^|\]]+?)\s*(?:\|\s*t\.?\s*([0-9:]+))?\s*(?:\|\s*([^\]]+?))?\s*\]\]/gi,
+      (match, rawVideoTitle, rawTime, rawSearch) => {
+        const videoTitle = (rawVideoTitle || "").trim();
+        const timeStamp = (rawTime || "").trim() || "00:00";
+        const searchPhrase = (rawSearch || "").trim();
+
+        // Match video from transcriptVideos or topicVideos
+        const matched = (transcriptVideos || []).find(v =>
+          v.title && videoTitle && (
+            v.title.toLowerCase().includes(videoTitle.toLowerCase()) ||
+            videoTitle.toLowerCase().includes(v.title.toLowerCase())
+          )
+        ) || (topicVideos || []).find(v =>
+          v.title && videoTitle && (
+            v.title.toLowerCase().includes(videoTitle.toLowerCase()) ||
+            videoTitle.toLowerCase().includes(v.title.toLowerCase())
+          )
+        ) || transcriptVideos?.[0] || topicVideos?.[0] || null;
+
+        const videoUrl = matched?.url || "";
+        const shortTitle = videoTitle.length > 22 ? `${videoTitle.slice(0, 20)}…` : videoTitle;
+        const disp = `🎬 ${shortTitle}${timeStamp ? `, ${timeStamp}` : ""}`;
+
+        return `<span class="transcript-citation-pill" data-video-url="${videoUrl}" data-timestamp="${timeStamp}" data-video-title="${videoTitle}" data-search="${encodeURIComponent(searchPhrase || videoTitle)}" style="display:inline-flex;align-items:center;padding:1px 7px;margin:0 4px;border-radius:4px;font-size:0.75rem;font-weight:700;cursor:pointer;background:rgba(22,163,74,0.15);color:#16a34a;border:1px solid rgba(22,163,74,0.35);vertical-align:baseline;transition:all 0.15s ease;" title="${videoTitle} (${timeStamp}) - Click to play video from timestamp">[${disp}]</span>`;
+      }
+    );
+
+    // If matched transcript videos exist, attach citation pills contextually to corresponding paragraphs
+    if (transcriptVideos && transcriptVideos.length > 0) {
+      for (const vid of transcriptVideos) {
+        if (!vid || !vid.url) continue;
+        const rawTitle = vid.title || "Course Video";
+        const shortTitle = rawTitle.length > 20 ? `${rawTitle.slice(0, 18)}…` : rawTitle;
+        const disp = `🎬 ${shortTitle}`;
+
+        // Don't duplicate if a pill for this video title is already present
+        if (output.includes(`data-video-title="${rawTitle}"`) || output.includes(shortTitle)) continue;
+
+        const pillHtml = ` <span class="transcript-citation-pill" data-video-url="${vid.url}" data-timestamp="00:00" data-video-title="${rawTitle}" data-search="" style="display:inline-flex;align-items:center;padding:1px 7px;margin:0 4px;border-radius:4px;font-size:0.75rem;font-weight:700;cursor:pointer;background:rgba(22,163,74,0.15);color:#16a34a;border:1px solid rgba(22,163,74,0.35);vertical-align:middle;transition:all 0.15s ease;" title="${rawTitle} - Click to play video">[${disp}]</span>`;
+
+        const keywords = `${rawTitle} ${vid.topic_name || ""}`.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !["video", "course", "topic", "lesson", "module", "part", "intro", "introduction"].includes(w));
+        if (keywords.length > 0) {
+          const matchPattern = new RegExp(`(<p[^>]*>(?:(?!<\\/p>|transcript-citation-pill|pdf-citation-pill)[\\s\\S])*?(?:${keywords.join("|")})[\\s\\S]*?)(<\\/p>)`, "i");
+          if (matchPattern.test(output)) {
+            output = output.replace(matchPattern, `$1${pillHtml}$2`);
+          }
+        }
+      }
+    }
+
+    // If high-confidence matched vector PDFs exist, attach citation pills to corresponding paragraphs
+    if (groupedVectorPdfs && groupedVectorPdfs.length > 0) {
+      for (const pdf of groupedVectorPdfs) {
+        if (!pdf || !pdf.link) continue;
+        const pNum = pdf.firstPage || (pdf.pages && pdf.pages[0]) || 1;
+        const rawTitle = pdf.title && pdf.title.toLowerCase() !== "untitled document" && pdf.title.toLowerCase() !== "document"
+          ? pdf.title
+          : (pdf.topic_name || "Document");
+        const shortTitle = rawTitle.length > 20 ? `${rawTitle.slice(0, 18)}…` : rawTitle;
+        const searchPhrase = (pdf.text_preview || "").slice(0, 30).trim();
+        const disp = `📄 ${shortTitle}, p. ${pNum}`;
+
+        // Don't duplicate if a pill for this specific page & title is already present
+        if (output.includes(`data-pdf-page="${pNum}"`) && output.includes(shortTitle)) continue;
+
+        const pillHtml = ` <span class="pdf-citation-pill" data-pdf-url="${pdf.link}" data-pdf-page="${pNum}" data-pdf-title="${rawTitle}" data-search="${encodeURIComponent(searchPhrase)}" style="display:inline-flex;align-items:center;padding:1px 7px;margin:0 4px;border-radius:4px;font-size:0.75rem;font-weight:700;cursor:pointer;background:rgba(217,119,6,0.15);color:#d97706;border:1px solid rgba(217,119,6,0.35);vertical-align:middle;transition:all 0.15s ease;" title="${rawTitle} (Page ${pNum}) - Click to open PDF and highlight text">[${disp}]</span>`;
+
+        // Contextual matching: Only attach if a paragraph actually discusses concepts from this PDF.
+        // We never forcefully attach citations to unrelated paragraphs.
+        const keywords = `${rawTitle} ${pdf.topic_name || ""}`.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !["document", "untitled", "code", "part", "volume", "regulations", "guide"].includes(w));
+        if (keywords.length > 0) {
+          const matchPattern = new RegExp(`(<p[^>]*>(?:(?!<\\/p>|pdf-citation-pill)[\\s\\S])*?(?:${keywords.join("|")})[\\s\\S]*?)(<\\/p>)`, "i");
+          if (matchPattern.test(output)) {
+            output = output.replace(matchPattern, `$1${pillHtml}$2`);
+          }
+        }
+      }
+    }
 
     // 1. Replace explicit ref markers if present: @@SOURCE_REF_1@@ or [[Ref: 1]]
     output = output.replace(
@@ -1038,7 +1152,64 @@ const ChatMessage = ({
       }
     }
 
-    // Handle in-text citation pill click
+    // Handle in-text PDF citation pill click (jump to page and highlight text)
+    const pdfPill = e.target.closest(".pdf-citation-pill");
+    if (pdfPill) {
+      e.preventDefault();
+      e.stopPropagation();
+      const pdfUrl = pdfPill.getAttribute("data-pdf-url") || "";
+      const pdfPage = pdfPill.getAttribute("data-pdf-page") || "1";
+      const pdfTitle = pdfPill.getAttribute("data-pdf-title") || "PDF Document";
+      const rawSearch = pdfPill.getAttribute("data-search") || "";
+      const searchPhrase = rawSearch ? decodeURIComponent(rawSearch).trim() : "";
+
+      if (pdfUrl) {
+        const searchParam = searchPhrase ? `&search=${encodeURIComponent(searchPhrase.slice(0, 40))}` : "";
+        const targetUrl = `${pdfUrl}#page=${pdfPage}${searchParam}`;
+        openPreview("pdf", targetUrl, `${pdfTitle} (Page ${pdfPage})`);
+      }
+      return;
+    }
+
+    // Handle in-text Video Transcript citation pill click (jump to video timestamp)
+    const transcriptPill = e.target.closest(".transcript-citation-pill");
+    if (transcriptPill) {
+      e.preventDefault();
+      e.stopPropagation();
+      const videoTitle = transcriptPill.getAttribute("data-video-title") || "Course Video";
+      const timestampStr = transcriptPill.getAttribute("data-timestamp") || "00:00";
+      const videoUrlAttr = transcriptPill.getAttribute("data-video-url") || "";
+
+      // Match video from transcriptVideos or topicVideos
+      const matched = (transcriptVideos || []).find(v =>
+        v.title && videoTitle && (
+          v.title.toLowerCase().includes(videoTitle.toLowerCase()) ||
+          videoTitle.toLowerCase().includes(v.title.toLowerCase())
+        )
+      ) || (topicVideos || []).find(v =>
+        v.title && videoTitle && (
+          v.title.toLowerCase().includes(videoTitle.toLowerCase()) ||
+          videoTitle.toLowerCase().includes(v.title.toLowerCase())
+        )
+      ) || transcriptVideos?.[0] || topicVideos?.[0] || null;
+
+      const targetUrl = videoUrlAttr || matched?.url || "";
+      if (targetUrl) {
+        let seekSeconds = 0;
+        if (timestampStr.includes(":")) {
+          const parts = timestampStr.split(":").map(Number);
+          seekSeconds = parts.length === 2 ? parts[0] * 60 + parts[1] : (parts[0] * 3600 + parts[1] * 60 + parts[2]);
+        } else if (!isNaN(Number(timestampStr))) {
+          seekSeconds = Number(timestampStr);
+        }
+        const cleanBaseUrl = targetUrl.split("#")[0];
+        const playerUrl = `${cleanBaseUrl}#t=${seekSeconds}`;
+        openPreview("video", playerUrl, `${matched?.title || videoTitle} (${timestampStr})`);
+      }
+      return;
+    }
+
+    // Handle in-text topic citation pill click
     const citationBadge = e.target.closest(".citation-pill");
     if (citationBadge) {
       e.preventDefault();
