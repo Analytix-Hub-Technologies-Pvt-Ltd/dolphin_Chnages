@@ -56,7 +56,7 @@ export const sendMessage = async (
   sessionId,
   messageText,
   signal,
-  { onContentToken, onSuggestions, onMedia, onTopic, onError, onDone, onCompanyContent, onTranscriptResult, onCheckLicCourses, onStatus, onPdfResult } = {},
+  { onContentToken, onSuggestions, onMedia, onTopic, onError, onDone, onCompanyContent, onTranscriptResult, onCheckLicCourses, onStatus, onPdfResult, onCourseDiscovery } = {},
 ) => {
   const userId = localStorage.getItem("user_id");
   const role = localStorage.getItem("role");
@@ -187,6 +187,15 @@ export const sendMessage = async (
             images: event.images ?? [],
             pdfs: event.pdfs ?? [],
           });
+          break;
+
+        case "course_discovery":
+          onCourseDiscovery?.(event.courses || []);
+          break;
+
+        case "matched_courses":
+          // For course discovery queries, matched courses are formatted in the text response;
+          // do NOT feed into onCheckLicCourses to prevent duplicate Reference Course cards.
           break;
 
         case "transcript_result":

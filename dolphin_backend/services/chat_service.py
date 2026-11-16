@@ -3137,6 +3137,236 @@ Rules:
         state["company_answer"] = None
         return state
 
+    def _detect_course_discovery_intent(self, query: str) -> Optional[str]:
+        """
+        Detects if user is asking to discover, list, or learn available/enrolled courses on a topic.
+        e.g. 'I want to learn cargo related', 'show me courses about safety', 'what courses do I have for bridge?'
+        """
+        q = (query or "").strip().lower()
+        q = re.sub(r'[\?!.,;]+$', '', q).strip()
+
+        PATTERNS = [
+            r'^(?:i\s+(?:want|wish|would\s+like)\s+to\s+(?:learn|study|know\s+about|take|see)|show\s+me|tell\s+me\s+about|find\s+me|give\s+me|what\s+are\s+the|which)\s+(?:the\s+)?(?:available\s+|enrolled\s+|my\s+)?(?:courses?|training|modules?|classes?)\s+(?:for|about|on|related\s+to|involving|regarding)\s+(.+)$',
+            r'^(?:i\s+(?:want|wish|would\s+like)\s+to\s+(?:learn|study))\s+(?:about\s+)?(.+?)(?:\s+courses?|\s+related|\s+training)?$',
+            r'^(?:what|which)\s+courses?\s+(?:do\s+i\s+have|are\s+available|can\s+i\s+(?:learn|take|study))\s+(?:for|about|on|related\s+to)\s+(.+)$',
+            r'^(?:show\s+me|list|find|recommend|suggest)\s+(?:my\s+)?(?:courses?|training)\s+(?:for|about|on|related\s+to)\s+(.+)$',
+            r'^(?:courses?|training)\s+related\s+to\s+(.+)$',
+            r'^(?:any\s+courses?\s+(?:for|about|on|related\s+to))\s+(.+)$',
+        ]
+
+        for pat in PATTERNS:
+            m = re.match(pat, q, re.IGNORECASE)
+            if m:
+                topic = m.group(1).strip()
+                topic = re.sub(r'\s+(?:courses?|related|training|topics?|material)$', '', topic).strip()
+                topic = re.sub(r'^(?:the|my|all|any)\s+', '', topic).strip()
+                if topic:
+                    return topic
+        return None
+
+    async def _get_user_enrolled_courses(self, user_id: str, user_details: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Retrieve user_courses list from user_details or direct PostgreSQL users query."""
+        raw = (user_details or {}).get("user_courses")
+        if raw:
+            if isinstance(raw, str):
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        return parsed
+                except Exception:
+                    pass
+            elif isinstance(raw, list):
+                return raw
+
+        if user_id and user_id != "anonymous":
+            try:
+                pool = await get_pool()
+                async with pool.acquire() as conn:
+                    row = await conn.fetchrow(
+                        "SELECT user_courses FROM users WHERE id::text = $1 OR user_name = $1 OR email = $1 LIMIT 1",
+                        str(user_id)
+                    )
+                    if row and row["user_courses"]:
+                        val = row["user_courses"]
+                        if isinstance(val, str):
+                            try:
+                                parsed = json.loads(val)
+                                if isinstance(parsed, list):
+                                    return parsed
+                            except Exception:
+                                pass
+                        elif isinstance(val, list):
+                            return val
+            except Exception as e:
+                logger.warning(f"Error fetching user_courses for user {user_id}: {e}")
+
+        return []
+
+    async def _handle_course_discovery_node(
+        self,
+        state: Dict[str, Any],
+        user_id: str,
+        user_details: Optional[Dict[str, Any]],
+        topic_keyword: str,
+        stream_callback: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Handles course discovery intent by filtering user's enrolled courses and outputting matched courses."""
+        enrolled_courses = await self._get_user_enrolled_courses(user_id, user_details)
+
+        clean_keyword = topic_keyword.lower().strip()
+        terms = [t for t in re.split(r'\s+', clean_keyword) if len(t) >= 3]
+        if not terms:
+            terms = [clean_keyword]
+
+        matched_items = []
+        seen_keys = set()
+
+        for item in (enrolled_courses or []):
+            if not isinstance(item, dict):
+                continue
+            code = str(item.get("CourseCode") or item.get("courseCode") or item.get("course_code") or "").strip()
+            name = str(item.get("CourseName") or item.get("courseName") or item.get("course_name") or "").strip()
+            search_str = f"{code} {name}".lower()
+
+            if clean_keyword in search_str or any(term in search_str for term in terms):
+                dedup_key = (name or code).lower()
+                if dedup_key and dedup_key not in seen_keys:
+                    seen_keys.add(dedup_key)
+                    if not code and name:
+                        m = re.match(r'^([A-Z0-9]+(?:-[A-Z0-9]+)?)(?:[-:\s]+)(.+)$', name, re.IGNORECASE)
+                        if m:
+                            code = m.group(1).strip()
+                    matched_items.append({
+                        "matched": True,
+                        "data": {
+                            "topic_code": "",
+                            "topic_name": name,
+                            "course": {
+                                "CourseCode": code,
+                                "CourseName": name,
+                            }
+                        }
+                    })
+
+        if matched_items:
+            count = len(matched_items)
+            course_word = "course" if count == 1 else "courses"
+
+            bullets = []
+            for m in matched_items:
+                c = m["data"]["course"]
+                c_code = c.get("CourseCode") or ""
+                c_name = c.get("CourseName") or ""
+                if c_code and c_code not in c_name:
+                    bullets.append(f"* **{c_code}**: {c_name}")
+                else:
+                    bullets.append(f"* {c_name}")
+            bullets_text = "\n".join(bullets)
+
+            # Use LLM to generate natural, dynamic introductory phrasing each time
+            prompt = (
+                f"You are Dolphin AI, an intelligent maritime training assistant.\n"
+                f"A crew member is asking what courses they have in their enrolled curriculum related to \"{topic_keyword}\".\n"
+                f"The system found {count} enrolled {course_word} matching their query:\n"
+                f"{bullets_text}\n\n"
+                f"Instructions:\n"
+                f"1. Generate a natural, friendly, and professional introductory sentence stating that they have {count} enrolled {course_word} related to \"{topic_keyword}\".\n"
+                f"2. Vary your wording dynamically (do not always use the exact same template sentence).\n"
+                f"3. Follow the introduction with the exact bulleted list of courses provided above.\n"
+                f"4. Output ONLY the introductory sentence and the bulleted course list. Do not add hallucinated courses or conversational filler."
+            )
+            try:
+                llm_response = await self.openai_service.chat(
+                    [{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    model="gpt-4o-mini",
+                    max_tokens=350,
+                )
+                content = llm_response.strip() if llm_response else ""
+                if not content or len(content) < 15:
+                    raise ValueError("Empty LLM response for course discovery")
+            except Exception as e:
+                logger.warning(f"LLM generation failed for course discovery (using dynamic fallback): {e}")
+                import random
+                fallbacks = [
+                    f"Based on your enrolled curriculum, you have **{count} {course_word}** related to **{topic_keyword}**:\n\n{bullets_text}",
+                    f"Here are the **{count} {course_word}** currently enrolled in your curriculum for **{topic_keyword}**:\n\n{bullets_text}",
+                    f"I found **{count} enrolled {course_word}** matching **{topic_keyword}** in your account:\n\n{bullets_text}",
+                    f"Your training curriculum includes the following **{count} {course_word}** related to **{topic_keyword}**:\n\n{bullets_text}",
+                ]
+                content = random.choice(fallbacks)
+        else:
+            # 0 matching courses found in user's enrolled curriculum
+            prompt = (
+                f"You are Dolphin AI, an intelligent maritime training assistant.\n"
+                f"A crew member is asking about courses related to \"{topic_keyword}\", but their enrolled curriculum currently does NOT have any licensed/enrolled courses matching this topic.\n\n"
+                f"Instructions:\n"
+                f"1. Inform the user politely that they do not currently have any enrolled or licensed courses related to \"{topic_keyword}\" in their account.\n"
+                f"2. Advise them to check with or contact their Training Officer (or company training manager) to request enrollment or access if needed.\n"
+                f"3. Strictly DO NOT suggest exploring other random topics (do not say 'You can explore Bridge Procedures, Cargo Handling, or Safety').\n"
+                f"4. Generate a fresh, natural variation each time while maintaining this exact meaning.\n"
+                f"5. Keep the response concise (1 to 2 sentences maximum)."
+            )
+            try:
+                llm_response = await self.openai_service.chat(
+                    [{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    model="gpt-4o-mini",
+                    max_tokens=150,
+                )
+                content = llm_response.strip() if llm_response else ""
+                if not content or len(content) < 15:
+                    raise ValueError("Empty LLM response for 0 course match")
+            except Exception as e:
+                logger.warning(f"LLM generation failed for 0 course match (using dynamic fallback): {e}")
+                import random
+                fallbacks = [
+                    f"You do not currently have any enrolled courses related to **{topic_keyword}** in your training account. Please check with your Training Officer to request enrollment or access.",
+                    f"No courses related to **{topic_keyword}** were found in your current curriculum. If you require this course, please contact your Training Officer.",
+                    f"It looks like you don't have any enrolled courses for **{topic_keyword}** at this time. Please speak with your Training Officer regarding enrollment.",
+                    f"There are currently no active courses matching **{topic_keyword}** assigned to your account. Please check with your Training Officer to get access.",
+                ]
+                content = random.choice(fallbacks)
+
+        if stream_callback:
+            try:
+                for tok in re.findall(r'\S+\s*|\n+', content):
+                    await stream_callback({"type": "content", "token": tok})
+                    await asyncio.sleep(0.01)
+                state["_streamed_live"] = True
+            except Exception as e:
+                logger.warning(f"Error streaming course discovery tokens: {e}")
+
+        suggs = []
+        if matched_items:
+            first_name = matched_items[0]["data"]["course"]["CourseName"]
+            first_clean = first_name.split("-")[-1].strip() if "-" in first_name else first_name
+            suggs.append(f"What is covered in {first_clean}?")
+            suggs.extend(["What courses do I have for bridge?", "What courses are available for safety?"])
+        else:
+            suggs.extend(["What courses do I have for bridge?", "What courses are available for cargo?", "What courses are available for safety?"])
+
+        state["node_response"] = {
+            "type": "query",
+            "content": content,
+            "category": "COURSE_DISCOVERY",
+            "sections": [],
+            "chunks_used": [],
+            "videos": [],
+            "images": [],
+            "pdfs": [],
+            "question_suggestions": suggs[:3],
+            "metadata": {
+                "category": "COURSE_DISCOVERY",
+                "matched_courses": matched_items,
+            },
+        }
+        state["matched_courses"] = matched_items
+        state["retrieval_chunks"] = []
+        state["video_suggestions"] = []
+        state["company_answer"] = None
+        return state
+
     async def run_chat(
         self,
         user_id: str,
@@ -3284,9 +3514,9 @@ Rules:
         is_user_greeting = is_greeting_query(current_query)
 
         # -----------------------------
-        # DYNAMIC JIT ACRONYM RESOLUTION (Only if not simple social greeting/goodbye)
+        # DYNAMIC JIT ACRONYM RESOLUTION (Only if not simple social greeting/goodbye or course discovery)
         # -----------------------------
-        if not simple_social:
+        if not simple_social and not self._detect_course_discovery_intent(current_query):
             words_raw = current_query.strip().split()
             is_short_query = (1 <= len(words_raw) <= 3)
             from services.dynamic_acronym_service import COMMON_NON_ACRONYMS
@@ -3432,6 +3662,22 @@ Rules:
             latencies["query_rewrite"] = 0.0
             latencies["router_classify"] = 0.0
             logger.info(f"⚡ [Fast-Path] Instant Social Routing: '{current_query}' → {node_type} (0.00s)")
+        elif self._detect_course_discovery_intent(current_query):
+            course_discovery_topic = self._detect_course_discovery_intent(current_query)
+            standalone_query = current_query
+            node_type = "course_discovery"
+            user_category = "COURSE_DISCOVERY"
+            router_decision = {
+                "node_type": "course_discovery",
+                "short_topic": course_discovery_topic,
+                "reason": f"Course discovery query for topic: {course_discovery_topic}",
+                "user_name": None,
+                "category": "COURSE_DISCOVERY",
+                "standalone_query": current_query,
+            }
+            latencies["query_rewrite"] = 0.0
+            latencies["router_classify"] = 0.0
+            logger.info(f"⚡ [Fast-Path] Course Discovery Intent: '{current_query}' → topic: '{course_discovery_topic}' (0.00s)")
         elif is_direct_marine:
             standalone_query = current_query
             node_type = "query"
@@ -3531,14 +3777,15 @@ Rules:
         router_decision["question_scope"] = question_scope
 
         is_social = node_type in {"greeting", "goodbye", "thank", "well_wish"}
+        is_course_discovery = (node_type == "course_discovery")
 
         # -----------------------------
         # ⚡ FAST MODE
         # -----------------------------
-        if is_social:
+        if is_social or is_course_discovery:
             logger.info(f"⚡ FAST MODE: {node_type}")
 
-            user_category = user_category or "GREETING"
+            user_category = user_category or ("COURSE_DISCOVERY" if is_course_discovery else "GREETING")
             messages_with_user = await self.append_message(
                 session_id,
                 "user",
@@ -3972,8 +4219,8 @@ Rules:
                             "videos": [],
                             "images": [],
                             "pdfs": [],
-                            # NO TAP BUTTONS - user confirms through typing in chat
-                            "question_suggestions": [],
+                            # Smart Disambiguation Card suggestions
+                            "question_suggestions": clar_payload.get("suggestions", []),
                             "metadata": {
                                 "routing_reason": "cross_domain_clarification",
                                 "needs_clarification": True,
@@ -4132,6 +4379,21 @@ Rules:
                         logger.warning(f"Status callback failed: {e}")
                 state = await quiz_node(state, self.openai_service, self.suggestion_service)
 
+            elif node_type == "course_discovery":
+                if status_callback:
+                    try:
+                        await status_callback("generating", "Dolphin is checking your enrolled courses...")
+                    except Exception as e:
+                        logger.warning(f"Status callback failed: {e}")
+                course_topic = (router_decision or {}).get("short_topic") or self._detect_course_discovery_intent(current_query) or "maritime"
+                state = await self._handle_course_discovery_node(
+                    state=state,
+                    user_id=user_id,
+                    user_details=user_details,
+                    topic_keyword=course_topic,
+                    stream_callback=stream_callback,
+                )
+
             else:
                 if user_declined_clarification:
                     decline_msg = "Understood! Let me know if you have any questions related to maritime navigation, marine engineering, cargo operations, or vessel safety."
@@ -4186,7 +4448,7 @@ Rules:
                             "videos": [],
                             "images": [],
                             "pdfs": [],
-                            "question_suggestions": [],  # NO TAP BUTTONS
+                            "question_suggestions": clar_payload.get("suggestions", []),  # Smart Disambiguation suggestions
                             "metadata": {
                                 "routing_reason": "cross_domain_clarification",
                                 "needs_clarification": True,
@@ -4407,15 +4669,16 @@ Rules:
             standalone_query,
             understanding_summary,
             {
-                "videos": [] if (is_resp_out_of_scope or is_social or is_clarification) else final_videos,
-                "images": [] if (is_resp_out_of_scope or is_social or is_clarification) else all_images,
-                "pdfs": [] if (is_resp_out_of_scope or is_social or is_clarification) else all_pdfs,
-                "pdf_context_chunks": [] if (is_resp_out_of_scope or is_social or is_clarification) else pdf_context_chunks,
-                "transcript_chunks": [] if (is_resp_out_of_scope or is_social or is_clarification) else transcript_chunks,
-                "topic_codes": [] if (is_resp_out_of_scope or is_social or is_clarification) else all_topic_codes,
+                "videos": [] if (is_resp_out_of_scope or is_social or is_clarification or is_course_discovery) else final_videos,
+                "images": [] if (is_resp_out_of_scope or is_social or is_clarification or is_course_discovery) else all_images,
+                "pdfs": [] if (is_resp_out_of_scope or is_social or is_clarification or is_course_discovery) else all_pdfs,
+                "pdf_context_chunks": [] if (is_resp_out_of_scope or is_social or is_clarification or is_course_discovery) else pdf_context_chunks,
+                "transcript_chunks": [] if (is_resp_out_of_scope or is_social or is_clarification or is_course_discovery) else transcript_chunks,
+                "topic_codes": [] if (is_resp_out_of_scope or is_social or is_clarification or is_course_discovery) else all_topic_codes,
                 "question_scope": question_scope,
-                "company_answer": None if (is_resp_out_of_scope or is_social or is_clarification) else company_answer,
+                "company_answer": None if (is_resp_out_of_scope or is_social or is_clarification or is_course_discovery) else company_answer,
                 "clarification": clarification_payload if is_clarification else None,
+                "matched_courses": state.get("matched_courses", []),
                 "latencies": latencies,
             }
         )

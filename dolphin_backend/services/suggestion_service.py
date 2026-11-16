@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import random
@@ -193,6 +194,21 @@ class SuggestionService:
                 question = template.format(topic=topic_phrase)
                 if word_count_within(question, 5, 8):
                     suggestions.append(question)
+
+            clean_anchor = (short_topic or query or "").strip()
+            if clean_anchor:
+                clean_anchor = re.sub(r'^(what\s+is|how\s+to|explain|overview\s+of)\s+', '', clean_anchor, flags=re.IGNORECASE).strip()
+            if clean_anchor and len(clean_anchor) >= 3 and clean_anchor.lower() not in ("marine", "general", "query"):
+                topic_fallbacks = [
+                    f"What keeps {clean_anchor} safe at sea?",
+                    f"Why is {clean_anchor} vital onboard?",
+                    f"How to handle {clean_anchor} underway?",
+                ]
+                for tf in topic_fallbacks:
+                    if len(suggestions) >= 2:
+                        break
+                    if tf not in suggestions:
+                        suggestions.append(tf)
 
             safe_pool = [
                 "How does anchor scope aid navigation?",

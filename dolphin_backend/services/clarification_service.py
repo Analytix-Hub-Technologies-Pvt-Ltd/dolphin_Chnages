@@ -63,6 +63,7 @@ _GENERAL_WORDS = {"general", "generic", "overview", "basics", "basic", "anything
 _AFFIRMATIVE_WORDS = {
     "yes", "yeah", "yep", "yup", "sure", "ok", "okay", "proceed", "confirm",
     "continue", "why not", "definitely", "correct", "tell me", "show me",
+    "yse", "ya", "yea", "y", "yes please",
 }
 _NEGATIVE_WORDS = {
     "no", "nope", "nah", "never", "cancel", "dont", "don't", "stop", "skip",
@@ -890,6 +891,11 @@ Rules: Use only the numbered course topics; never invent topics; set 'ambiguous'
         if not toks or len(toks) > 6:
             return None
 
+        # Cross-domain term match (e.g. user typed "squat" or "bridge")
+        term = _norm(pending.get("term", ""))
+        if term and (norm == term or (len(term) >= 3 and term in toks)):
+            return options[0]
+
         # Affirmative replies ("yes", "sure", "proceed", "1")
         if any(t in _AFFIRMATIVE_WORDS for t in toks) and not any(t in _NEGATIVE_WORDS for t in toks):
             return options[0]
@@ -1000,32 +1006,60 @@ Rules: Use only the numbered course topics; never invent topics; set 'ambiguous'
         target_query: str,
     ) -> Tuple[str, Dict[str, Any]]:
         """
-        Build text-only confirmation message (NO BUTTONS) where user confirms by typing in chat.
+        Build Smart Disambiguation Card message with one-click direct action.
         """
+        import urllib.parse
         clean_user_q = user_query.strip().rstrip("?.!")
+
+        clean_term = overlap_term.strip()
+        display_label = maritime_label.strip()
+        if display_label.lower() == clean_term.lower():
+            known_context = {
+                "squat": "Vessel Hydrodynamic Squat",
+                "bridge": "Navigation Bridge on a vessel",
+                "port": "Ship's Port Side & Port Facilities",
+                "bow": "Vessel Bow Operations",
+                "stern": "Vessel Stern Operations",
+                "draft": "Vessel Draft & Displacement",
+                "trim": "Vessel Trim & Stability",
+                "heel": "Vessel Heel & List",
+                "rudder": "Marine Steering Rudder",
+                "anchor": "Ship Ground Tackle & Anchoring",
+            }
+            display_label = known_context.get(clean_term.lower(), f"Maritime {clean_term.title()}")
+
+        action_title = f"Explore {display_label}"
+        encoded_q = urllib.parse.quote(target_query)
+
         text = (
-            f"**\"{clean_user_q}\"** appears to fall outside our maritime training curriculum.\n\n"
-            f"However, in maritime navigation and nautical science, **{overlap_term.title()}** refers to **{maritime_label}**.\n\n"
-            f"Would you like to learn about this maritime topic?\n"
-            f"• Reply with **yes** (or type **{overlap_term}**) to proceed with the explanation.\n"
-            f"• Reply with **no** or ask another question to skip."
+            f"**\"{clean_user_q}\"** is outside our maritime training curriculum. "
+            f"Did you mean the maritime topic **{display_label}**?\n\n"
+            f"👉 **[{action_title}](#ask:{encoded_q})**"
         )
+
+        cross_suggestions = [
+            f"What is the principle of {display_label}?",
+            f"How does {clean_term} affect ship navigation?",
+            f"What safety precautions apply to {clean_term}?",
+        ]
+
         clar_payload = {
             "term": overlap_term,
             "original_query": user_query,
             "kind": "cross_domain_confirmation",
-            "question": f"Would you like to learn about {maritime_label}?",
+            "question": f"Did you mean {display_label}?",
             "options": [
                 {
                     "id": 1,
-                    "label": maritime_label,
+                    "label": action_title,
                     "query": target_query,
                     "kind": "confirmation",
-                    "topic_name": maritime_label,
+                    "topic_name": display_label,
                     "topic_code": "",
-                    "hint": "",
+                    "hint": f"Explore {display_label} in maritime navigation",
                 }
             ],
+            "suggestions": cross_suggestions,
             "intro": "",
         }
         return text, clar_payload

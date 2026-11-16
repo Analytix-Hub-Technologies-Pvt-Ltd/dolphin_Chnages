@@ -340,6 +340,8 @@ const EMPTY_ACC = () => ({
   transcripts: [],
   matched_pdf_chunks: [],
   checkLicCoursesData: null,
+  isCourseDiscovery: false,
+  category: null,
 });
 
 // ─── Component ────
@@ -511,6 +513,8 @@ const ChatWindow = ({
           matched_pdf_chunks: acc.matched_pdf_chunks || [],
           question_suggestions: acc.suggestions || [],
           checkLicCoursesData: acc.checkLicCoursesData,
+          category: acc.category || (acc.isCourseDiscovery ? "COURSE_DISCOVERY" : null),
+          isCourseDiscovery: acc.isCourseDiscovery || false,
           timestamp: new Date().toISOString(),
           mediaLoaded: true,
         },
@@ -729,6 +733,16 @@ const ChatWindow = ({
               }
             },
 
+            onCourseDiscovery: (courses) => {
+              accRef.current.isCourseDiscovery = true;
+              accRef.current.category = "COURSE_DISCOVERY";
+              setLiveMessage((prev) => ({
+                ...prev,
+                isCourseDiscovery: true,
+                category: "COURSE_DISCOVERY",
+              }));
+            },
+
             onCheckLicCourses: (data) => {
               accRef.current.checkLicCoursesData = data;
               setLiveMessage((prev) => ({
@@ -792,6 +806,8 @@ const ChatWindow = ({
                     matched_pdf_chunks: acc.matched_pdf_chunks || [],
                     question_suggestions: acc.suggestions || [],
                     checkLicCoursesData: acc.checkLicCoursesData,
+                    category: acc.category || (acc.isCourseDiscovery ? "COURSE_DISCOVERY" : null),
+                    isCourseDiscovery: acc.isCourseDiscovery || false,
                     timestamp: new Date().toISOString(),
                     mediaLoaded: true,
                   },

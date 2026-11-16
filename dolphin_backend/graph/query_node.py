@@ -1367,10 +1367,8 @@ VARIATION REQUIREMENTS:
 
         if distinct_course_chapters:
             import urllib.parse
-            for dcc in distinct_course_chapters:
-                if dcc not in dynamic_suggestions:
-                    dynamic_suggestions.append(dcc)
-
+            # Chapter titles are formatted for in-text links (chapter_block);
+            # do not append chapter titles into the question_suggestions chips array.
             links_md = "\n".join([f"- **[{ch}](#ask:{urllib.parse.quote(ch)})**" for ch in distinct_course_chapters])
             chapter_block = f"**Also covered in course chapters:**\n{links_md}"
             if chapter_block not in answer:

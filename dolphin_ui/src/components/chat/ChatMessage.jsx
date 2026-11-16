@@ -21,6 +21,7 @@ import FeedbackRatingButtons from "./FeedbackRatingButtons";
 import { resolveImageUrl } from "../../api/config";
 import PdfThumbnail from "./PdfThumbnail";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import MenuBookIcon from "@mui/icons-material/MenuBook";
 
 // ─── Testing Feature Flag ───
 // Set to false to revert UI 100% to original layout with zero inspector/citation elements.
@@ -564,6 +565,17 @@ const ChatMessage = ({
       msg.content.toLowerCase().includes("specialized exclusively in maritime")
     ));
 
+  const isCourseDiscovery =
+    msg.category === "COURSE_DISCOVERY" ||
+    msg.metadata?.category === "COURSE_DISCOVERY" ||
+    msg.isCourseDiscovery === true ||
+    (typeof msg.content === "string" && (
+      msg.content.includes("Based on your enrolled curriculum, you have") ||
+      msg.content.includes("You do not have any enrolled courses related to") ||
+      (/training officer/i.test(msg.content) && /course|curriculum|enrolled/i.test(msg.content)) ||
+      (/(?:enrolled|assigned|curriculum)\s+courses?/i.test(msg.content) && /^\s*[*•-]\s+/m.test(msg.content))
+    ));
+
   const isGreeting =
     msg.category === "GREETING" ||
     msg.type === "greeting" ||
@@ -576,7 +588,7 @@ const ChatMessage = ({
 
   // 1. Unified, deduplicated videos list (capped to strictly maximum 5; greetings return none)
   const unifiedVideos = React.useMemo(() => {
-    if (isGreeting || isOutOfScope || isUser) return [];
+    if (isGreeting || isOutOfScope || isUser || isCourseDiscovery) return [];
 
     const rawList = [
       ...(msg.transcripts || []).map((t) => ({
@@ -610,7 +622,7 @@ const ChatMessage = ({
     }
 
     return result;
-  }, [msg.transcripts, msg.videos, videos_suggestions, isGreeting, isOutOfScope, isUser]);
+  }, [msg.transcripts, msg.videos, videos_suggestions, isGreeting, isOutOfScope, isUser, isCourseDiscovery]);
 
   // Topic metadata extraction
   const primaryTopic = React.useMemo(() => {
@@ -649,7 +661,7 @@ const ChatMessage = ({
 
   // 1a. Dedicated Topic / Curriculum Videos (for testing inspector)
   const topicVideos = React.useMemo(() => {
-    if (isGreeting || isOutOfScope || isUser) return [];
+    if (isGreeting || isOutOfScope || isUser || isCourseDiscovery) return [];
     const firstTopicCode = primaryTopic?.code || "";
     const firstTopicName = primaryTopic?.name || "";
     const rawList = [
@@ -682,11 +694,11 @@ const ChatMessage = ({
       if (result.length >= 5) break;
     }
     return result;
-  }, [msg.videos, videos_suggestions, primaryTopic, isGreeting, isOutOfScope, isUser]);
+  }, [msg.videos, videos_suggestions, primaryTopic, isGreeting, isOutOfScope, isUser, isCourseDiscovery]);
 
   // 1b. Dedicated Transcript-Matched Videos (for testing inspector)
   const transcriptVideos = React.useMemo(() => {
-    if (isGreeting || isOutOfScope || isUser) return [];
+    if (isGreeting || isOutOfScope || isUser || isCourseDiscovery) return [];
     const rawTranscripts = msg.transcripts || msg?.metadata?.transcripts || [];
     const rawList = (rawTranscripts || []).map((t) => {
       const vUrl = t.video_link || t.Url || t.url || t.videourl || "";
@@ -720,13 +732,13 @@ const ChatMessage = ({
       if (result.length >= 5) break;
     }
     return result;
-  }, [msg.transcripts, msg?.metadata?.transcripts, isGreeting, isOutOfScope, isUser]);
+  }, [msg.transcripts, msg?.metadata?.transcripts, isGreeting, isOutOfScope, isUser, isCourseDiscovery]);
 
   const [failedImageUrls, setFailedImageUrls] = useState(() => new Set());
 
   // 2. Unified, deduplicated images list (capped to strictly maximum 5; broken images and raw scanned text pages excluded)
   const normalizedImages = React.useMemo(() => {
-    if (isGreeting || isOutOfScope || isUser) return [];
+    if (isGreeting || isOutOfScope || isUser || isCourseDiscovery) return [];
     const seen = new Set();
     return (images_suggestions || msg?.images || msg?.metadata?.images || [])
       .map(normalizeImage)
@@ -760,11 +772,11 @@ const ChatMessage = ({
         return true;
       })
       .slice(0, 5);
-  }, [images_suggestions, msg?.images, msg?.metadata?.images, failedImageUrls, isGreeting, isOutOfScope, isUser]);
+  }, [images_suggestions, msg?.images, msg?.metadata?.images, failedImageUrls, isGreeting, isOutOfScope, isUser, isCourseDiscovery]);
 
   // 3. Unified, deduplicated PDFs list (capped to strictly maximum 5)
   const normalizedPdfs = React.useMemo(() => {
-    if (isGreeting || isOutOfScope || isUser) return [];
+    if (isGreeting || isOutOfScope || isUser || isCourseDiscovery) return [];
     const seen = new Set();
     const result = [];
     const rawList = [
@@ -809,15 +821,15 @@ const ChatMessage = ({
     }
 
     return result;
-  }, [pdf_suggestions, msg?.pdfs, msg?.metadata?.pdfs, isGreeting, isOutOfScope, isUser]);
+  }, [pdf_suggestions, msg?.pdfs, msg?.metadata?.pdfs, isGreeting, isOutOfScope, isUser, isCourseDiscovery]);
 
   const matchedPdfChunks = React.useMemo(() => {
-    if (isGreeting || isOutOfScope || isUser) return [];
+    if (isGreeting || isOutOfScope || isUser || isCourseDiscovery) return [];
     return msg?.matched_pdf_chunks || [];
-  }, [msg?.matched_pdf_chunks, isGreeting, isOutOfScope, isUser]);
+  }, [msg?.matched_pdf_chunks, isGreeting, isOutOfScope, isUser, isCourseDiscovery]);
 
   const groupedVectorPdfs = React.useMemo(() => {
-    if (isGreeting || isOutOfScope || isUser) return [];
+    if (isGreeting || isOutOfScope || isUser || isCourseDiscovery) return [];
     const rawChunks = msg?.matched_pdf_chunks || [];
     if (!rawChunks || rawChunks.length === 0) return [];
 
@@ -874,7 +886,7 @@ const ChatMessage = ({
       }
     }
     return Array.from(map.values());
-  }, [msg?.matched_pdf_chunks, isGreeting, isOutOfScope, isUser]);
+  }, [msg?.matched_pdf_chunks, isGreeting, isOutOfScope, isUser, isCourseDiscovery]);
 
   const rawSuggestions = msg.question_suggestions || [];
   const normalizedSuggestions = useMemo(() => {
@@ -920,6 +932,7 @@ const ChatMessage = ({
   const shouldShowMedia =
     !isOutOfScope &&
     !isGreeting &&
+    !isCourseDiscovery &&
     Boolean(msg.content && msg.content.length > 0);
   const shouldShowQuestions =
     !isOutOfScope && !isClarification && normalizedSuggestions.length > 0;
@@ -1521,7 +1534,7 @@ const ChatMessage = ({
                 )}
 
                 {/* Test Mode: Interactive Topic Pill Banner */}
-                {ENABLE_MEDIA_INSPECTOR && !isUser && (Boolean(primaryTopic?.name) || Boolean(primaryTopic?.code) || (msg.topics && msg.topics.length > 0) || Boolean(topicVideos?.[0]?.topic_code)) && (
+                {ENABLE_MEDIA_INSPECTOR && !isUser && !isCourseDiscovery && (Boolean(primaryTopic?.name) || Boolean(primaryTopic?.code) || (msg.topics && msg.topics.length > 0) || Boolean(topicVideos?.[0]?.topic_code)) && (
                   <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.8, mb: 1.5, alignItems: "center" }}>
                     <Typography variant="caption" sx={{ color: "text.caption", fontWeight: 700, fontSize: "0.72rem" }}>
                       TOPIC REF:
@@ -2103,92 +2116,175 @@ const ChatMessage = ({
               )
             )}
 
-            {/* Related Courses UI temporarily hidden.
+            {/* Reference Course Section (Shown only if the user has an active license for the course) */}
             {(() => {
-              if (isOutOfScope || !msg.checkLicCoursesData || !Array.isArray(msg.checkLicCoursesData) || msg.checkLicCoursesData.length === 0) return null;
+              if (
+                isGreeting ||
+                isOutOfScope ||
+                isUser ||
+                isCourseDiscovery ||
+                !msg.checkLicCoursesData ||
+                !Array.isArray(msg.checkLicCoursesData) ||
+                msg.checkLicCoursesData.length === 0
+              ) {
+                return null;
+              }
 
-              const userType = msg.checkLicCoursesData[0]?.user_type?.toLowerCase() || "";
-              const isStudent = userType === "student";
+              // STRICT GATE: Only show courses where matched === true (licensed)
+              const coursesToShow = msg.checkLicCoursesData.filter((item) => Boolean(item && item.matched));
 
-              const coursesToShow = msg.checkLicCoursesData.filter((item) => {
-                if (isStudent) return item.matched;
-                return true;
-              });
+              if (coursesToShow.length === 0) return null;
 
               const uniqueCoursesMap = new Map();
               coursesToShow.forEach((item) => {
                 const courseInfo = item.data?.course;
                 if (courseInfo) {
-                  const code = courseInfo.CourseCode || courseInfo.courseCode;
-                  if (code && !uniqueCoursesMap.has(code)) {
-                    uniqueCoursesMap.set(code, {
+                  const code = courseInfo.CourseCode || courseInfo.courseCode || courseInfo.course_code;
+                  const name = courseInfo.CourseName || courseInfo.courseName || courseInfo.course_name;
+                  const dedupKey = (name || code || "").trim().toLowerCase();
+                  if (dedupKey && !uniqueCoursesMap.has(dedupKey)) {
+                    uniqueCoursesMap.set(dedupKey, {
                       ...courseInfo,
-                      matched: item.matched,
-                      topicName: item.data?.topic_name
+                      matched: true,
+                      topicName: item.data?.topic_name || "",
+                      topicCode: item.data?.topic_code || "",
+                      courseCode: code,
+                      courseName: name,
                     });
                   }
                 }
               });
 
               const uniqueCourses = Array.from(uniqueCoursesMap.values());
-
               if (uniqueCourses.length === 0) return null;
 
               return (
-                <Box sx={{ mt: 3, mb: 1 }}>
-                  <Typography
-                    variant="overline"
+                <Box sx={{ mt: 2.5 }}>
+                  <Box
                     sx={{
-                      color: "text.secondary",
-                      fontWeight: 700,
-                      letterSpacing: "0.08em",
-                      mb: 1.5,
-                      display: "block"
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 0.8,
+                      mb: 1,
                     }}
                   >
-                    Related Courses
-                  </Typography>
-                  <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+                    <MenuBookIcon
+                      sx={{
+                        fontSize: 20,
+                        color: mode === "dark" ? "#e8f1fb" : "#0f1c2e",
+                      }}
+                    />
+                    <Typography variant="h3" sx={{ color: "text.primary" }}>
+                      Reference Course
+                    </Typography>
+                  </Box>
+
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, py: 0.5 }}>
                     {uniqueCourses.map((course, i) => (
                       <Box
-                        key={i}
+                        key={`ref-course-${course.courseCode || i}`}
+                        onClick={() => {
+                          if (onOpenInspector) {
+                            onOpenInspector({
+                              sectionTitle: "Reference Course",
+                              topic_name: course.topicName || primaryTopic?.name || "",
+                              topic_code: course.topicCode || primaryTopic?.code || "",
+                              course_code: course.courseCode || primaryCourse?.code || "",
+                              course_name: course.courseName || primaryCourse?.name || "",
+                              video: topicVideos?.[0] || null,
+                              image: normalizedImages?.[0] || null,
+                              pdf: normalizedPdfs?.[0] || null,
+                            });
+                          }
+                        }}
                         sx={(theme) => ({
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "space-between",
                           p: 1.5,
                           borderRadius: 2,
-                          backgroundColor: course.matched
-                            ? theme.palette.mode === "dark" ? "rgba(46, 125, 50, 0.15)" : "rgba(46, 125, 50, 0.04)"
-                            : theme.palette.mode === "dark" ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)",
-                          border: `1px solid ${course.matched
-                            ? theme.palette.mode === "dark" ? "rgba(76, 175, 80, 0.3)" : "rgba(46, 125, 50, 0.2)"
-                            : theme.palette.divider
-                            }`,
+                          backgroundColor:
+                            theme.palette.mode === "dark"
+                              ? "rgba(46, 125, 50, 0.12)"
+                              : "rgba(46, 125, 50, 0.05)",
+                          border: `1px solid ${
+                            theme.palette.mode === "dark"
+                              ? "rgba(76, 175, 80, 0.35)"
+                              : "rgba(46, 125, 50, 0.25)"
+                          }`,
+                          cursor: onOpenInspector ? "pointer" : "default",
+                          transition: "all 0.2s ease",
+                          "&:hover": {
+                            borderColor:
+                              theme.palette.mode === "dark"
+                                ? "rgba(129, 199, 132, 0.6)"
+                                : "rgba(46, 125, 50, 0.5)",
+                            backgroundColor:
+                              theme.palette.mode === "dark"
+                                ? "rgba(46, 125, 50, 0.18)"
+                                : "rgba(46, 125, 50, 0.08)",
+                          },
                         })}
                       >
-                        <Box>
-                          <Typography variant="body2" sx={{ fontWeight: 600, color: "text.primary" }}>
-                            {course.CourseName || course.courseName || "Unknown Course"}
+                        <Box sx={{ minWidth: 0, flex: 1 }}>
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              fontWeight: 600,
+                              color: "text.primary",
+                              wordBreak: "break-word",
+                            }}
+                          >
+                            {course.courseName || "Curriculum Training Course"}
                           </Typography>
-                          <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mt: 0.5 }}>
-                            {course.topicName && `Topic: ${course.topicName}`}
-                          </Typography>
-                        </Box>
-                        {course.matched && (
-                          <Box sx={{ bgcolor: "success.main", color: "success.contrastText", px: 1.5, py: 0.5, borderRadius: 1.5, fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.05em" }}>
-                            LICENSED
+                          <Box
+                            sx={{
+                              display: "flex",
+                              flexWrap: "wrap",
+                              alignItems: "center",
+                              gap: 0.8,
+                              mt: 0.5,
+                            }}
+                          >
+                            {course.courseCode && (
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  color: "text.secondary",
+                                  fontSize: "0.75rem",
+                                  fontWeight: 500,
+                                }}
+                              >
+                                Course Code: <strong>{course.courseCode}</strong>
+                              </Typography>
+                            )}
+                            {course.courseCode && course.topicName && (
+                              <Typography
+                                variant="caption"
+                                sx={{ color: "text.disabled", fontSize: "0.75rem" }}
+                              >
+                                •
+                              </Typography>
+                            )}
+                            {course.topicName && (
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  color: "text.secondary",
+                                  fontSize: "0.75rem",
+                                }}
+                              >
+                                Topic: {course.topicName}
+                              </Typography>
+                            )}
                           </Box>
-                        )}
+                        </Box>
                       </Box>
                     ))}
                   </Box>
                 </Box>
               );
             })()}
-
-
-            */}
 
             {/* Follow-up suggestions (Preserved "Try asking..." full questions) */}
             {shouldShowQuestions && (

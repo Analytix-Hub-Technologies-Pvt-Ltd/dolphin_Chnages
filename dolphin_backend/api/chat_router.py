@@ -154,7 +154,8 @@ async def chat(
 
     # Non-streaming PDF Vector Retrieval (Part 2)
     try:
-        if not is_simple_social_intent(user_content):
+        is_course_discovery_nonstream = bool(chat_service._detect_course_discovery_intent(user_content))
+        if not is_simple_social_intent(user_content) and not is_course_discovery_nonstream:
             # Reuse PDF context chunks from run_chat extras (Call #1) to ensure the UI
             # displays the exact documents used during answer generation without duplicate searching.
             raw_pdf_chunks = (extras or {}).get("pdf_context_chunks")
@@ -203,6 +204,16 @@ async def chat(
             updated_messages[-1]["transcripts"] = raw_tr_chunks
     except Exception as tr_err:
         logger.debug(f"Non-fatal transcript attachment error: {tr_err}")
+
+    # Non-streaming Course Discovery attachment
+    try:
+        raw_matched_courses = (extras or {}).get("matched_courses")
+        if raw_matched_courses and updated_messages and isinstance(updated_messages[-1], dict) and updated_messages[-1].get("role") == "assistant":
+            updated_messages[-1]["matched_courses"] = raw_matched_courses
+            updated_messages[-1]["category"] = "COURSE_DISCOVERY"
+            updated_messages[-1]["checkLicCoursesData"] = []
+    except Exception as mc_err:
+        logger.debug(f"Non-fatal matched_courses attachment error: {mc_err}")
 
     logger.info(f"Updated messages count: {len(updated_messages)}")
 
@@ -420,10 +431,11 @@ async def chat1(
             transcript_dur = 0.0
             pdf_dur = 0.0
             is_social_query = bool(is_simple_social_intent(user_content))
+            is_course_discovery_query = bool(chat_service._detect_course_discovery_intent(user_content))
             transcript_task: Optional[asyncio.Task] = None
             pdf_task: Optional[asyncio.Task] = None
 
-            if not is_social_query:
+            if not is_social_query and not is_course_discovery_query:
                 async def transcript_search():
                     nonlocal transcript_dur
                     try:
@@ -494,7 +506,13 @@ async def chat1(
                 media
             ) = await chat_task
 
-           
+            matched_courses = (media or {}).get("matched_courses") or (node_response.metadata or {}).get("matched_courses") or []
+            is_course_discovery_resp = bool((node_response.metadata or {}).get("category") == "COURSE_DISCOVERY" or getattr(node_response, "category", "") == "COURSE_DISCOVERY" or is_course_discovery_query)
+            if is_course_discovery_resp:
+                yield f"data: {json.dumps({'type': 'course_discovery', 'is_course_discovery': True, 'courses': matched_courses})}\n\n"
+            elif matched_courses:
+                yield f"data: {json.dumps({'type': 'matched_courses', 'courses': matched_courses})}\n\n"
+
             sections = node_response.sections or []
 
             clarification_payload = (node_response.metadata or {}).get("clarification")
@@ -602,7 +620,9 @@ async def chat1(
                 "does not cover",
             ])
 
-            if is_stream_out_of_scope or is_resp_social or suppress_extras or is_course_missing:
+            is_course_discovery_resp = bool((node_response.metadata or {}).get("category") == "COURSE_DISCOVERY" or matched_courses)
+
+            if is_stream_out_of_scope or is_resp_social or suppress_extras or is_course_missing or is_course_discovery_resp:
                 media_videos = []
                 media_images = []
                 media_pdfs = []
@@ -660,7 +680,7 @@ async def chat1(
                             "course_name": "",
                         })
 
-            if not is_stream_out_of_scope and not is_resp_social and not suppress_extras:
+            if not is_stream_out_of_scope and not is_resp_social and not suppress_extras and not is_course_discovery_resp:
                 media_payload = {
                     "type": "media",
                     "videos": media_videos[:5],
@@ -677,7 +697,7 @@ async def chat1(
                 for top in extracted_topics:
                     yield f"data: {json.dumps({'type': 'source_topic', 'topic_code': top['code'], 'topic_name': top['name']})}\n\n"
 
-            company_answer = None if (is_stream_out_of_scope or is_resp_social or suppress_extras) else media.get("company_answer")
+            company_answer = None if (is_stream_out_of_scope or is_resp_social or suppress_extras or is_course_discovery_resp) else media.get("company_answer")
 
             if company_answer:
                 yield (
@@ -699,7 +719,7 @@ async def chat1(
                 if transcript_task is not None and not transcript_task.done():
                     transcript_task.cancel()
                 transcript_chunks = cached_transcripts
-            elif is_stream_out_of_scope or is_resp_social or suppress_extras or transcript_task is None:
+            elif is_stream_out_of_scope or is_resp_social or suppress_extras or is_course_discovery_resp or transcript_task is None:
                 if transcript_task is not None and not transcript_task.done():
                     transcript_task.cancel()
                 transcript_chunks = []
@@ -787,7 +807,9 @@ async def chat1(
             # -----------------------------
             # PDF VECTOR RESULT (PART 2)
             # -----------------------------
-            if is_stream_out_of_scope or is_resp_social or suppress_extras or is_course_missing:
+            is_course_discovery_resp = bool((node_response.metadata or {}).get("category") == "COURSE_DISCOVERY" or matched_courses)
+
+            if is_stream_out_of_scope or is_resp_social or suppress_extras or is_course_missing or is_course_discovery_resp:
                 if pdf_task is not None and not pdf_task.done():
                     pdf_task.cancel()
                 raw_pdf_chunks = []
@@ -851,16 +873,26 @@ async def chat1(
                         
             # Attach rich media, transcripts, and topics to saved session message
             if updated_messages and isinstance(updated_messages[-1], dict) and updated_messages[-1].get("role") == "assistant":
-                if unique_chunks:
-                    updated_messages[-1]["transcripts"] = unique_chunks
-                if unique_pdf_chunks:
-                    updated_messages[-1]["matched_pdf_chunks"] = unique_pdf_chunks
-                if extracted_topics:
-                    updated_messages[-1]["topics"] = extracted_topics
-                if media_topic_codes:
-                    updated_messages[-1]["topic_codes"] = media_topic_codes
-                if media_videos:
-                    updated_messages[-1]["videos"] = media_videos[:5]
+                if is_course_discovery_resp:
+                    updated_messages[-1]["category"] = "COURSE_DISCOVERY"
+                    updated_messages[-1]["matched_courses"] = matched_courses
+                    updated_messages[-1]["transcripts"] = []
+                    updated_messages[-1]["matched_pdf_chunks"] = []
+                    updated_messages[-1]["topics"] = []
+                    updated_messages[-1]["topic_codes"] = []
+                    updated_messages[-1]["videos"] = []
+                    updated_messages[-1]["checkLicCoursesData"] = []
+                else:
+                    if unique_chunks:
+                        updated_messages[-1]["transcripts"] = unique_chunks
+                    if unique_pdf_chunks:
+                        updated_messages[-1]["matched_pdf_chunks"] = unique_pdf_chunks
+                    if extracted_topics:
+                        updated_messages[-1]["topics"] = extracted_topics
+                    if media_topic_codes:
+                        updated_messages[-1]["topic_codes"] = media_topic_codes
+                    if media_videos:
+                        updated_messages[-1]["videos"] = media_videos[:5]
 
             # -----------------------------
             # SAVE (Concurrent Redis + PostgreSQL)

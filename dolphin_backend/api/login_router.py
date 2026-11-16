@@ -22,6 +22,9 @@ ALGORITHM = settings.algorithm
 COMPANY_COURSES_API_URL = "https://cms.marinerskills.com/api/companycourses"
 COMPANY_COURSES_SECURITY_KEY = "FslKvipEQ3hT2PfdZla00hp"
 
+STUDENT_COURSES_API_URL = "https://cms.marinerskills.com/api/studentcourses"
+STUDENT_COURSES_SECURITY_KEY = "FslKviDfp2tH3qeZla00hp"
+
 router = APIRouter(prefix="/login", tags=["auth"])
 
 @router.get("/debug-db")
@@ -294,6 +297,76 @@ async def login(
                 logger.warning(f"Error fetching company courses: {e}")
 
         # -------------------------------------------------
+        # FETCH STUDENT / USER LICENSED COURSES
+        # -------------------------------------------------
+        user_courses_data = []
+        target_username = user.user_name or (clean_email if 'clean_email' in locals() else None)
+        if target_username and (settings.app_env == "production" or not settings.disable_external_auth):
+            try:
+                sc_response = requests.post(
+                    STUDENT_COURSES_API_URL,
+                    json={
+                        "UserName": target_username,
+                        "SecurityKey": STUDENT_COURSES_SECURITY_KEY
+                    },
+                    timeout=5.0
+                )
+                if sc_response.status_code == 200:
+                    sc_data = sc_response.json()
+                    if isinstance(sc_data, list):
+                        user_courses_data = sc_data
+                    elif isinstance(sc_data, dict):
+                        if "courses" in sc_data and isinstance(sc_data["courses"], list):
+                            user_courses_data = sc_data["courses"]
+                        else:
+                            # Handle CMS studentcourses format: {"StudentId": ..., "CompletedCourses": "...", "PendingCourses": "..."}
+                            raw_course_entries = []
+                            for key in ["CompletedCourses", "PendingCourses"]:
+                                val = sc_data.get(key)
+                                if isinstance(val, str) and val.strip():
+                                    raw_course_entries.extend([item.strip() for item in val.split(",") if item.strip()])
+                                elif isinstance(val, list):
+                                    raw_course_entries.extend(val)
+                            
+                            user_courses_data = []
+                            for entry in raw_course_entries:
+                                if isinstance(entry, dict):
+                                    user_courses_data.append(entry)
+                                elif isinstance(entry, str):
+                                    parts = entry.split("-", 1)
+                                    code_prefix = parts[0].strip() if len(parts) > 1 else entry.strip()
+                                    user_courses_data.append({
+                                        "CourseCode": code_prefix,
+                                        "CourseName": entry.strip()
+                                    })
+                    try:
+                        async with pool.acquire() as conn:
+                            await conn.execute(
+                                """
+                                UPDATE users
+                                SET user_courses = $1,
+                                    updated_at = NOW()
+                                WHERE id = $2
+                                """,
+                                json.dumps(user_courses_data),
+                                str(user.id)
+                            )
+                    except Exception as db_err:
+                        logger.warning(f"Error updating user_courses in DB: {db_err}")
+            except Exception as e:
+                logger.warning(f"Error fetching student courses: {e}")
+
+        # Fallback to existing DB user_courses if external call was empty or offline
+        if not user_courses_data and user.user_courses:
+            try:
+                if isinstance(user.user_courses, str):
+                    user_courses_data = json.loads(user.user_courses)
+                elif isinstance(user.user_courses, list):
+                    user_courses_data = user.user_courses
+            except Exception:
+                user_courses_data = []
+
+        # -------------------------------------------------
         # STORE USER IN REDIS
         # -------------------------------------------------
         user_data = {
@@ -306,7 +379,7 @@ async def login(
             "user_type": user.user_type,
             "ship_name": user.ship_name,
             "ship_type": user.ship_type,
-            "user_courses": user.user_courses,
+            "user_courses": user_courses_data,
             "company_courses": company_courses
         }
 

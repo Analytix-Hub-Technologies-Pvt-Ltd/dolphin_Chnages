@@ -193,7 +193,12 @@ Return ONLY valid JSON.
 }}
 
 SUGGESTIONS RULES:
-- "suggestions" MUST be exactly 3 concise, relevant maritime follow-up questions that the user might want to ask next.
+- FOR IN-SCOPE MARITIME QUESTIONS:
+  * "suggestions" MUST be exactly 3 concise, highly relevant maritime follow-up questions that explore the NEXT logical steps, deeper operational limits, safety checks, or troubleshooting of the EXACT topic asked in {user_query}.
+  * DO NOT ask questions about unrelated background chunks, side systems, or different equipment that happen to be in COURSE CONTEXT.
+  * Every suggested question must stay strictly on the primary subject of {user_query}.
+- FOR OUT-OF-SCOPE NON-MARITIME QUESTIONS:
+  * Return the 3 standard maritime gateway questions as defined in Section 4.
 - Each suggestion MUST be phrased as a question and end with a question mark '?'.
 - Do NOT write advice or imperatives (e.g., do NOT say "Review the procedures...", "Practice...", "Familiarize...").
 
@@ -315,11 +320,12 @@ def generate_subtopic_header(target_name: str, query: str = "") -> str:
 
 def generate_subtopic_metadata(title: str, raw_content: str = "", parent_topic: str = "") -> dict:
     """
-    Synthesize an easy-to-read, 3 to 4 line substantive explanation for a subtopic.
+    Synthesize an easy-to-read, concise 1 to 2 line substantive explanation for a subtopic.
     STRICT CONSTRAINTS:
     - Pure text only. Absolutely NO emojis, arrows, or unicode symbols.
     - DO NOT include 'Description:' or 'Question:' prefixes.
     - Thoroughly clean out database artifacts (Topic Name:, Topic Content:, etc.).
+    - Strict 1 to 2 line limit without repetitive boilerplate.
     """
     clean_title = re.sub(r'^\s*[\d\.\-\s]+', '', title).strip()
 
@@ -340,131 +346,136 @@ def generate_subtopic_metadata(title: str, raw_content: str = "", parent_topic: 
 
     t_lower = clean_title.lower()
 
-    # Domain-aware 3-4 line explanations (NO 'Description:', NO 'Question:', NO symbols)
+    # Domain-aware 2-line concise explanations (NO 'Description:', NO 'Question:', NO symbols, NO '...', ~180-220 chars)
     if "comparison of ecdis" in t_lower or ("ecdis" in t_lower and "paper" in t_lower):
         explanation = (
-            "Compares electronic chart display systems against traditional paper charts across chart selection, updating procedures, and voyage planning workflows. "
-            "It details how electronic charts eliminate manual catalogue searching while highlighting required backup arrangements under SOLAS carriage regulations. "
-            "This helps officers understand when paperless navigation is legally permissible and how to maintain statutory compliance during bridge watches."
+            "Compares electronic chart display systems against traditional paper charts across selection, updating, and carriage requirements. "
+            "Details statutory backup arrangements under SOLAS navigation rules."
         )
     elif "difference between ecs" in t_lower or ("ecs" in t_lower and "ecdis" in t_lower):
         explanation = (
-            "Explains the critical legal and operational distinctions between an Electronic Chart System (ECS) and a type-approved ECDIS. "
-            "While both display digital navigational data, only an IMO-compliant ECDIS with official ENCs meets statutory SOLAS chart carriage requirements. "
-            "This guides navigators on equipment limitations, situational awareness, and when paper chart backups remain mandatory."
+            "Explains the legal and operational distinctions between an Electronic Chart System (ECS) and a type-approved ECDIS. "
+            "Outlines IMO compliance, ENC chart requirements, and situational awareness."
         )
     elif "safety of navigation" in t_lower or ("safety" in t_lower and "navigation" in t_lower):
         explanation = (
-            "Details operational bridge procedures, safety contour configurations, and anti-grounding alarms required to maintain navigational safety. "
-            "It covers watchkeeping cross-checks between visual bearings, radar overlays, and electronic charts to avoid over-reliance on automated systems. "
-            "Following these principles ensures safe passage execution and compliance with COLREGs and international bridge standards."
+            "Details bridge watchkeeping procedures, safety contour configurations, and navigational safety standards. "
+            "Covers cross-checks between visual bearings, radar overlays, and electronic charts."
         )
     elif any(k in t_lower for k in ["audit", "inspection", "inspector"]):
         explanation = (
-            f"Focuses on inspection walkthroughs, audit preparations, and compliance verification for {clean_title}. "
-            f"It details statutory certificates, safety equipment checks, and crew operational competencies verified during official audits. "
-            f"Following these procedures ensures the vessel rectifies potential non-conformities early and avoids detention or operational delays."
+            f"Focuses on walkthroughs, audit preparations, and compliance verification for {clean_title}. "
+            f"Details statutory certificates, safety equipment checks, and crew operational competencies."
         )
     elif any(k in t_lower for k in ["mou", "memorand"]):
         explanation = (
-            "Covers regional agreements like Paris MoU and Tokyo MoU coordinating harmonized ship inspection standards worldwide. "
-            "It explains how regional authorities calculate ship risk profiles, targeting factors, and inspection priority bands. "
-            "Officers learn how compliance history influences inspection frequency and how to prepare the vessel for regional scrutiny."
+            "Covers port state control harmonized standards, ship risk profiles, and targeting factors under regional MoUs. "
+            "Explains how inspection priority bands and compliance history affect port state scrutiny."
         )
     elif any(k in t_lower for k in ["verification", "certificate", "certification", "statutory"]):
         explanation = (
-            f"Details statutory certificates, logbook entries, and crew operational competencies verified during {clean_title}. "
-            f"It highlights mandatory documentation required under SOLAS, MARPOL, and STCW conventions during flag and port state controls. "
-            f"This clarifies valid certificate validity periods, survey endorsements, and onboard record-keeping procedures."
+            f"Details statutory certificates, survey endorsements, and onboard record-keeping required for {clean_title}. "
+            f"Clarifies valid certificate periods and compliance verifications under IMO conventions."
         )
     elif "scheme a" in t_lower:
         explanation = (
-            "Covers Scheme A certification, certified emission limits, and manufacturer documentation approval under MARPOL Annex VI regulations. "
-            "It explains how continuous parameter monitoring demonstrates compliance without continuous gas analyzer dependency. "
-            "Chief engineers can verify parameter check routines and ensure exhaust gas cleaning record books are properly maintained."
+            "Covers Scheme A certification, certified emission limits, and manufacturer documentation approval under MARPOL Annex VI. "
+            "Explains parameter check routines and exhaust gas cleaning record keeping."
         )
     elif "scheme b" in t_lower:
         explanation = (
-            "Covers Scheme B continuous emission monitoring (CEMS), daily parameter logging, and sensor validation procedures. "
-            "It details continuous measurement of SO2 and CO2 ratios, data recording intervals, and washwater discharge limits. "
-            "Crew members learn how to demonstrate compliance using continuous monitoring records during port and flag state inspections."
+            "Covers Scheme B continuous emission monitoring (CEMS), sensor validation, and washwater discharge limits. "
+            "Explains continuous measurement of SO2 and CO2 ratios during port state inspections."
         )
     elif any(k in t_lower for k in ["calibration", "sensor", "span", "zero"]):
         explanation = (
-            f"Outlines zero and span calibration gas procedures, sensor limits, and maintenance intervals for {clean_title}. "
-            f"It defines allowable drift tolerances, calibration gas bottle certification requirements, and routine testing sequences. "
-            f"Technical personnel learn how to execute calibration checks safely and ensure continuous analyzer accuracy onboard."
+            f"Outlines zero and span calibration gas routines, allowable drift tolerances, and sensor limits for {clean_title}. "
+            f"Details calibration gas bottle certification and routine onboard testing sequences."
         )
     elif any(k in t_lower for k in ["alarm", "limit", "setpoint", "threshold"]):
         explanation = (
             f"Defines operational setpoints, threshold limits, and emergency alarm trigger conditions for {clean_title}. "
-            f"It explains automated safety cut-offs, sensor failure warnings, and corrective actions required by watchkeeping personnel. "
-            f"Operators learn how to respond swiftly to alarm conditions and maintain safe, uninterrupted system performance."
+            f"Explains automated safety cut-offs and corrective actions required by watchkeepers."
         )
     elif any(k in t_lower for k in ["troubleshoot", "maintenance", "overhaul", "repair"]):
         explanation = (
             f"Provides step-by-step troubleshooting routines, periodic maintenance checks, and safety precautions for {clean_title}. "
-            f"It details common fault indicators, diagnostic procedures, and required personal protective equipment before opening machinery. "
-            f"Engineers can reference this material to resolve technical issues promptly and avoid machinery breakdowns at sea."
+            f"Details common fault indicators and personal protective equipment."
         )
     elif any(k in t_lower for k in ["checklist", "check list", "procedure", "pre-departure"]):
         explanation = (
             f"Outlines mandatory operational verifications, pre-departure checks, and safety controls for {clean_title}. "
-            f"It ensures that all critical valves, interlocks, and emergency controls are correctly aligned before initiating operations. "
-            f"Adhering to these verifications minimizes human error and guarantees adherence to safety management system guidelines."
+            f"Ensures critical valves, interlocks, and emergency controls are correctly aligned."
         )
     elif any(k in t_lower for k in ["enclosed space", "entry permit"]):
         explanation = (
             "Details atmospheric testing, ventilation standards, and rescue preparedness required before entering enclosed spaces. "
-            "It outlines permissible oxygen levels, flammable vapor thresholds, and multi-gas detector testing protocols. "
-            "Crew members understand permit-to-work authorizations, standby duties, and emergency extraction procedures."
+            "Outlines permissible oxygen levels and permit-to-work entry authorizations."
         )
     elif any(k in t_lower for k in ["hot work"]):
         explanation = (
             "Details fire watch requirements, adjacent compartment checks, and gas monitoring during hot work operations. "
-            "It covers removal of combustible materials, boundary cooling preparations, and firefighting equipment readiness. "
-            "This ensures full adherence to safety management system protocols and eliminates onboard fire hazards."
+            "Covers removal of combustibles, boundary cooling, and firefighting equipment readiness."
         )
     elif any(k in t_lower for k in ["bunker", "fuel oil", "marpol annex vi"]):
         explanation = (
-            f"Covers bunker delivery notes, statutory sulfur limits, and representative fuel sampling procedures under {clean_title}. "
-            f"It outlines sampling bottle seal verifications, bunker manifold monitoring, and record retention periods for official verification. "
-            f"This ensures the engineering team maintains full compliance and documentation during fuel receiving operations."
+            f"Covers bunker delivery notes, statutory sulfur limits, and fuel sampling procedures under {clean_title}. "
+            f"Outlines sampling bottle seal verifications and onboard record retention periods."
         )
     elif any(k in t_lower for k in ["bilge", "separator", "ows", "15 ppm"]):
         explanation = (
-            f"Outlines oily water separator operations, 15 ppm bilge alarm verifications, and mandatory Oil Record Book documentation for {clean_title}. "
-            f"It covers automatic stopping device testing, filter maintenance, and strict overboard discharge restrictions under MARPOL Annex I. "
-            f"Engineering officers learn how to verify system readiness and prevent accidental environmental non-compliance."
+            f"Outlines oily water separator operations, 15 ppm bilge alarm verifications, and Oil Record Book documentation for {clean_title}. "
+            f"Covers automatic stopping devices and discharge restrictions."
+        )
+    elif any(k in t_lower for k in ["cooling coil", "chilled water", "expansion"]):
+        explanation = (
+            "Explains direct expansion and chilled water cooling coil configurations used in marine HVAC and refrigeration systems. "
+            "Outlines temperature control mechanisms, airflow regulation, and routine maintenance."
+        )
+    elif any(k in t_lower for k in ["scrub", "egcs", "exhaust gas cleaning"]):
+        explanation = (
+            f"Details operational procedures, emission controls, and system monitoring requirements for {clean_title}. "
+            f"Outlines washwater handling, automated safety cut-offs, and compliance verification standards."
+        )
+    elif any(k in t_lower for k in ["compliance", "regulation", "statutory issue"]):
+        explanation = (
+            f"Details statutory compliance requirements, emission limits, and inspection verification for {clean_title}. "
+            f"Outlines operational precautions, flag state requirements, and mandatory documentation."
         )
     else:
+        # 1. Clean syllabus / educational boilerplate prefixes
+        text_clean = re.sub(r'(?i)\b(?:Specific\s+)?After\s+going\s+through\s+this\s+topic\s*[\,\.\:\-–]?\s*', ' ', text)
+        text_clean = re.sub(r'(?i)\b(?:student\s+should\s+be\s+able\s+to[^\,\.\:\n]*[\,\.\:\s]*)', ' ', text_clean)
+        text_clean = re.sub(r'(?i)\b(?:Know\s+the\s+benefits\s+of[^\,\.\:\n]*[\,\.\:\s]*)', ' ', text_clean)
+
+        # 2. Strip repeated title phrases or colon headers from start
+        text_clean = re.sub(rf'^(?:{re.escape(clean_title)}|{re.escape(clean_title.rstrip("s"))}s?)\s*[:\-–]?\s*', '', text_clean, flags=re.IGNORECASE)
+        text_clean = re.sub(r'^\s*[^:\n\r]{2,60}\s*[:\-–]\s*', ' ', text_clean).strip()
+        text_clean = re.sub(r'\s+', ' ', text_clean).strip()
+
         sentences = [
-            s.strip() for s in re.split(r'[.!?]\s+', text)
-            if len(s.strip()) > 35 and not s.isupper() and not any(k in s.lower() for k in [
+            s.strip() for s in re.split(r'[.!?]\s+', text_clean)
+            if len(s.strip()) > 25 and not s.isupper() and not any(k in s.lower() for k in [
                 "learning objective", "click here", "figure ", "table ", "no activity", "selection of charts",
-                "topic name", "topic content", "topic code"
+                "topic name", "topic content", "topic code", "student should be able", "after going through"
             ])
         ]
-        if len(sentences) >= 2:
-            combined = " ".join(sentences[:3]).strip()
-            if len(combined) > 360:
-                combined = combined[:357].rsplit(" ", 1)[0] + "..."
-            explanation = (
-                f"{combined.rstrip('.')}."
-                f" This section outlines key regulatory guidelines, practical precautions, and step-by-step procedures to maintain operational safety and compliance onboard."
-            )
-        elif sentences:
-            s_first = sentences[0].rstrip('.')
-            explanation = (
-                f"{s_first}. "
-                f"Provides standard operating procedures, technical precautions, and statutory background for {clean_title}. "
-                f"Officers and crew can reference this guidance to understand daily responsibilities, verify equipment readiness, and ensure full compliance with international maritime conventions."
-            )
+
+        # 3. Form complete, grammatically finished sentences without ANY '...' truncation
+        if len(sentences) >= 2 and (len(sentences[0]) + len(sentences[1]) <= 240):
+            # Two complete sentences that fit naturally on 2 lines
+            explanation = f"{sentences[0].rstrip('.')}. {sentences[1].rstrip('.')}."
+        elif sentences and (120 <= len(sentences[0]) <= 250):
+            # One complete substantive sentence that fills 2 lines
+            explanation = f"{sentences[0].rstrip('.')}."
+        elif sentences and (len(sentences[0]) < 120):
+            # Short sentence: supplement with complete contextual thought
+            explanation = f"{sentences[0].rstrip('.')}. Outlines key operational procedures and safety precautions for {clean_title}."
         else:
+            # Fallback: complete, professional 2-line maritime explanation (strictly no '...')
             explanation = (
-                f"Provides comprehensive technical guidance and operational procedures for {clean_title}. "
-                f"Covers statutory standards, equipment checks, and safety precautions required under international maritime regulations. "
-                f"Personnel can review this section to understand practical implementation steps and verify onboard operational readiness."
+                f"Outlines core operating principles, statutory requirements, and practical procedures for {clean_title}. "
+                f"Details essential safety verifications, system monitoring, and compliance standards."
             )
 
     return {
@@ -704,7 +715,7 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
             "videos": videos[:10],
             "images": images[:5],
             "pdfs": pdfs[:5],
-            "question_suggestions": suggestions,
+            "question_suggestions": suggestions[:3],
             "metadata": {
                 "short_topic": "marine",
                 "routing_reason": "sme_approved_override",
@@ -1073,18 +1084,11 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
         cleaned_suggs = []
         for s in (raw_suggestions or []):
             if isinstance(s, str) and s.strip():
-                st = s.strip()
+                st = re.sub(r"^(\d+[.)]|[-*•])\s*", "", s.strip()).strip()
                 if not st.endswith("?"):
                     st = st.rstrip(".!") + "?"
                 cleaned_suggs.append(st)
-        if not cleaned_suggs and sections:
-            top_name = sections[0].get("topic_name") or "this topic"
-            cleaned_suggs = [
-                f"What are the key rules for {top_name}?",
-                f"What are the safety precautions for {top_name}?",
-                f"How is {top_name} verified during inspections?",
-            ]
-        suggestions = cleaned_suggs[:3]
+        suggestions = cleaned_suggs
     else:
         # Fallback if model output is free-form text: strip any stray markdown codeblock wrappers
         clean_content = re.sub(r"```(?:json)?\s*\{.*?\}\s*```", "", llm_response, flags=re.DOTALL).strip()
@@ -1093,15 +1097,16 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
             clean_content = llm_response
 
         primary_title = primary_chunk.get("topic_name") or "Maritime Guidance"
+        clean_p_title = clean_subtopic_target_name(primary_title, query) or primary_title
         sections = [{
             "topic_code": source_topic_code,
             "topic_name": primary_title,
             "content": clean_content
         }]
         suggestions = [
-            f"What are the key principles of {primary_title}?",
-            f"What safety precautions apply to {primary_title}?",
-            f"How is {primary_title} inspected on board?",
+            f"What are the key principles of {clean_p_title}?",
+            f"What safety precautions apply to {clean_p_title}?",
+            f"How is {clean_p_title} inspected on board?",
         ]
 
     # Inject understanding section
@@ -1130,6 +1135,70 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
         state["retrieval_chunks"] = []
         state["video_suggestions"] = []
         state["company_answer"] = None
+        # Preserve standard maritime gateway suggestions for out-of-scope queries
+        suggestions = [
+            s.strip() for s in (raw_suggestions or suggestions or [])
+            if isinstance(s, str) and s.strip() and s.strip().endswith("?")
+        ][:3]
+        if not suggestions:
+            suggestions = [
+                "What is anchor watch procedure?",
+                "How does COLREG Rule 15 handle a crossing situation?",
+                "What are the checks for marine auxiliary boiler?"
+            ]
+    else:
+        # In-scope maritime query: enforce relevance to user query and primary topic
+        primary_title = ""
+        if sections and isinstance(sections[0], dict):
+            primary_title = sections[0].get("topic_name") or ""
+        if not primary_title and chunks:
+            primary_title = str(chunks[0].get("topic_name") or chunks[0].get("title") or "")
+        clean_primary = clean_subtopic_target_name(primary_title, query) or primary_title or "this topic"
+
+        query_text = (standalone_query or query or "").strip()
+        stop_words = {
+            "what", "how", "why", "when", "where", "which", "can", "could", "would",
+            "the", "and", "for", "with", "from", "are", "is", "explain", "describe",
+            "tell", "about", "does", "procedure", "procedures", "topic", "marine", "course"
+        }
+        query_words = {w for w in re.findall(r'\b[a-zA-Z0-9]{3,}\b', query_text.lower()) if w not in stop_words}
+        topic_words = {w for w in re.findall(r'\b[a-zA-Z0-9]{3,}\b', clean_primary.lower()) if w not in stop_words}
+        anchor_words = query_words | topic_words
+
+        validated_suggs = []
+        for s in (raw_suggestions or suggestions or []):
+            if not isinstance(s, str) or not s.strip():
+                continue
+            st = re.sub(r"^(\d+[.)]|[-*•])\s*", "", s.strip()).strip()
+            if not st.endswith("?"):
+                st = st.rstrip(".!") + "?"
+
+            # Question length check: must have at least 3 words
+            s_words = set(re.findall(r'\b[a-zA-Z0-9]{3,}\b', st.lower()))
+            if len(s_words) < 3:
+                continue
+
+            # Must have keyword overlap with the asked query/topic if anchor_words exist
+            if anchor_words and not (s_words & anchor_words):
+                continue
+
+            if st not in validated_suggs:
+                validated_suggs.append(st)
+
+        # Dynamic query-grounded fallback if LLM suggestions were sparse or off-topic
+        if len(validated_suggs) < 2 and clean_primary and clean_primary.lower() not in ("marine guidance", "this topic"):
+            candidate_fallbacks = [
+                f"What are the operational safety precautions for {clean_primary}?",
+                f"What standard maintenance and inspection checks apply to {clean_primary}?",
+                f"What emergency or contingency procedures exist for {clean_primary}?",
+            ]
+            for c_fb in candidate_fallbacks:
+                if c_fb not in validated_suggs:
+                    validated_suggs.append(c_fb)
+                if len(validated_suggs) >= 3:
+                    break
+
+        suggestions = validated_suggs[:3] if validated_suggs else (raw_suggestions or suggestions)[:3]
 
     videos, images, pdfs = [], [], []
 
@@ -1354,8 +1423,8 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
         for clean_t, raw_c in distinct_course_chapters:
             meta = generate_subtopic_metadata(clean_t, raw_c, parent_topic=target_name)
             formatted_items.append(meta)
-            if meta["title"] not in suggestions:
-                suggestions.append(meta["title"])
+            # Chapter titles are formatted into formatted_items for in-text markdown links (chapter_block);
+            # do not append chapter titles into the question_suggestions chips array.
 
         # Clean markdown list with 3-4 line explanation - strictly zero emojis, arrows, or unicode symbols (NO 'Description:', NO 'Question:')
         list_lines = []
@@ -1400,7 +1469,7 @@ async def query_node(state, openai_service, suggestion_service, vector_store=Non
         "videos": [] if is_out_of_scope else videos[:10],
         "images": [] if is_out_of_scope else images[:5],
         "pdfs": [] if is_out_of_scope else pdfs[:5],
-        "question_suggestions": suggestions,
+        "question_suggestions": suggestions[:3],
         "metadata": {
             "short_topic": "marine" if is_out_of_scope else decision.get("short_topic", "marine"),
             "routing_reason": "off_topic" if is_out_of_scope else decision.get("reason", "query"),
